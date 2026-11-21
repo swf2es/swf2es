@@ -181,7 +181,10 @@
 // frame: the fill libtess2 is pathologically slow at, its crossings growing with the square of N
 // (#1104). --paint gradient or bitmap fills it with a linear gradient or a smoothed, repeating
 // bitmap instead of a colour (solid). --ratio-change makes it a morph shape placed at a new ratio
-// each frame, so that every frame tessellates it anew, as a tween of such a morph does. The
+// each frame, so that every frame tessellates it anew, as a tween of such a morph does.
+// --deck-turn T turns each contour T radians from the last rather than 0.004: at 1e-4, 80 to 100
+// contours come within hundredths of a pixel of each other, as a real morph's do at some ratios,
+// where lyon's triangles can fail the module's check both ways and libtess2 fills them. The
 // frames' tessellation (tess) is their draw's part spent in the tessellator, for every mode.
 //
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
@@ -211,7 +214,7 @@
 //     | --scripted N [--still] | --town N | --still-crowd N | --timelines N [--loop K]
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
 //     | --triangles N [--culled] | --redraw N | --burst N [--every K] | --vectors N | --text N [--normal | --device]
-//     | --deck N [--paint solid|gradient|bitmap] [--ratio-change]] [--toggle-every K] [--frames N] [--idle K]
+//     | --deck N [--paint solid|gradient|bitmap] [--ratio-change] [--deck-turn T]] [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--census] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //     [--checkout DIR] [--no-multi-draw]
@@ -287,6 +290,9 @@ const texts = option("text", 0);
 const deck = option("deck", 0);
 const paint = args.includes("--paint") ? args[args.indexOf("--paint") + 1] : "solid";
 const ratioChange = args.includes("--ratio-change");
+const deckTurn = args.includes("--deck-turn")
+  ? Number(args[args.indexOf("--deck-turn") + 1])
+  : undefined;
 if (!["solid", "gradient", "bitmap"].includes(paint)) {
   console.error("--paint is solid, gradient or bitmap");
   process.exit(2);
@@ -1840,7 +1846,7 @@ function branchSwf(count: number): Uint8Array {
  * and wobbled apart, placed at a ratio of its own each frame, so that each frame needs new
  * geometry.
  */
-function deckSwf(count: number, paint: string, ratioChange: boolean): Uint8Array {
+function deckSwf(count: number, paint: string, ratioChange: boolean, step?: number): Uint8Array {
   const pixels: number[] = [];
   for (let y = 0; y < 16; y++) {
     for (let x = 0; x < 16; x++) {
@@ -1879,9 +1885,9 @@ function deckSwf(count: number, paint: string, ratioChange: boolean): Uint8Array
       true,
     ),
   ];
-  const start = paths(deckContours(count));
+  const start = paths(deckContours(count, 0, 0, step));
   if (ratioChange) {
-    const end = paths(deckContours(count, 0.25, 1.5));
+    const end = paths(deckContours(count, 0.25, 1.5, step));
     tags.push(
       w.morphShape({
         id: 1,
@@ -2190,7 +2196,7 @@ function within(profile: SampledProfile, from: number, ms: number): string[] {
 
 const swf =
   deck > 0
-    ? deckSwf(deck, paint, ratioChange)
+    ? deckSwf(deck, paint, ratioChange, deckTurn)
     : vectors > 0
       ? vectorsSwf(vectors)
       : redraws > 0

@@ -10,7 +10,8 @@
 // (crossings.zig), half of them converging to within thousandths of a pixel far from the origin:
 // whichever filler took each, lyon or libtess2 where lyon's triangles failed the module's check,
 // it must have libtess2's area and cover every sample once where its rule fills it and not at all
-// elsewhere, and lyon must have taken most.
+// elsewhere, and lyon must have taken most; and a few of 80 to 100 converging contours, right
+// whichever filler took them.
 // Run with: node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]
 import assert from "node:assert/strict";
 import { binary } from "../../packages/native/dist/render/binary.js";
@@ -709,8 +710,67 @@ for (let i = 0; i < Math.max(8, Math.floor(cases / 100)); i++) {
   decks++;
 }
 
+// Decks of 80 to 100 converging contours, a real morph's size, where lyon's triangles fail the
+// check more often: right whichever filler took them. libtess2 takes seconds over each, so they
+// are few, and its area is not compared.
+let largeDecks = 0;
+let largeLyon = 0;
+for (let i = 0; i < Math.max(2, Math.floor(cases / 1000)); i++) {
+  const count = 80 + Math.floor(random() * 21);
+  const turn = 10 ** (-5 + 2 * random());
+  const centre = 250 + random() * 3000;
+  const contours: number[][] = [];
+  for (let c = 0; c < count; c++) {
+    const [cos, sin] = [Math.cos(c * turn), Math.sin(c * turn)];
+    const contour: number[] = [];
+    for (let k = 0; k < 200; k++) {
+      const u = (k / 200) * 2 * Math.PI;
+      const r = 200 + 12 * Math.sin(u * 9);
+      const [px, py] = [r * Math.cos(u) * 0.7, r * Math.sin(u)];
+      contour.push(centre + px * cos - py * sin, centre + px * sin + py * cos);
+    }
+
+    contours.push(contour);
+  }
+
+  const context = `large deck ${i} from seed ${seed}: ${count} contours turned ${turn} about ${centre}`;
+  const { status, by, v, t } = rawFill(contours, false);
+  assert.equal(status, 0, context);
+  assert.ok(by === LYON || by === LIBTESS2, `filled by ${by}: ${context}`);
+  if (by === LYON) {
+    largeLyon++;
+  }
+
+  for (let sample = 0; sample < 20; sample++) {
+    const x = centre - 212 + random() * 424;
+    const y = centre - 212 + random() * 424;
+    if (near(contours, x, y, 1e-3)) {
+      continue;
+    }
+
+    let covered = 0;
+    for (let j = 0; j < t.length; j += 3) {
+      const [a, b, c] = [t[j] * 2, t[j + 1] * 2, t[j + 2] * 2];
+      const p = (v[b] - v[a]) * (y - v[a + 1]) - (v[b + 1] - v[a + 1]) * (x - v[a]);
+      const q = (v[c] - v[b]) * (y - v[b + 1]) - (v[c + 1] - v[b + 1]) * (x - v[b]);
+      const r = (v[a] - v[c]) * (y - v[c + 1]) - (v[a + 1] - v[c + 1]) * (x - v[c]);
+      if ((p > 0 && q > 0 && r > 0) || (p < 0 && q < 0 && r < 0)) {
+        covered++;
+      }
+    }
+
+    assert.equal(
+      covered,
+      Math.abs(winding(contours, x, y)) % 2,
+      `coverage at ${x},${y}: ${context}`,
+    );
+  }
+
+  largeDecks++;
+}
+
 // Most decks are lyon's: the fallback is for the few it gets wrong.
 assert.ok(lyonDecks * 2 >= decks, `only ${lyonDecks} of ${decks} decks filled by lyon`);
 console.log(
-  `fuzz tessellate: ${decks} decks of densely crossing contours, half of them converging, ${lyonDecks} filled by lyon and the rest by libtess2, each libtess2's area, ${deckSamples} winding samples each covered once or not at all`,
+  `fuzz tessellate: ${decks} decks of densely crossing contours, half of them converging, ${lyonDecks} filled by lyon and the rest by libtess2, each libtess2's area, ${deckSamples} winding samples each covered once or not at all; ${largeDecks} decks of 80 to 100 converging contours, ${largeLyon} filled by lyon`,
 );

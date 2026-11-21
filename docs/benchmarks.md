@@ -90,8 +90,12 @@ draws on the machine's GPU (on a machine with two,
 - `--deck N`: one shape of N wobbly contours stacked almost on top of
   each other, filled even-odd, whose crossings make libtess2 slow with
   the square of N (`--paint gradient` or `bitmap`; `--ratio-change`
-  makes it a morph at a new ratio each frame, tessellated anew); the
-  `tess` line, for every scene, is the draw's time in the tessellator;
+  makes it a morph at a new ratio each frame, tessellated anew;
+  `--deck-turn T` turns each contour T from the last rather than 0.004,
+  and at 1e-4 brings 80 to 100 of them within hundredths of a pixel of
+  each other, where lyon's triangles can fail the native check both ways
+  and libtess2 fills them); the `tess` line, for every scene, is the
+  draw's time in the tessellator;
 - and others for one path each: `--rig`, `--pulse`, `--branches`,
   `--toggle`, `--masks`, `--scroll`, `--stamps`, `--pen`, `--triangles`,
   `--redraw`, `--vectors` (the script's header says what each plays).

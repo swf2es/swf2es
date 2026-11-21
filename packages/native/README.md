@@ -465,23 +465,34 @@ each other wrongly, covering wedges of the even-odd rule's fill several
 times or not at all, and say nothing. So `src/render/validate.zig` checks
 its triangles before they are drawn: along 256 scanlines over the fill's
 box, every stretch between two crossings must be covered once where the
-contours' winding there says the rule fills it and not at all elsewhere,
-stretches narrower than a quarter of a pixel (or than the positions' f32
-rounding) aside: lyon leaves slivers a tenth of a pixel wide between
-converging contours here and there, a faint line at most, where libtess2
-would take seconds; one up to about a third of a pixel wide can fall
-between scanlines.
-It reads every triangle once, about 11 ms of lyon's 153 on a deck of 95
-contours; lyon's wrong wedges can be under three pixels tall, which 48
-scanlines let through. A fill whose triangles fail it goes to libtess2: the bands give
-up on such decks after a tenth of a second or more without filling them.
-What lyon fails at (-1, or -3 where its own buffers find no memory) goes to
-the bands; input it refuses (coordinates more than ±838,860.8 from its box's
-centre) to libtess2. A trap in it is the host's, as one in libtess2 is:
-lyon traps where it panics and where an allocation of its own fails, which
--3 does not cover, and the host fills the call again by the bands in a new
-instance. `filledBy()` names what filled the last fill, and `lyonFault()`
-makes the next lyon fill fail, for tests.
+contours' winding there says the rule fills it and not at all elsewhere.
+A stretch narrower than a quarter of a pixel (or than the positions' f32
+rounding) passes alone, as lyon leaves slivers a tenth of a pixel wide
+between converging contours here and there, a faint line at most; but the
+signed error of such stretches in a row is added up, and more than a
+quarter of a pixel of it fails, so that a wide misfill made of thin
+stretches does not pass. One sliver up to about a third of a pixel wide
+can still fall between scanlines. It reads every triangle once, about 11 ms
+of lyon's 153 on a deck of 95 contours; lyon's wrong wedges can be under
+three pixels tall, which 48 scanlines let through.
+
+lyon sweeps first along the box's shorter side and, where its triangles
+fail the check, again along the longer (swf2es/tessellate's `HORIZONTAL`
+flag): converging contours can come out wrong one way and right the other.
+A fill that fails both ways goes to libtess2, as the bands give up on such
+decks after a tenth of a second or more without filling them. On even-odd
+decks of 80 to 100 contours turned 1e-5 to 1e-3 apart, the size of a real
+morph's, about one in eight still fails both ways and takes libtess2's 2 to 4 s.
+What lyon fails at (-1, or -3 where its own buffers or the check's scratch
+find no memory) goes to the bands: libtess2, in the same nearly full arena,
+would run out too and unwind the instance, where the bands fail cleanly and
+the host fills the call again alone. Input lyon refuses (coordinates more
+than ±838,860.8 from its box's centre) goes to libtess2. A trap in it is
+the host's, as one in libtess2 is: lyon traps where it panics and where an
+allocation of its own fails, which -3 does not cover, and the host fills the
+call again by the bands in a new instance. `filledBy()` names what filled
+the last fill, `lyonFault()` makes the next lyon fill fail, and
+`checkFill()` gives the check's verdict on given triangles, for tests.
 
 What libtess2 fails at, gives output
 unfit to draw for, or cannot take (coordinates outside ±2^23), and what lyon

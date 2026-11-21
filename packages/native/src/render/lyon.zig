@@ -1,4 +1,4 @@
-//! lyon's fill tessellator, from swf2es/tessellate's static library (tessellate/), for the fills
+//! lyon's fill tessellator, from swf2es/tessellate's static library (lyon/), for the fills
 //! crossings.zig finds too dense for libtess2. The library allocates through arena.zig's malloc
 //! and realloc, so its output lives until the next reset; it fills in twips itself.
 const std = @import("std");
@@ -11,6 +11,7 @@ extern fn lyon_fill(
     ends: [*]const u32,
     contours: usize,
     nonzero: i32,
+    flags: i32,
     positions: *[*]const f32,
     vertices: *usize,
     indices: *[*]const u32,
@@ -19,21 +20,22 @@ extern fn lyon_fill(
 
 /// lyon_fill's status for input it refused, such as coordinates past its range.
 pub const refused = -2;
+/// lyon_fill's flag for its sweep along x rather than y.
+pub const horizontal = 1;
 
 pub const Output = struct {
     positions: []const f64,
     indices: []const c.TESSindex,
 };
 
-/// lyon's fill of the contours, its positions widened to f64 in the arena; or its status where
-/// it failed, -1 for output unfit to draw (an index past the vertices or past TESSindex) or where
-/// the arena has no room for the widened positions.
-pub fn fill(coords: []const f64, ends: []const u32, nonzero: bool) union(enum) { output: Output, status: i32 } {
+/// lyon's fill of the contours as `flags` ask, its positions widened to f64 in the arena; or its status where it failed, -1 for output unfit to draw (an index past the
+/// vertices or past TESSindex) or where the arena has no room for the widened positions.
+pub fn fill(coords: []const f64, ends: []const u32, nonzero: bool, flags: i32) union(enum) { output: Output, status: i32 } {
     var positions: [*]const f32 = undefined;
     var vertices: usize = 0;
     var indices: [*]const u32 = undefined;
     var index_count: usize = 0;
-    const status = lyon_fill(coords.ptr, coords.len / 2, ends.ptr, ends.len, @intFromBool(nonzero), &positions, &vertices, &indices, &index_count);
+    const status = lyon_fill(coords.ptr, coords.len / 2, ends.ptr, ends.len, @intFromBool(nonzero), flags, &positions, &vertices, &indices, &index_count);
     if (status != 0) {
         return .{ .status = status };
     }

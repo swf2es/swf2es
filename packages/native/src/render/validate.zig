@@ -65,11 +65,14 @@ fn span(y0: f64, y1: f64, top: f64, per: f64) struct { first: usize, end: usize 
     return .{ .first = first, .end = @max(first, end) };
 }
 
+pub const Verdict = enum { right, wrong, no_memory };
+
 /// Whether `positions` (x then y) and `indices` (three a triangle) cover the closed contours of
-/// `coords`, each ending at its point in `ends`, as `nonzero` or the even-odd rule fills them;
-/// false too where the scratch does not fit in `allocator`.
-pub fn covers(allocator: std.mem.Allocator, coords: []const f64, ends: []const u32, nonzero: bool, positions: []const f64, indices: []const i32) bool {
-    return check(allocator, coords, ends, nonzero, positions, indices) catch false;
+/// `coords`, each ending at its point in `ends`, as `nonzero` or the even-odd rule fills them; or
+/// that the scratch did not fit in `allocator`.
+pub fn covers(allocator: std.mem.Allocator, coords: []const f64, ends: []const u32, nonzero: bool, positions: []const f64, indices: []const i32) Verdict {
+    const right = check(allocator, coords, ends, nonzero, positions, indices) catch return .no_memory;
+    return if (right) .right else .wrong;
 }
 
 fn check(allocator: std.mem.Allocator, coords: []const f64, ends: []const u32, nonzero: bool, positions: []const f64, indices: []const i32) !bool {
@@ -85,8 +88,11 @@ fn check(allocator: std.mem.Allocator, coords: []const f64, ends: []const u32, n
         if (@abs(y) > farthest) farthest = @abs(y);
     }
 
+    // A box of no height, or of one so small its lines would not be told apart, has nothing to
+    // check: its triangles have no area to draw.
     const step = (bottom - top) / lines;
-    if (!(step > 0) or !std.math.isFinite(step)) {
+    const per = 1 / step;
+    if (!(step > 0) or !std.math.isFinite(step) or !std.math.isFinite(per)) {
         return true;
     }
 
@@ -105,7 +111,7 @@ fn check(allocator: std.mem.Allocator, coords: []const f64, ends: []const u32, n
     var found: std.ArrayList(Found) = .empty;
     defer found.deinit(allocator);
     const most = (coords.len / 2 + indices.len / 3 + lines) * crossings_per_point;
-    if (!try visit(allocator, &found, most, coords, ends, positions, indices, top, 1 / step, &ys)) {
+    if (!try visit(allocator, &found, most, coords, ends, positions, indices, top, per, &ys)) {
         return false;
     }
 
@@ -131,6 +137,9 @@ fn check(allocator: std.mem.Allocator, coords: []const f64, ends: []const u32, n
         std.sort.pdq(Crossing, line, {}, leftOf);
         var cover: i32 = 0;
         var winding: i32 = 0;
+        // The signed error over the narrow stretches since the last wide one: each is let pass
+        // alone, but many in a row that err the same way are a wide misfill made of thin ones.
+        var drift: f64 = 0;
         var i: usize = 0;
         while (i < line.len) {
             const x = line[i].x;
@@ -139,12 +148,24 @@ fn check(allocator: std.mem.Allocator, coords: []const f64, ends: []const u32, n
                 winding += line[i].winding;
             }
 
-            if (i == line.len or line[i].x - x <= tolerance) {
-                continue;
+            if (i == line.len) {
+                break;
             }
 
             const fills = if (nonzero) winding != 0 else @mod(winding, 2) == 1;
-            if (cover != @intFromBool(fills)) {
+            const err = cover - @as(i32, @intFromBool(fills));
+            const width = line[i].x - x;
+            if (width > tolerance) {
+                if (err != 0) {
+                    return false;
+                }
+
+                drift = 0;
+                continue;
+            }
+
+            drift += @as(f64, @floatFromInt(err)) * width;
+            if (@abs(drift) > tolerance) {
                 return false;
             }
         }
@@ -241,14 +262,14 @@ const square = [_]f64{ 0, 0, 10, 0, 10, 10, 0, 10 };
 test "two triangles covering a square once cover it" {
     const positions = square;
     const indices = [_]i32{ 0, 1, 2, 0, 2, 3 };
-    try testing.expect(covers(testing.allocator, &square, &.{4}, false, &positions, &indices));
-    try testing.expect(covers(testing.allocator, &square, &.{4}, true, &positions, &indices));
+    try testing.expect(.right == covers(testing.allocator, &square, &.{4}, false, &positions, &indices));
+    try testing.expect(.right == covers(testing.allocator, &square, &.{4}, true, &positions, &indices));
 }
 
 test "a triangle missing, or one drawn twice, is caught" {
     const positions = square;
-    try testing.expect(!covers(testing.allocator, &square, &.{4}, false, &positions, &.{ 0, 1, 2 }));
-    try testing.expect(!covers(testing.allocator, &square, &.{4}, false, &positions, &.{ 0, 1, 2, 0, 2, 3, 0, 1, 2 }));
+    try testing.expect(.wrong == covers(testing.allocator, &square, &.{4}, false, &positions, &.{ 0, 1, 2 }));
+    try testing.expect(.wrong == covers(testing.allocator, &square, &.{4}, false, &positions, &.{ 0, 1, 2, 0, 2, 3, 0, 1, 2 }));
 }
 
 test "a hole filled under the even-odd rule is caught, and under the non-zero rule is right" {
@@ -256,17 +277,46 @@ test "a hole filled under the even-odd rule is caught, and under the non-zero ru
     const coords = [_]f64{ 0, 0, 10, 0, 10, 10, 0, 10, 2, 2, 8, 2, 8, 8, 2, 8 };
     const ends = [_]u32{ 4, 8 };
     const whole = [_]i32{ 0, 1, 2, 0, 2, 3 };
-    try testing.expect(covers(testing.allocator, &coords, &ends, true, &coords, &whole));
-    try testing.expect(!covers(testing.allocator, &coords, &ends, false, &coords, &whole));
+    try testing.expect(.right == covers(testing.allocator, &coords, &ends, true, &coords, &whole));
+    try testing.expect(.wrong == covers(testing.allocator, &coords, &ends, false, &coords, &whole));
     // The ring between the two squares, as eight triangles.
     const ring = [_]i32{ 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7 };
-    try testing.expect(covers(testing.allocator, &coords, &ends, false, &coords, &ring));
-    try testing.expect(!covers(testing.allocator, &coords, &ends, true, &coords, &ring));
+    try testing.expect(.right == covers(testing.allocator, &coords, &ends, false, &coords, &ring));
+    try testing.expect(.wrong == covers(testing.allocator, &coords, &ends, true, &coords, &ring));
 }
 
 test "triangles off by less than a quarter of a pixel pass, and by more do not" {
     const near = [_]f64{ 0, 0, 10.2, 0, 10.2, 10, 0, 10 };
-    try testing.expect(covers(testing.allocator, &square, &.{4}, false, &near, &.{ 0, 1, 2, 0, 2, 3 }));
+    try testing.expect(.right == covers(testing.allocator, &square, &.{4}, false, &near, &.{ 0, 1, 2, 0, 2, 3 }));
     const far = [_]f64{ 0, 0, 10.5, 0, 10.5, 10, 0, 10 };
-    try testing.expect(!covers(testing.allocator, &square, &.{4}, false, &far, &.{ 0, 1, 2, 0, 2, 3 }));
+    try testing.expect(.wrong == covers(testing.allocator, &square, &.{4}, false, &far, &.{ 0, 1, 2, 0, 2, 3 }));
+}
+
+test "a wide misfill made of thin stretches is caught" {
+    // A comb of 40 teeth a fifth of a pixel wide, each a contour, filled as if by the non-zero rule
+    // over one square: every gap between teeth is a stretch too thin to judge alone, but together
+    // they leave half the square wrongly covered.
+    var coords: [(1 + 40) * 8]f64 = undefined;
+    var ends: [41]u32 = undefined;
+    @memcpy(coords[0..8], &[_]f64{ 0, 0, 16, 0, 16, 10, 0, 10 });
+    ends[0] = 4;
+    for (0..40) |k| {
+        const x = 0.2 + 0.4 * @as(f64, @floatFromInt(k));
+        @memcpy(coords[8 + k * 8 ..][0..8], &[_]f64{ x, 1, x + 0.2, 1, x + 0.2, 9, x, 9 });
+    }
+
+    for (&ends, 0..) |*end, k| {
+        end.* = @intCast((k + 1) * 4);
+    }
+
+    // The even-odd rule leaves the teeth out; the whole square, two triangles, is wrong there.
+    const whole = [_]i32{ 0, 1, 2, 0, 2, 3 };
+    try testing.expect(.wrong == covers(testing.allocator, &coords, &ends, false, &coords, &whole));
+    try testing.expect(.right == covers(testing.allocator, &coords, &ends, true, &coords, &whole));
+}
+
+test "a box too thin to tell its lines apart has nothing to check" {
+    const tiny = 0x1p-1060;
+    const coords = [_]f64{ 0, 0, 10, 0, 10, tiny, 0, tiny };
+    try testing.expect(.right == covers(testing.allocator, &coords, &.{4}, false, &coords, &.{ 0, 1, 2, 0, 2, 3 }));
 }

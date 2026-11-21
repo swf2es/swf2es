@@ -639,6 +639,17 @@ interface RawRender {
   triangleCount(): number;
   filledBy(): number;
   lyonFault(fault: number): void;
+  checkFill(
+    coords: number,
+    count: number,
+    ends: number,
+    contours: number,
+    nonzero: number,
+    positions: number,
+    vertexCount: number,
+    indices: number,
+    indexCount: number,
+  ): number;
 }
 
 const LIBTESS2 = 4;
@@ -945,4 +956,51 @@ test("a trap in lyon, as running out of memory inside it is, leaves the bands to
   assert.notEqual((tess as unknown as { instance: RawRender }).instance, first);
   assert.deepEqual(Array.from(fill.vertices), Array.from(banded.vertices));
   assert.deepEqual(Array.from(fill.indices), Array.from(banded.indices));
+});
+
+test("lyon's triangles wrong both ways are caught and libtess2 fills the deck instead", async () => {
+  // The smallest such deck found: 80 contours of 200 points, each turned 1e-4 from the last.
+  const x = await rawRender();
+  const deck = deckAt(80, 1e-4, 400);
+  const fill = rawFill(x, deck, false);
+  assert.equal(fill.status, 0);
+  assert.equal(fill.by, LIBTESS2);
+  checkCoverage(deck, false, fill, 60);
+});
+
+test("the check adds up thin wrong stretches, which pass one at a time", async () => {
+  // libtess2's even-odd triangles judged as the non-zero rule's fill of 41 contours turned 1e-4
+  // apart: wrong by some 140 px², all of it in stretches under a quarter of a pixel.
+  const x = await rawRender();
+  const deck = deckAt(41, 1e-4, 400);
+  const evenOdd = rawFill(x, deck, false, -2);
+  assert.equal(evenOdd.by, LIBTESS2);
+  const check = (nonZero: boolean) => {
+    x.reset();
+    const flat = deck.flat();
+    const coords = x.alloc(flat.length * 8);
+    const ends = x.alloc(deck.length * 4);
+    const positions = x.alloc(evenOdd.vertices.length * 8);
+    const indices = x.alloc(evenOdd.indices.length * 4);
+    new Float64Array(x.memory.buffer, coords, flat.length).set(flat);
+    let end = 0;
+    new Uint32Array(x.memory.buffer, ends, deck.length).set(
+      deck.map((points) => (end += points.length / 2)),
+    );
+    new Float64Array(x.memory.buffer, positions, evenOdd.vertices.length).set(evenOdd.vertices);
+    new Int32Array(x.memory.buffer, indices, evenOdd.indices.length).set(evenOdd.indices);
+    return x.checkFill(
+      coords,
+      flat.length / 2,
+      ends,
+      deck.length,
+      Number(nonZero),
+      positions,
+      evenOdd.vertices.length / 2,
+      indices,
+      evenOdd.indices.length,
+    );
+  };
+  assert.equal(check(false), 0);
+  assert.equal(check(true), 1);
 });

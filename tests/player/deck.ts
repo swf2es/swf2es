@@ -16,12 +16,12 @@ const MIDDLE_Y = 300;
 /**
  * `count` contours of DECK_POINTS points each, x and y in turn, in stage pixels rounded to twips
  * as a SWF holds them: ellipses of 140 by 200 pixels whose radius wobbles by 12 nine times
- * round, the c-th turned by `turn` + c times DECK_TURN, its wobble moved on by `phase`.
+ * round, the c-th turned by `turn` + c times `step`, its wobble moved on by `phase`.
  */
-export function deckContours(count: number, turn = 0, phase = 0): number[][] {
+export function deckContours(count: number, turn = 0, phase = 0, step = DECK_TURN): number[][] {
   const contours: number[][] = [];
   for (let c = 0; c < count; c++) {
-    const a = turn + c * DECK_TURN;
+    const a = turn + c * step;
     const cos = Math.cos(a);
     const sin = Math.sin(a);
     const points: number[] = [];

@@ -228,7 +228,7 @@ fn render(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
         "highWater",   "allocated",  "setLimit",        "layer",        "lineInput",       "lineHeader",  "lineBuild",
         "resetArena",  "convolve",   "capacity",        "bandsOnly",    "blurFilter",      "layerFilter", "channelPixels",
         "mergePixels", "overPixels", "palettePixels",   "matrixPixels", "transformPixels", "noisePixels", "perlinPixels",
-        "wordsPixels", "drawPixels", "compositePixels", "encodeDxt",    "filledBy",        "lyonFault",
+        "wordsPixels", "drawPixels", "compositePixels", "encodeDxt",    "filledBy",        "lyonFault",   "checkFill",
     };
 
     const library = b.path(vendor ++ "libtess2");

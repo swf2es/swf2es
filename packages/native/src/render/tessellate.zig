@@ -45,14 +45,42 @@ export fn filledBy() u32 {
 
 /// For tests: what the next lyon fill does in place of filling. 0 fills; a negative status is
 /// returned as lyon's own; 1 traps, as a panic in lyon does; 2 fills, and its triangles are
-/// taken as having failed the check. It applies once.
+/// taken as having failed the check, both ways. It applies once.
 var lyon_fault: i32 = 0;
 
 export fn lyonFault(fault: i32) void {
     lyon_fault = fault;
 }
 
-/// lyon's fill, checked (validate.zig): its status, or -4 where its triangles failed the check.
+/// For tests: validate.zig's verdict on `index_count` indices at `triangles` into `vertex_count`
+/// positions at `at` as the fill of the contours at `coords`: 0 right, 1 wrong, 2 out of
+/// memory, -2 for arguments that disagree.
+export fn checkFill(coords: [*]const f64, count: usize, ends: [*]const u32, contours: usize, nonzero: i32, at: [*]const f64, vertex_count: usize, triangles: [*]const i32, index_count: usize) i32 {
+    if (!valid(coords[0 .. count * 2], ends[0..contours], nonzero) or index_count % 3 != 0) {
+        return -2;
+    }
+
+    for (triangles[0..index_count]) |index| {
+        if (index < 0 or @as(usize, @intCast(index)) >= vertex_count) {
+            return -2;
+        }
+    }
+
+    return switch (validate.covers(arena.allocator, coords[0 .. count * 2], ends[0..contours], nonzero == 1, at[0 .. vertex_count * 2], triangles[0..index_count])) {
+        .right => 0,
+        .wrong => 1,
+        .no_memory => 2,
+    };
+}
+
+/// lyon's fill, checked (validate.zig): its status, -3 where the check found no memory for its
+/// scratch, as lyon's own buffers report, or -4 where its triangles failed the check every way.
+/// Contours that come within thousandths of a pixel of each other can come out wrong one way and
+/// right the other, and a try costs a tenth of what libtess2 takes over them: so lyon sweeps
+/// first along the box's shorter side, then along its longer; snapping the points to whole
+/// twips as a third and fourth try rescued none of the decks these two lost. Out of memory for
+/// the check is lyon's own: libtess2, in the same nearly full arena, would run out too and unwind
+/// the instance, where the bands fail cleanly and the host fills the call again alone.
 fn lyonChecked(coords: []const f64, ends: []const u32, nonzero: bool) union(enum) { output: lyon.Output, status: i32 } {
     const fault = lyon_fault;
     lyon_fault = 0;
@@ -64,16 +92,37 @@ fn lyonChecked(coords: []const f64, ends: []const u32, nonzero: bool) union(enum
         @trap();
     }
 
-    switch (lyon.fill(coords, ends, nonzero)) {
-        .output => |result| {
-            if (fault == 2 or !validate.covers(arena.allocator, coords, ends, nonzero, result.positions, result.indices)) {
-                return .{ .status = -4 };
-            }
-
-            return .{ .output = result };
-        },
-        .status => |status| return .{ .status = status },
+    var left = coords[0];
+    var right = coords[0];
+    var top = coords[1];
+    var bottom = coords[1];
+    for (0..coords.len / 2) |i| {
+        const x = coords[i * 2];
+        const y = coords[i * 2 + 1];
+        if (x < left) left = x;
+        if (x > right) right = x;
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
     }
+
+    const first: i32 = if (bottom - top > right - left) lyon.horizontal else 0;
+    const mark = arena.top;
+    for ([_]i32{ first, first ^ lyon.horizontal }) |flags| {
+        arena.top = mark;
+        switch (lyon.fill(coords, ends, nonzero, flags)) {
+            .output => |result| {
+                const verdict = if (fault == 2) .wrong else validate.covers(arena.allocator, coords, ends, nonzero, result.positions, result.indices);
+                switch (verdict) {
+                    .right => return .{ .output = result },
+                    .wrong => {},
+                    .no_memory => return .{ .status = -3 },
+                }
+            },
+            .status => |status| return .{ .status = status },
+        }
+    }
+
+    return .{ .status = -4 };
 }
 
 export fn reset() void {
