@@ -603,16 +603,7 @@ export function domainContext(index: i32 = -1, after: i32 = 0, upTo: i32 = -1): 
   const seen = seenBy(own);
   const out = context;
   out.reset();
-  for (let i = 0; i < seen.length; i++) {
-    if (i > 0) {
-      out.byte(0x2c);
-    }
-
-    out.uint(seen[i]);
-  }
-
-  out.byte(0x0a);
-  out.uint(placeOf(seen, <u32>at));
+  writeSeen(out, seen, <u32>at);
   let count: u32 = 0;
   for (let e = 0; e < domain.logKind.length; e++) {
     // Visible ABCs added before the entry happened.
@@ -625,57 +616,241 @@ export function domainContext(index: i32 = -1, after: i32 = 0, upTo: i32 = -1): 
       continue;
     }
 
-    const kind = domain.logKind[e];
-    const place = placeOf(seen, domain.logAbc[e]);
-    if (kind === LOG_None || place < 0) {
-      continue;
-    }
-
-    const f = domain.logA[e];
-    const depth = kind === LOG_Found ? depthOf(own, domain.foundDomain[f]) : 0;
-    if (depth < 0) {
-      continue;
-    }
-
-    out.byte(0x0a);
-    out.uint(kind);
-    out.byte(0x20);
-    out.uint(place);
-    out.byte(0x20);
-    out.uint(count);
-    out.byte(0x20);
-    if (kind !== LOG_Found) {
-      out.uint(f);
-      out.byte(0x20);
-      out.uint(domain.logB[e]);
-      continue;
-    }
-
-    const uri = domain.foundUri[f];
-    const name = domain.foundName[f];
-    out.uint(depth);
-    out.byte(0x20);
-    out.uint(domain.foundKind[f]);
-    out.byte(0x20);
-    out.uint(domain.foundAsType[f]);
-    out.byte(0x20);
-    named(out, uri);
-    named(out, name);
+    writeEntry(out, e, own, seen, count);
   }
 
   return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);
 }
 
+/** The first two lines of a context: the ABCs `seen`, comma-separated, and the place of ABC `at` among them. */
+function writeSeen(out: Output, seen: u32[], at: u32): void {
+  for (let i = 0; i < seen.length; i++) {
+    if (i > 0) {
+      out.byte(0x2c);
+    }
+
+    out.uint(seen[i]);
+  }
+
+  out.byte(0x0a);
+  out.uint(placeOf(seen, at));
+}
+
+/**
+ * Log entry `e` as a context names it to application domain `own`, which
+ * sees the ABCs `seen`, `count` of them added before it: a line break,
+ * then its kind, its ABC's place in `seen`, `count`, and its numbers, or
+ * for a finding how many parents up from `own` the domain that found it
+ * is and what it found. Nothing if `own` does not see the entry. Whether
+ * it wrote it.
+ */
+function writeEntry(out: Output, e: i32, own: u32, seen: u32[], count: u32): bool {
+  const kind = domain.logKind[e];
+  const place = placeOf(seen, domain.logAbc[e]);
+  if (kind === LOG_None || place < 0) {
+    return false;
+  }
+
+  const f = domain.logA[e];
+  const depth = kind === LOG_Found ? depthOf(own, domain.foundDomain[f]) : 0;
+  if (depth < 0) {
+    return false;
+  }
+
+  out.byte(0x0a);
+  out.uint(kind);
+  out.byte(0x20);
+  out.uint(place);
+  out.byte(0x20);
+  out.uint(count);
+  out.byte(0x20);
+  if (kind !== LOG_Found) {
+    out.uint(f);
+    out.byte(0x20);
+    out.uint(domain.logB[e]);
+    return true;
+  }
+
+  const uri = domain.foundUri[f];
+  const name = domain.foundName[f];
+  out.uint(depth);
+  out.byte(0x20);
+  out.uint(domain.foundKind[f]);
+  out.byte(0x20);
+  out.uint(domain.foundAsType[f]);
+  out.byte(0x20);
+  named(out, uri);
+  named(out, name);
+  return true;
+}
+
+/**
+ * What a module cache key names of ABC `index` besides its application
+ * domain's log, which domainKeyLogBytes gives, handed out (see handOut):
+ * the first two lines of domainContext, then the ABC's application
+ * domain, and how many rebuilds the domain is from its reset. No address
+ * if there is no such ABC.
+ */
+export function domainKeyHeaderBytes(index: i32 = -1): usize {
+  const at = abcIndex(index);
+  if (at < 0) {
+    return handOut(null);
+  }
+
+  const own = domain.abcDomain[at];
+  const out = context;
+  out.reset();
+  writeSeen(out, seenBy(own), <u32>at);
+  out.byte(0x0a);
+  out.uint(own);
+  out.byte(0x0a);
+  out.uint(domain.generation);
+  return handOut(out);
+}
+
+/** Application domain `appDomain`'s parent; -1 for the root, or for one never made. */
+export function domainParent(appDomain: i32): i32 {
+  return appDomain > 0 && appDomain < domain.domainParent.length
+    ? domain.domainParent[<u32>appDomain]
+    : -1;
+}
+
+/**
+ * How far live application domain `appDomain`'s log, as domainKeyLogBytes
+ * writes it, is its parent's, entry for entry: the index of the first log
+ * entry past which they may part, 0 for the root or a domain not live.
+ * Before its first ABC is added, a domain sees what its parent does, by
+ * the same places and counts, but for the findings of the two (one
+ * parent further up from it) and its own (which its parent does not see).
+ */
+export function domainKeyFork(appDomain: i32): i32 {
+  if (appDomain <= 0 || !isLive(appDomain)) {
+    return 0;
+  }
+
+  const own = <u32>appDomain;
+  let bound = domain.logKind.length;
+  for (let i = 0; i < domain.abcs.length; i++) {
+    if (domain.abcDomain[i] === own) {
+      bound = firstAfter(i);
+      break;
+    }
+  }
+
+  for (let k = 0; k < domain.foundEntry.length; k++) {
+    const e = <i32>domain.foundEntry[k];
+    if (e >= bound) {
+      break;
+    }
+
+    if (depthOf(own, domain.foundDomain[k]) >= 0) {
+      bound = e;
+      break;
+    }
+  }
+
+  return bound;
+}
+
+/**
+ * Live application domain `appDomain`'s log, as domainContext writes it
+ * for an ABC of the domain, from entry `from` to entry `to` (the log's
+ * end where negative), the entries made with `after` ABCs added or fewer
+ * left out, handed out (see handOut): no address if `appDomain` is not
+ * live. The entries made before the last ABC was added are settled: none
+ * of them changes any more while the domain is live, but in a rebuild,
+ * where those made since may (a verification's LOG_Verify may go, see
+ * Verifier). After every `block` settled entries it writes, `filled` of
+ * the first block written before `from`, it writes a line of "#" and the
+ * index of the entry after them; and before the first entry not settled,
+ * or at the end, a line of "$" and the index of that entry, from which a
+ * later call goes on. So that a host keying a domain's modules chains the
+ * digests of its blocks once each, and takes its parent's blocks for its
+ * own before domainKeyFork.
+ */
+export function domainKeyLogBytes(
+  appDomain: i32,
+  after: i32,
+  from: i32,
+  to: i32,
+  block: i32,
+  filled: i32,
+): usize {
+  if (!isLive(appDomain) || from < 0 || block <= 0 || filled < 0 || filled >= block) {
+    return handOut(null);
+  }
+
+  const own = <u32>appDomain;
+  const seen = seenBy(own);
+  const out = context;
+  out.reset();
+  const length = domain.logKind.length;
+  const end = to < 0 || to > length ? length : to;
+  const settled = <u32>domain.abcs.length;
+  let count: u32 = 0;
+  let e = max(from, firstAfter(after));
+  for (; e < end; e++) {
+    // The entries after one not settled are not either.
+    if (domain.logAt[e] >= settled) {
+      break;
+    }
+
+    while (count < <u32>seen.length && seen[count] < domain.logAt[e]) {
+      count++;
+    }
+
+    if (writeEntry(out, e, own, seen, count) && ++filled === block) {
+      out.byte(0x0a);
+      out.byte(0x23);
+      out.uint(e + 1);
+      filled = 0;
+    }
+  }
+
+  out.byte(0x0a);
+  out.byte(0x24);
+  out.uint(e);
+  for (; e < end; e++) {
+    while (count < <u32>seen.length && seen[count] < domain.logAt[e]) {
+      count++;
+    }
+
+    writeEntry(out, e, own, seen, count);
+  }
+
+  return handOut(out);
+}
+
+/** The index of the first log entry made with more than `after` ABCs added, or the log's length. */
+function firstAfter(after: i32): i32 {
+  let low = 0;
+  let high = domain.logAt.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (<i64>domain.logAt[mid] <= <i64>after) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+
+  return low;
+}
+
 /** domainContext's buffer, kept from call to call. */
 const context = new Output();
 
-/** `s` as domainContext writes a name: its length, ":", and its code units, a backslash or one past ASCII escaped. */
+/**
+ * `s` as domainContext writes a name: its length, ":", and its code units,
+ * a backslash, a control character or one past ASCII escaped, so that a
+ * line break in the text is always an entry's (see domainKeyLogBytes).
+ */
 function named(out: Output, s: string): void {
   out.uint(s.length);
   out.byte(0x3a);
   for (let i = 0; i < s.length; i++) {
     const c = <u32>s.charCodeAt(i);
-    if (c < 0x80 && c !== 0x5c) {
+    if (c >= 0x20 && c < 0x7f && c !== 0x5c) {
       out.byte(<u8>c);
     } else {
       out.unit(c);

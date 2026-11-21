@@ -1,5 +1,7 @@
-// SHA-256 computed here, synchronously, for the player where crypto.subtle,
-// which only a secure context has and only asynchronously, will not do.
+// SHA-256 computed here, synchronously: for module keys' chained digests
+// (keys.ts), which a key takes as it is asked for, and for the player where
+// crypto.subtle, which only a secure context has and only asynchronously,
+// will not do.
 
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -19,6 +21,27 @@ export function sha256Here(bytes: Uint8Array): Uint8Array {
   const block = padded(bytes.length);
   block.set(bytes);
   return digest(block, bytes.length);
+}
+
+/** The SHA-256 of `prefix`, ASCII, and then each of `parts`, as 64 hex digits. */
+export function sha256Joined(prefix: string, ...parts: Uint8Array[]): string {
+  let n = prefix.length;
+  for (const part of parts) {
+    n += part.length;
+  }
+
+  const block = padded(n);
+  for (let i = 0; i < prefix.length; i++) {
+    block[i] = prefix.charCodeAt(i);
+  }
+
+  let at = prefix.length;
+  for (const part of parts) {
+    block.set(part, at);
+    at += part.length;
+  }
+
+  return hex(digest(block, n));
 }
 
 /** Room for a message of `n` bytes and its padding: 0x80, zeros to 56 mod 64, then the bit length. */

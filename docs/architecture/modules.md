@@ -121,6 +121,23 @@ the key names them by a digest taken once per compiler epoch
 them out: keyed whole, and taken twice a module, they cost 4.5 ms a
 module, hit or miss.
 
+The rest of the log grows as a session loads, and keyed whole it cost
+each load the whole of it: 32 ms a key after 800 loads into one domain.
+So the key names it by the digests of its blocks of 64 entries, chained,
+`sha256(previous digest + block)`, and the text of the entries after the
+last block (`Codegen.keyContext`, `packages/codegen/src/keys.ts`). Only
+the entries made before the last ABC was added go in blocks: none of a
+live domain changes once made but in a rebuild, except the `LOG_Verify`
+a verification logs, which may go when it ends, and adding an ABC
+abandons any verification under way. Each application domain keeps
+where its chain is, so a key reads (`domainKeyLogBytes`) and digests only
+the entries made since; a new domain starts from its parent's chain where
+the two logs part (`domainKeyFork`): at its first ABC, or at the first
+finding it or an ancestor recorded, which it sees one domain further up
+than its parent does. The blocks are the same however they were read, so
+a key is too, and the swf2es command, which keys each module once, takes
+the player's keys. A rebuild or a reset starts every chain again.
+
 `Code.link` adds a SWF's ABCs, then, with a cache, makes each module ready
 in order, reading it and replaying its log or compiling it, then
 evaluates and loads them all into the runtime at once, as without a

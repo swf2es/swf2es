@@ -54,6 +54,7 @@ test("a module key names the compiler, the ABCs its domain sees and what it foun
     abcs: ["builtin a", "b"],
     own: 1,
     libraries: null,
+    blocks: "",
     log: "",
   });
 

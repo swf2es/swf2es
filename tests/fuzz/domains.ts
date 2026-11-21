@@ -13,10 +13,15 @@
 // ancestor defines another A of the same name is resolved again after
 // it. A failure prints the step and where the two modules part.
 //
+// And each ABC's module key context, as either instance's chains keep it
+// from the start (packages/codegen/src/keys.ts), must be the one taken
+// from nothing, and name the log domainContext gives.
+//
 //   node tests/fuzz/domains.ts [steps, 3000] [seed, 1]
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { containerEngine, libraries, runOracle } from "../../oracle/oracle.ts";
+import { KeyChains, type KeyLog } from "../../packages/codegen/dist/keys.js";
 import { classes, GETTER, METHOD, mn, OVERRIDE, SLOT } from "../unit/codegen/link-cases.ts";
 import { loadTesting } from "../unit/codegen/testing-module.ts";
 
@@ -170,6 +175,21 @@ const abcDomain = roots.map(() => 0);
 const parent = [-1];
 const failures: string[] = [];
 const counts = { compiles: 0, drops: 0, evictions: 0, revivals: 0, rebuilds: 0, findings: 0 };
+const decoder = new TextDecoder();
+
+/** What KeyChains asks of an instance; without `inherit`, each domain's chain starts from nothing. */
+// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+function keyLog(t: any, inherit = true): KeyLog {
+  return {
+    header: (index) => decoder.decode(t.domainKeyHeaderBytes(index)),
+    parent: (appDomain) => (inherit ? t.domainParent(appDomain) : -1),
+    fork: (appDomain) => t.domainKeyFork(appDomain),
+    log: (appDomain, after, from, to, block, filled) =>
+      t.domainKeyLogBytes(appDomain, after, from, to, block, filled),
+  };
+}
+
+const chains = [new KeyChains(keyLog(subject)), new KeyChains(keyLog(reference))];
 
 /** Ask both the same; they must answer alike. */
 // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
@@ -186,9 +206,38 @@ const state = (d: number) => subject.domainState(d) as number;
 const live = () => parent.map((_, d) => d).filter((d) => state(d) === 0);
 const where = (text: string, at: number) => text.slice(Math.max(0, at - 150), at + 150);
 
+/** ABC `i`'s key contexts in each instance, kept and from nothing, alike, and naming its log. */
+function keys(step: number, i: number): void {
+  for (const [k, t] of [subject, reference].entries()) {
+    const which = k === 0 ? "subject" : "reference";
+    for (const after of [0, roots.length]) {
+      const kept = JSON.stringify(chains[k].context(i, after));
+      const alone = JSON.stringify(new KeyChains(keyLog(t, false)).context(i, after));
+      if (kept !== alone) {
+        failures.push(
+          `step ${step}: ABC ${i}'s key context after ${after} is not the one taken from nothing (${which})\n${kept}\n----\n${alone}`,
+        );
+        return;
+      }
+
+      const context: string = t.domainContext(i, after);
+      const second = context.indexOf("\n", context.indexOf("\n") + 1);
+      const appDomain = Number(decoder.decode(t.domainKeyHeaderBytes(i)).split("\n")[2]);
+      const log = decoder.decode(t.domainKeyLogBytes(appDomain, after, 0, -1, 64, 0));
+      if (log.replace(/\n[#$]\d+/g, "") !== (second < 0 ? "" : context.slice(second))) {
+        failures.push(
+          `step ${step}: ABC ${i}'s key log after ${after} is not its context's (${which})`,
+        );
+        return;
+      }
+    }
+  }
+}
+
 /** Compare module, entries and methods compiled alone of ABC `i` in both. */
 function compare(step: number, i: number): void {
   counts.compiles++;
+  keys(step, i);
   const joined = hashes.join("\n");
   const a: string = subject.domainModule(joined, i, true);
   const b: string = reference.domainModule(joined, i, true);

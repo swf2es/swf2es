@@ -17,6 +17,8 @@ const HANDED_OUT = new Set([
   "domainModuleBytes",
   "domainModuleMoreBytes",
   "domainEmitEachBytes",
+  "domainKeyHeaderBytes",
+  "domainKeyLogBytes",
   "actionsModuleBytes",
   "actionsEmitEachBytes",
   "actionsUnitBytes",
