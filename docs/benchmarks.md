@@ -83,6 +83,11 @@ draws on the machine's GPU (on a machine with two,
   into a ByteArray after a 54-byte header (`--opaque` for an opaque
   bitmap): a fresh bitmap's texture, the readback after a draw and the
   scan;
+- `--deck N`: one shape of N wobbly contours stacked almost on top of
+  each other, filled even-odd, whose crossings make libtess2 slow with
+  the square of N (`--paint gradient` or `bitmap`; `--ratio-change`
+  makes it a morph at a new ratio each frame, tessellated anew); the
+  `tess` line, for every scene, is the draw's time in the tessellator;
 - and others for one path each: `--rig`, `--pulse`, `--branches`,
   `--toggle`, `--masks`, `--scroll`, `--stamps`, `--pen`, `--triangles`,
   `--redraw`, `--vectors` (the script's header says what each plays).

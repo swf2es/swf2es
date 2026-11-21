@@ -296,6 +296,12 @@ export type MorphFillSpec =
       endMatrix?: MatrixSpec;
       /** Each stop's start ratio and colour, then its end ratio and colour. */
       stops: [number, number, number, number][];
+    }
+  | {
+      type: 0x40 | 0x41 | 0x42 | 0x43;
+      bitmap: number;
+      startMatrix?: MatrixSpec;
+      endMatrix?: MatrixSpec;
     };
 
 export interface MorphShapeSpec {
@@ -341,6 +347,13 @@ export function morphShape(spec: MorphShapeSpec): Uint8Array {
     }
 
     body.u8(f.type);
+    if ("bitmap" in f) {
+      body.u16(f.bitmap);
+      matrix(body, f.startMatrix ?? {});
+      matrix(body, f.endMatrix ?? {});
+      return;
+    }
+
     matrix(body, f.startMatrix ?? {});
     matrix(body, f.endMatrix ?? {});
     body.u8(f.stops.length);
