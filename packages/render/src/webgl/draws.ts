@@ -855,8 +855,8 @@ export class Draws {
       last = j;
     }
 
+    // Places past the count are left from runs before: trimmed, the array would grow again.
     this.runCount = draws;
-    this.runPlaces.length = draws;
 
     return last;
   }

@@ -12,23 +12,21 @@ export class StaleShapes {
   >();
 
   /**
-   * The shape a Shape draws: the one Flash's stale bitmap cache shows, given
-   * another of the same bounds while cached (display/shapeobject.ts), while
-   * it stands on the stage at the scale and turn (a b c d) it was first
-   * drawn at and stays cached; from a frame either changes, what it is
-   * (`cache-replace`). Only a frame that
-   * draws it decides: one walked hidden draws nothing of it, and
-   * BitmapData.draw's walk is in the bitmap's space, which shows the cache
-   * as the stage last did.
+   * The shape a Shape draws: the one Flash's stale bitmap cache shows,
+   * given another of the same bounds while cached (display/shapeobject.ts),
+   * while it stands on the stage at the scale and turn it was first drawn
+   * at (a b c d, read from `places[at]` so that no Shape's walk boxes them)
+   * and stays cached; from a frame either changes, what it is
+   * (`cache-replace`). Only a frame that draws it decides: one walked
+   * hidden draws nothing of it, and BitmapData.draw's walk is in the
+   * bitmap's space, which shows the cache as the stage last did.
    */
   staleShape(
     o: ShapeObject,
     hidden: boolean,
     snapshotting: boolean,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
+    places: Float64Array,
+    at: number,
   ): ShapeCharacter | null {
     const cache = o.stale;
     if (!cache || hidden) {
@@ -40,6 +38,10 @@ export class StaleShapes {
       return seen?.cache === cache && seen.spent ? o.drawn() : cache.shape;
     }
 
+    const a = places[at];
+    const b = places[at + 1];
+    const c = places[at + 2];
+    const d = places[at + 3];
     if (!seen || seen.cache !== cache) {
       // A first frame with its cache off already draws it as it is.
       seen = { cache, a, b, c, d, spent: !cached(o) };

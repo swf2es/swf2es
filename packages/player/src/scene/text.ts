@@ -21,15 +21,16 @@ const LEAST_RESOLUTION = 1 / 64;
 
 /**
  * Canvas pixels a pixel of device text is shown at, `pixels` a stage pixel
- * at the text's largest stretch: below 1 too, where the stage is shown
+ * at the largest stretch of its linear transform on the stage (a b c d,
+ * from `world[at]`): below 1 too, where the stage is shown
  * smaller, as Flash rasterizes a device font at the size it is shown;
  * 8 times the screen's at most.
  */
-export function deviceTextResolution(
-  world: readonly [number, number, number, number],
-  pixels: number,
-): number {
-  const [a, b, c, d] = world;
+export function deviceTextResolution(world: ArrayLike<number>, pixels: number, at = 0): number {
+  const a = world[at];
+  const b = world[at + 1];
+  const c = world[at + 2];
+  const d = world[at + 3];
   const x = a * a + b * b;
   const y = c * c + d * d;
   const cross = a * c + b * d;
@@ -139,6 +140,14 @@ export interface TextOmissions {
   clip: { x: number; y: number; width: number; height: number } | null;
   clipFrom: number;
   clipTo: number;
+}
+
+/** `omitted` as nothing is left out, for another text's items. */
+export function clearOmissions(omitted: TextOmissions): void {
+  omitted.advanced = false;
+  omitted.clip = null;
+  omitted.clipFrom = 0;
+  omitted.clipTo = 0;
 }
 
 /** A glyph's outline as a shape of one white fill, in the font's units over 20, as shapeLayers takes twips. */

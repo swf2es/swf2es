@@ -32,10 +32,14 @@ const SWEEP_FRAMES = 60;
 const hashFloat = new Float64Array(1);
 const hashInts = new Int32Array(hashFloat.buffer);
 
-/** `h` mixed with the bits of `x`, zero's two signs alike and every NaN, as same() takes them. */
+/**
+ * `h` mixed with the bits of `x`, zero's two signs alike and every NaN, as
+ * same() takes them: in 31 bits, which V8 keeps as a small integer, where
+ * half of all 32-bit hashes were boxed on every frame.
+ */
 function mixHash(h: number, x: number): number {
   hashFloat[0] = x === 0 ? 0 : Number.isNaN(x) ? Number.NaN : x;
-  return Math.imul(Math.imul(h ^ hashInts[0], 0x9e3779b1) ^ hashInts[1], 0x85ebca6b);
+  return Math.imul(Math.imul(h ^ hashInts[0], 0x9e3779b1) ^ hashInts[1], 0x85ebca6b) >> 1;
 }
 
 /**
@@ -152,60 +156,54 @@ export class LineCache {
   }
 
   /**
-   * `layer`'s lines through the linear transform (a b c d), at least `least`
-   * wide, drawn opaque or not: stroked again for another transform, screen
-   * or version of its drawing, the old ones kept while drawn as the
-   * geometries keep them. A layer of no painted line (LayerLines' painted);
-   * `layerLines`, where given, is what `of` gave for the layer and version.
+   * `layer`'s lines through the linear transform `key[0]` to `key[3]` (a b
+   * c d), at least `key[4]` (least) wide, drawn opaque or not: stroked
+   * again for another transform, screen or version of its drawing, the old
+   * ones kept while drawn as the geometries keep them. A layer of no painted
+   * line (LayerLines' painted); `layerLines`, where given, is what `of` gave
+   * for the layer and version.
    */
   take(
     layer: ShapeLayer,
     version: number,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    least: number,
+    key: Float64Array,
     by: readonly number[] | null,
     drawnOpaque: boolean,
     layerLines?: LayerLines,
   ): GeometryHandle | null {
-    return (
-      this.entry(layer, version, a, b, c, d, least, by, drawnOpaque, layerLines)?.handle ?? null
-    );
+    return this.entry(layer, version, key, by, drawnOpaque, layerLines)?.handle ?? null;
   }
 
   /** As take, a painted layer's lines in their pieces, in order; null for none. */
   pieces(
     layer: ShapeLayer,
     version: number,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    least: number,
+    key: Float64Array,
     by: readonly number[] | null,
     drawnOpaque: boolean,
     layerLines?: LayerLines,
   ): readonly LinePiece[] | null {
-    return (
-      this.entry(layer, version, a, b, c, d, least, by, drawnOpaque, layerLines)?.pieces ?? null
-    );
+    return this.entry(layer, version, key, by, drawnOpaque, layerLines)?.pieces ?? null;
   }
 
-  /** The entry take and pieces read, stroked if it was not, or its geometries were let go of. */
+  /**
+   * The entry take and pieces read, stroked if it was not, or its geometries
+   * were let go of. Its key's numbers come in a typed array: passed one by
+   * one, each would be boxed on every frame of every line.
+   */
   private entry(
     layer: ShapeLayer,
     version: number,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    least: number,
+    key: Float64Array,
     by: readonly number[] | null,
     drawnOpaque: boolean,
     layerLines?: LayerLines,
   ): LineEntry | null {
+    const a = key[0];
+    const b = key[1];
+    const c = key[2];
+    const d = key[3];
+    const least = key[4];
     const frame = this.geometries.frame;
     if (frame - this.swept >= SWEEP_FRAMES) {
       this.trim(frame);

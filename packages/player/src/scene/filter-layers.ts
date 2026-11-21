@@ -112,27 +112,28 @@ export class FilterLayers {
    * Whether `o`'s filters' output kept last can be drawn again, its rectangle then in keptRect;
    * else whether to keep what they make now. Kept while nothing they ran on changed but where it is
    * on the stage: not past a change in `o` but a move, in what is in it, in its scale or turn on
-   * the stage (a b c d), a move of what it scrolls, its filters, or the screen's scale; and drawn
+   * the stage (a b c d of its transform there, read from `places[at]` with tx ty so that none is
+   * boxed passing it), a move of what it scrolls, its filters, or the screen's scale; and drawn
    * again only while its rectangle moved with it, its size the same and its corner within a pixel.
    * One that changes frame after frame is not kept, as keeping it would cost a target for nothing.
-   * `frames` and `generation` are the view's: the stage's frames drawn, and what outputs are kept at;
-   * `whole` how its layer covers whole pixels (@swf2es/render's SceneList.wholes).
+   * `frames` and `generation` are the view's: the stage's frames drawn, and what outputs are kept
+   * at; `whole` how its layer covers whole pixels (@swf2es/render's SceneList.wholes).
    */
   keptOutput(
     o: DisplayObject,
     plan: FilterPlan,
     sliceKey: string,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    tx: number,
-    ty: number,
+    places: Float64Array,
+    at: number,
     target: MeasureTarget,
     frames: number,
     generation: number,
     whole: number,
   ): KeptOutput {
+    const a = places[at];
+    const b = places[at + 1];
+    const c = places[at + 2];
+    const d = places[at + 3];
     let k = this.outputs.get(o);
     if (!k) {
       k = {
@@ -157,8 +158,8 @@ export class FilterLayers {
       this.outputs.set(o, k);
     }
 
-    const x = tx * target.scale;
-    const y = ty * target.scale;
+    const x = places[at + 4] * target.scale;
+    const y = places[at + 5] * target.scale;
     const l = k.linear;
     // One not drawn on the frame before was hidden, or off the list, where a walk cleared its flags
     // and its children's without it hearing of a change.

@@ -83,6 +83,8 @@ export class TextItems {
   /** A text item's colour, and that before its object's, made in place for each item drawn. */
   private readonly itemColor: ColorTransform = { ...IDENTITY_COLOR };
   private readonly itemColored: ColorTransform = { ...IDENTITY_COLOR };
+  /** A rectangle item's place in its text, rewritten for each. */
+  private readonly rectPlace = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
   /** Device text rasterized, by its text; among its runs, by style, metrics and resolution. */
   private readonly runs = new Map<string, DeviceRun[]>();
   /** How many texts' runs are kept before those let go of are next looked for. */
@@ -114,24 +116,20 @@ export class TextItems {
   }
 
   /**
-   * A text's item under the object's transform (a b c d tx ty) and colour
-   * transform: a glyph its fill, a rectangle the unit quad, each placed by
-   * its row and coloured by its colour as a multiplier before the object's;
-   * a device run its rasterized texture, a texel a canvas pixel at
-   * `resolution` canvas pixels a pixel of the text, its corner on a canvas
-   * pixel, `unit` canvas pixels a stage pixel, where it is neither turned
-   * nor skewed.
+   * A text's item under the object's transform (a b c d tx ty, read from
+   * `places[at]` so that none is boxed passing it) and colour transform: a
+   * glyph its fill, a rectangle the unit quad, each placed by its row and
+   * coloured by its colour as a multiplier before the object's; a device
+   * run its rasterized texture, a texel a canvas pixel at `resolution`
+   * canvas pixels a pixel of the text, its corner on a canvas pixel, `unit`
+   * canvas pixels a stage pixel, where it is neither turned nor skewed.
    */
   drawTextItem(
     scene: SceneList,
     rows: Rows,
     item: TextItem,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    tx: number,
-    ty: number,
+    places: Float64Array,
+    at: number,
     color: ColorTransform | null,
     resolution: number,
     unit: number,
@@ -155,6 +153,12 @@ export class TextItems {
       // canvas pixel, which its texels then each cover, not two halves of two.
       const k = 1 / (run.resolution || resolution);
       const x = item.x - run.left * k;
+      const a = places[at];
+      const b = places[at + 1];
+      const c = places[at + 2];
+      const d = places[at + 3];
+      const tx = places[at + 4];
+      const ty = places[at + 5];
       let x0 = a * x + c * item.top + tx;
       let y0 = b * x + d * item.top + ty;
       if (b === 0 && c === 0 && unit > 0) {
@@ -178,15 +182,21 @@ export class TextItems {
       return;
     }
 
-    const m =
-      item.kind === "glyph"
-        ? item.m
-        : { a: item.width, b: 0, c: 0, d: item.height, tx: item.x, ty: item.y };
+    let m = this.rectPlace;
+    if (item.kind === "glyph") {
+      m = item.m;
+    } else {
+      m.a = item.width;
+      m.d = item.height;
+      m.tx = item.x;
+      m.ty = item.y;
+    }
+
     this.geometries.use(geometry.id);
     // A glyph's outline on quarters of a stage pixel, as Flash places it.
     scene.draw(
       geometry.id,
-      placedRow(rows, a, b, c, d, tx, ty, m, colored),
+      placedRowAt(rows, places, at, m, colored),
       NORMAL,
       -1,
       item.kind === "glyph" ? SNAP : 0,
@@ -510,6 +520,29 @@ function quad(to: Float32Array, q: number, x: number, y: number, w: number, h: n
   to[at + 5] = y + h;
   to[at + 6] = x;
   to[at + 7] = y + h;
+}
+
+/** A row for what `m` places within an object under the transform at `places[at]`. */
+export function placedRowAt(
+  rows: Rows,
+  places: Float64Array,
+  at: number,
+  m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
+  color: ColorTransform | null,
+): number {
+  const a = places[at];
+  const b = places[at + 1];
+  const c = places[at + 2];
+  const d = places[at + 3];
+  return rows.add(
+    a * m.a + c * m.b,
+    b * m.a + d * m.b,
+    a * m.c + c * m.d,
+    b * m.c + d * m.d,
+    a * m.tx + c * m.ty + places[at + 4],
+    b * m.tx + d * m.ty + places[at + 5],
+    color,
+  );
 }
 
 /** A row for what `m` places within an object under the transform (a b c d tx ty). */
