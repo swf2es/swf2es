@@ -1681,7 +1681,12 @@ export class Runtime {
     return this.boundClosure(o, traits.proto[methodKey(id)], traits);
   }
 
-  /** `method` bound to `o`, the same function each time, `traits`' for moduleOf. */
+  /**
+   * `method` bound to `o`, the same function each time, whose module
+   * (moduleOf) is its receiver's class's, as avmplus has a bound method's
+   * code context, whichever class it was found through first; `traits`'s
+   * for a receiver with no class of its own.
+   */
   private boundClosure(o: Value, method: Method, traits: Traits): AsObject {
     const key = typeof o === "object" ? o : traits.proto;
     let byMethod = this.closures.get(key);
@@ -1709,7 +1714,7 @@ export class Runtime {
       f.$id = (method as Method & { $id?: number }).$id ?? 0;
       f.$closure = true;
       // Whose method it is, for moduleOf.
-      f.$of = traits;
+      f.$of = this.receiverTraits(o) ?? traits;
       if (typeof o === "object") {
         byMethod.set(method, f);
       }
