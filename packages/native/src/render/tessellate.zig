@@ -35,8 +35,9 @@ var made_in: u32 = 0;
 var libtess = true;
 
 /// What filled the last fill, for tests (filledBy): none, a fan, the
-/// monotone cut, ear clipping, libtess2, lyon or the bands.
-const Filler = enum(u32) { none, fan, monotone, earclip, libtess2, lyon, bands };
+/// monotone cut, ear clipping, libtess2, lyon sweeping along y, the bands, or
+/// lyon sweeping along x once its sweep along y failed the check.
+const Filler = enum(u32) { none, fan, monotone, earclip, libtess2, lyon, bands, lyon_x };
 var filler: Filler = .none;
 
 export fn filledBy() u32 {
@@ -45,7 +46,8 @@ export fn filledBy() u32 {
 
 /// For tests: what the next lyon fill does in place of filling. 0 fills; a negative status is
 /// returned as lyon's own; 1 traps, as a panic in lyon does; 2 fills, and its triangles are
-/// taken as having failed the check, both ways. It applies once.
+/// taken as having failed the check, both ways; 3 takes the sweep along y as having failed the
+/// check and the sweep along x as failing outright (-1). It applies once.
 var lyon_fault: i32 = 0;
 
 export fn lyonFault(fault: i32) void {
@@ -82,7 +84,7 @@ export fn checkFill(coords: [*]const f64, count: usize, ends: [*]const u32, cont
 /// two lost. Out of memory for
 /// the check is lyon's own: libtess2, in the same nearly full arena, would run out too and unwind
 /// the instance, where the bands fail cleanly and the host fills the call again alone.
-fn lyonChecked(coords: []const f64, ends: []const u32, nonzero: bool) union(enum) { output: lyon.Output, status: i32 } {
+fn lyonChecked(coords: []const f64, ends: []const u32, nonzero: bool) union(enum) { output: struct { fill: lyon.Output, horizontal: bool }, status: i32 } {
     const fault = lyon_fault;
     lyon_fault = 0;
     if (fault < 0) {
@@ -96,16 +98,20 @@ fn lyonChecked(coords: []const f64, ends: []const u32, nonzero: bool) union(enum
     const mark = arena.top;
     for ([_]i32{ 0, lyon.horizontal }) |flags| {
         arena.top = mark;
-        switch (lyon.fill(coords, ends, nonzero, flags)) {
+        const filled: @TypeOf(lyon.fill(coords, ends, nonzero, flags)) = if (fault == 3 and flags != 0) .{ .status = -1 } else lyon.fill(coords, ends, nonzero, flags);
+        switch (filled) {
             .output => |result| {
-                const verdict = if (fault == 2) .wrong else validate.covers(arena.allocator, coords, ends, nonzero, result.positions, result.indices);
+                const verdict = if (fault == 2 or fault == 3) .wrong else validate.covers(arena.allocator, coords, ends, nonzero, result.positions, result.indices);
                 switch (verdict) {
-                    .right => return .{ .output = result },
+                    .right => return .{ .output = .{ .fill = result, .horizontal = flags != 0 } },
                     .wrong => {},
                     .no_memory => return .{ .status = -3 },
                 }
             },
-            .status => |status| return .{ .status = status },
+            // Once the sweep along y has failed the check, the fill is one lyon gets wrong: should
+            // the sweep along x fail outright (-1), libtess2 fills it, as where both fail the
+            // check, rather than the bands, which give up on such fills.
+            .status => |status| return .{ .status = if (flags != 0 and status == -1) -4 else status },
         }
     }
 
@@ -229,8 +235,8 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
     if (dense) {
         switch (lyonChecked(coords, ends, nonzero)) {
             .output => |result| {
-                out = .{ .positions = result.positions, .indices = result.indices };
-                filler = .lyon;
+                out = .{ .positions = result.fill.positions, .indices = result.fill.indices };
+                filler = if (result.horizontal) .lyon_x else .lyon;
                 return 0;
             },
             .status => |status| {

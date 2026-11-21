@@ -532,6 +532,7 @@ const raw = (
 };
 const LIBTESS2 = 4;
 const LYON = 5;
+const LYON_X = 7;
 
 /**
  * A deck of random wobbly ellipses, each turned a little from the last, every point jittered:
@@ -629,8 +630,9 @@ for (let i = 0; i < Math.max(8, Math.floor(cases / 100)); i++) {
   const { status, by, v, t, area } = rawFill(contours, nonZero);
   assert.equal(status, 0, context);
   // lyon's, or libtess2's where lyon's triangles failed the module's check.
-  assert.ok(by === LYON || by === LIBTESS2, `filled by ${by}: ${context}`);
-  if (by === LYON) {
+  // lyon's along either sweep, or libtess2's where lyon's triangles failed the module's check.
+  assert.ok(by === LYON || by === LYON_X || by === LIBTESS2, `filled by ${by}: ${context}`);
+  if (by === LYON || by === LYON_X) {
     lyonDecks++;
   }
 
@@ -736,27 +738,48 @@ for (let i = 0; i < Math.max(2, Math.floor(cases / 1000)); i++) {
   const context = `large deck ${i} from seed ${seed}: ${count} contours turned ${turn} about ${centre}`;
   const { status, by, v, t } = rawFill(contours, false);
   assert.equal(status, 0, context);
-  assert.ok(by === LYON || by === LIBTESS2, `filled by ${by}: ${context}`);
-  if (by === LYON) {
+  assert.ok(by === LYON || by === LYON_X || by === LIBTESS2, `filled by ${by}: ${context}`);
+  if (by === LYON || by === LYON_X) {
     largeLyon++;
   }
 
+  // lyon's positions are f32s, so near an edge a sample may fall either side of it, the more so
+  // far from the origin; and on a triangle's own edge it says nothing.
+  const margin = Math.max(1e-3, (centre + 212) * 2e-7);
   for (let sample = 0; sample < 20; sample++) {
     const x = centre - 212 + random() * 424;
     const y = centre - 212 + random() * 424;
-    if (near(contours, x, y, 1e-3)) {
+    if (near(contours, x, y, margin)) {
       continue;
     }
 
     let covered = 0;
-    for (let j = 0; j < t.length; j += 3) {
+    let onEdge = false;
+    for (let j = 0; j < t.length && !onEdge; j += 3) {
       const [a, b, c] = [t[j] * 2, t[j + 1] * 2, t[j + 2] * 2];
+      if (
+        x < Math.min(v[a], v[b], v[c]) ||
+        x > Math.max(v[a], v[b], v[c]) ||
+        y < Math.min(v[a + 1], v[b + 1], v[c + 1]) ||
+        y > Math.max(v[a + 1], v[b + 1], v[c + 1])
+      ) {
+        continue;
+      }
+
       const p = (v[b] - v[a]) * (y - v[a + 1]) - (v[b + 1] - v[a + 1]) * (x - v[a]);
       const q = (v[c] - v[b]) * (y - v[b + 1]) - (v[c + 1] - v[b + 1]) * (x - v[b]);
       const r = (v[a] - v[c]) * (y - v[c + 1]) - (v[a + 1] - v[c + 1]) * (x - v[c]);
+      const ab = Math.hypot(v[b] - v[a], v[b + 1] - v[a + 1]);
+      const bc = Math.hypot(v[c] - v[b], v[c + 1] - v[b + 1]);
+      const ca = Math.hypot(v[a] - v[c], v[a + 1] - v[c + 1]);
+      onEdge = Math.min(Math.abs(p) / ab, Math.abs(q) / bc, Math.abs(r) / ca) < 1e-7;
       if ((p > 0 && q > 0 && r > 0) || (p < 0 && q < 0 && r < 0)) {
         covered++;
       }
+    }
+
+    if (onEdge) {
+      continue;
     }
 
     assert.equal(
