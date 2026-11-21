@@ -607,6 +607,7 @@ export class RenderView implements Drawer {
       target,
     );
     this.geometries.endFrame();
+    this.parts.endFrame();
     this.textures.endFrame();
     this.keeps.endFrame();
     this.drawnRoot = root;
@@ -2121,6 +2122,7 @@ export class RenderView implements Drawer {
     this.canvas.removeEventListener("webglcontextlost", this.lost);
     this.canvas.removeEventListener("webglcontextrestored", this.restored);
     this.backend.destroy();
+    this.parts.destroy();
     this.releaseOutlines();
     this.ownTessellator?.dispose();
     if (this.ownCanvas && !this.gl.isContextLost()) {

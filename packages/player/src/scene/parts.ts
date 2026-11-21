@@ -2,12 +2,15 @@
 // made once and kept while drawn: a shape layer's parts, each for its
 // drawing's version, a drawing used as a mask's apart; a bitmap's quad of
 // each size; a glyph's fill. A drawing drawn again lets go of the parts
-// of the layers it no longer draws (dropUndrawn).
+// of the layers it no longer draws (dropUndrawn). A layer slow to tessellate
+// keeps its triangles past its geometries' expiry, to add them again
+// (kept-parts.ts).
 import type { Glyph } from "@swf2es/format";
 import type { Geometries, GeometryHandle } from "@swf2es/render";
 import type { DisplayObject } from "../display/displayobject.js";
 import { type ShapeLayer, shapeLayers } from "../display/shapes.js";
 import { type FillTessellator, fillsApart } from "./fills.js";
+import { type KeptEntry, type KeptParts, keptParts } from "./kept-parts.js";
 import type { LineCache } from "./lines.js";
 import { bitmapQuad, layerParts, type PartPaint } from "./shapes.js";
 import { glyphShape } from "./text.js";
@@ -45,6 +48,12 @@ export interface Made {
   parts: MadePart[];
   version: number;
   checkedAt: number;
+  /**
+   * Its parts' geometries, where they were slow to make (SLOW_PARTS_MS)
+   * and are among those kept (kept-parts.ts): added again when theirs
+   * expire, rather than tessellated again.
+   */
+  kept: KeptEntry | null;
 }
 
 /**
@@ -80,7 +89,19 @@ export class Parts {
     private readonly geometries: Geometries,
     private readonly tessellator: FillTessellator,
     private readonly lineCache: LineCache,
+    /** Where slow layers' triangles are kept: every view's store, or a test's. */
+    private readonly kept: KeptParts = keptParts,
   ) {}
+
+  /** The view destroyed: its kept triangles let go of, which another view's budget may use. */
+  destroy(): void {
+    this.kept.forgetView(this.geometries);
+  }
+
+  /** A frame drawn, its geometries' frame ended: the kept triangles whose geometries expired counted. */
+  endFrame(): void {
+    this.kept.settle(this.geometries);
+  }
 
   /**
    * `o`'s drawing drawn as `layers` of `version`: the parts of the layers it
@@ -129,6 +150,7 @@ export class Parts {
       }
     }
 
+    this.kept.forget(made);
     cache.delete(layer);
   }
 
@@ -164,19 +186,52 @@ export class Parts {
       }
     }
 
-    // The layer can outlive its handle. Let the registry release the tessellated buffers on expiry.
-    const parts = layerParts(layer, this.tessellator, masking).map(
-      ({ geometry, paint, region, mesh, fillsFrom = 0, fillsTo = 0 }) => ({
-        handle: this.geometries.add(geometry),
-        paint,
-        region,
-        mesh,
-        madeAt: this.geometries.frame,
-        fillsFrom,
-        fillsTo,
-      }),
-    );
-    cache.set(layer, { parts, version, checkedAt: this.geometries.removalVersion });
+    if (made?.kept && made.version === version) {
+      const kept = made.kept.geometries;
+      const madeAt = this.geometries.frame;
+      // Looked into or not (markFlat) as they were, and standing again from now before a look.
+      made.parts = made.parts.map((part, i) => ({
+        ...part,
+        handle: this.geometries.add(kept[i]),
+        madeAt,
+      }));
+      made.checkedAt = this.geometries.removalVersion;
+      this.kept.added(made);
+      return made.parts;
+    }
+
+    if (made) {
+      this.kept.forget(made);
+    }
+
+    const outcome = { refused: false };
+    const started = this.kept.now();
+    const fresh = layerParts(layer, this.tessellator, masking, outcome);
+    const ms = this.kept.now() - started;
+    // The layer can outlive its handle. Let the registry release the tessellated buffers on expiry,
+    // unless they were slow to make.
+    const parts = fresh.map(({ geometry, paint, region, mesh, fillsFrom = 0, fillsTo = 0 }) => ({
+      handle: this.geometries.add(geometry),
+      paint,
+      region,
+      mesh,
+      madeAt: this.geometries.frame,
+      fillsFrom,
+      fillsTo,
+    }));
+    const entry: Made = { parts, version, checkedAt: this.geometries.removalVersion, kept: null };
+    cache.set(layer, entry);
+    // A fill refused is tried again when the geometries expire, as it would be otherwise.
+    if (!outcome.refused) {
+      this.kept.keep(
+        layer,
+        entry,
+        fresh.map((part) => part.geometry),
+        ms,
+        this.geometries,
+      );
+    }
+
     return parts;
   }
 
