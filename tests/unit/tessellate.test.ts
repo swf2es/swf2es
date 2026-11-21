@@ -655,6 +655,7 @@ interface RawRender {
 const LIBTESS2 = 4;
 const LYON = 5;
 const BANDS = 6;
+const LYON_X = 7;
 
 async function rawRender(): Promise<RawRender> {
   const module = await WebAssembly.compile(Buffer.from(binary, "base64"));
@@ -886,7 +887,7 @@ test("contours a hundredth of a pixel apart fill right by either rule, near the 
         const context = `turn ${turn} about ${centre}, ${nonZero ? "non-zero" : "even-odd"}`;
         assert.equal(fill.status, 0, context);
         // Whichever filler took it, lyon or, where its triangles failed the check, libtess2.
-        assert.ok(fill.by === LYON || fill.by === LIBTESS2, context);
+        assert.ok(fill.by === LYON || fill.by === LYON_X || fill.by === LIBTESS2, context);
         checkCoverage(deck, nonZero, fill, 60);
         const reference = rawFill(x, deck, nonZero, -2);
         assert.ok(
@@ -1003,4 +1004,23 @@ test("the check adds up thin wrong stretches, which pass one at a time", async (
   };
   assert.equal(check(false), 0);
   assert.equal(check(true), 1);
+});
+
+test("where lyon's sweep along y fails the check, its sweep along x can fill the deck right", async () => {
+  // 95 contours each turned 1e-3 from the last: lyon along y fails the check, along x passes.
+  const x = await rawRender();
+  const deck = deckAt(95, 1e-3, 400);
+  const fill = rawFill(x, deck, false);
+  assert.equal(fill.status, 0);
+  assert.equal(fill.by, LYON_X);
+  checkCoverage(deck, false, fill, 60);
+});
+
+test("where lyon's sweep along y fails the check and along x fails outright, libtess2 fills it", async () => {
+  const x = await rawRender();
+  const deck = deckAt(12, 0.004, 300, 100);
+  const fill = rawFill(x, deck, false, 3);
+  assert.equal(fill.status, 0);
+  assert.equal(fill.by, LIBTESS2);
+  checkCoverage(deck, false, fill, 60);
 });

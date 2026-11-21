@@ -481,7 +481,9 @@ lyon sweeps along y and, where its triangles fail the check, again along x
 wrong one way and right the other, and the sweep along y is the quicker on
 decks, by a tenth.
 A fill that fails both ways goes to libtess2, as the bands give up on such
-decks after a tenth of a second or more without filling them. Of 100
+decks after a tenth of a second or more without filling them; so does one
+whose sweep along x fails outright (-1) after its sweep along y failed the
+check. Of 100
 even-odd decks of 80 to 100 contours turned 1e-5 to 1e-3 apart, the size of
 a real morph's, 22 still fail both ways and take libtess2's 2 to 4 s, most
 of them turned 1e-4 or less; the fuzz's random ones fail one in eight.
@@ -493,7 +495,7 @@ than ±838,860.8 from its box's centre) goes to libtess2. A trap in it is
 the host's, as one in libtess2 is: lyon traps where it panics and where an
 allocation of its own fails, which -3 does not cover, and the host fills the
 call again by the bands in a new instance. `filledBy()` names what filled
-the last fill, `lyonFault()` makes the next lyon fill fail, and
+the last fill (lyon's sweep along x apart from its sweep along y), `lyonFault()` makes the next lyon fill fail, and
 `checkFill()` gives the check's verdict on given triangles, for tests.
 
 What libtess2 fails at, gives output

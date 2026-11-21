@@ -18,10 +18,11 @@ const std = @import("std");
 /// (48 let one through in the fuzz), for about 11 ms of lyon's 153 on a deck of 95 contours.
 const lines = 256;
 const offset = 0.5123456789;
-/// The most crossings looked at, a point or triangle, past which the triangles are taken as
-/// wrong: lyon's monotone pieces keep its triangles short, and many that span the box are not
-/// what it gives densely crossing contours.
+/// The most crossings looked at, a point or triangle, and a line, past which the triangles are
+/// taken as wrong: lyon's monotone pieces keep its triangles short, but a fan of a tall contour,
+/// as libtess2 gives, crosses most lines with each triangle, and must not be taken as wrong.
 const crossings_per_point = 64;
+const crossings_per_line = 1024;
 
 const Crossing = struct {
     x: f64,
@@ -110,7 +111,7 @@ fn check(allocator: std.mem.Allocator, coords: []const f64, ends: []const u32, n
     // by line, by counting, and along each line.
     var found: std.ArrayList(Found) = .empty;
     defer found.deinit(allocator);
-    const most = (coords.len / 2 + indices.len / 3 + lines) * crossings_per_point;
+    const most = (coords.len / 2 + indices.len / 3) * crossings_per_point + lines * crossings_per_line;
     if (!try visit(allocator, &found, most, coords, ends, positions, indices, top, per, &ys)) {
         return false;
     }
@@ -319,4 +320,26 @@ test "a box too thin to tell its lines apart has nothing to check" {
     const tiny = 0x1p-1060;
     const coords = [_]f64{ 0, 0, 10, 0, 10, tiny, 0, tiny };
     try testing.expect(.right == covers(testing.allocator, &coords, &.{4}, false, &coords, &.{ 0, 1, 2, 0, 2, 3 }));
+}
+
+test "a fan of a tall contour, every triangle crossing most lines, is right" {
+    // 600 points round an ellipse twice as tall as wide, fanned from its top, as libtess2 fills a
+    // convex contour: the triangles cross the lines more than the 93,000 times that 64 crossings
+    // a point, triangle and line allowed, which took them as wrong.
+    const n = 600;
+    var coords: [n * 2]f64 = undefined;
+    for (0..n) |k| {
+        const u = std.math.pi / 2.0 + @as(f64, @floatFromInt(k)) / n * std.math.pi * 2;
+        coords[k * 2] = 100 * @cos(u);
+        coords[k * 2 + 1] = 200 * @sin(u);
+    }
+
+    var fan: [(n - 2) * 3]i32 = undefined;
+    for (0..n - 2) |k| {
+        fan[k * 3] = 0;
+        fan[k * 3 + 1] = @intCast(k + 1);
+        fan[k * 3 + 2] = @intCast(k + 2);
+    }
+
+    try testing.expect(.right == covers(testing.allocator, &coords, &.{n}, false, &coords, &fan));
 }
