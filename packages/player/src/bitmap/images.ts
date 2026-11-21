@@ -108,7 +108,8 @@ async function decodeFrame(data: Uint8Array, type: string): Promise<DecodedImage
 /** Whether `library` has an image decodeImages has still to decode. */
 export function hasUndecoded(library: Library): boolean {
   for (const character of library.characters.values()) {
-    if (character.type === "bitmap" && !character.pixels) {
+    // A lossless bitmap's pixels are inflated when asked for: never here.
+    if (character.type === "bitmap" && character.definition.type === "image" && !character.pixels) {
       return true;
     }
   }
@@ -120,7 +121,8 @@ export function hasUndecoded(library: Library): boolean {
 export async function decodeImages(library: Library, decode: ImageDecode | null): Promise<void> {
   const pending: Promise<void>[] = [];
   for (const character of library.characters.values()) {
-    if (character.type === "bitmap" && !character.pixels) {
+    // A lossless bitmap's pixels are inflated when asked for: never here.
+    if (character.type === "bitmap" && character.definition.type === "image" && !character.pixels) {
       pending.push(decodeOne(character, decode));
     }
   }

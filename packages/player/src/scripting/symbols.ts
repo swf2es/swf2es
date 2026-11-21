@@ -4,7 +4,7 @@
 // identical sounds, which the libraries alive share.
 import { readSymbolClass, type Sound, type Swf, tags } from "@swf2es/format";
 import type { avm2 } from "@swf2es/runtime";
-import { BitmapStore } from "../bitmap/bitmap.js";
+import { symbolStore } from "../bitmap/bitmap.js";
 import {
   BitmapObject,
   ButtonObject,
@@ -17,14 +17,13 @@ import {
   TextObject,
   VideoObject,
 } from "../display/display.js";
-import {
-  type AnyFontCharacter,
-  type BitmapCharacter,
-  type Character,
-  type DisplayCharacter,
-  INVALID_PIXELS,
-  type Library,
-  type SoundCharacter,
+import type {
+  AnyFontCharacter,
+  BitmapCharacter,
+  Character,
+  DisplayCharacter,
+  Library,
+  SoundCharacter,
 } from "../display/timeline.js";
 import type { DecodedSound } from "../media/audio.js";
 import type { Scripting } from "../scripting.js";
@@ -346,7 +345,7 @@ export class Symbols {
       1,
       1,
     ) as AsObject;
-    data.$store = BitmapStore.of(character.pixels ?? INVALID_PIXELS);
+    data.$store = symbolStore(character);
     return data;
   }
 

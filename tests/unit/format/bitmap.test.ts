@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   type Bitmap,
+  decodeLossless,
   readBitmap,
   readSwf,
   zlibCompress,
@@ -31,10 +32,18 @@ function bitmaps(...tags: Uint8Array[]): Bitmap[] {
   return out;
 }
 
-const hex = (b: Bitmap) =>
-  b.type === "pixels" ? [...b.pixels].map((p) => p.toString(16)) : b.type;
+/** A bitmap's kind as the player gets it: a lossless one's pixels inflated, or none Flash can read. */
+const decoded = (b: Bitmap) => {
+  const pixels = b.type === "lossless" ? decodeLossless(b) : null;
+  return pixels ?? (b.type === "lossless" ? "invalid" : b.type);
+};
 
-test("the lossless formats read to premultiplied ARGB", () => {
+const hex = (b: Bitmap) => {
+  const d = decoded(b);
+  return typeof d === "string" ? d : [...d.pixels].map((p) => p.toString(16));
+};
+
+test("the lossless formats inflate to premultiplied ARGB", () => {
   const [palette, rgb15, xrgb, argb, palette2] = bitmaps(
     w.tag(
       20,
@@ -84,13 +93,13 @@ test("the lossless formats read to premultiplied ARGB", () => {
   );
   // Rows of indices padded to 4 bytes; an index past the palette is 0.
   assert.deepEqual(hex(palette), ["ff0a141e", "ffc86432", "ff0a141e", "ffc86432", "ff0a141e", "0"]);
-  assert.equal(palette.type === "pixels" && palette.transparent, false);
+  assert.equal(palette.type === "lossless" && palette.transparent, false);
   // 5-bit channels widened to v * 8 + 7, 0 kept at 0.
   assert.deepEqual(hex(rgb15), ["ffff0000", "ff0f171f"]);
   // The first byte of xRGB is not alpha.
   assert.deepEqual(hex(xrgb), ["ff010203"]);
   assert.deepEqual(hex(argb), ["80402010"]);
-  assert.equal(argb.type === "pixels" && argb.transparent, true);
+  assert.equal(argb.type === "lossless" && argb.transparent, true);
   // Lossless2's palette is premultiplied, as its pixels are.
   assert.deepEqual(hex(palette2), ["80008000", "ffff0000"]);
 });
@@ -105,8 +114,41 @@ test("Flash refuses a bitmap tag with the short header, corrupt data and DefineB
     w.tag(6, Uint8Array.from([...u16(5), 0xff, 0xd8, 0xff, 0xda, 0, 2, 0xff, 0xd9]), true),
   );
   assert.deepEqual(
-    [short.type, long.type, corrupt.type, empty.type, noTables.type],
+    [short, long, corrupt, empty, noTables].map((b) => {
+      const d = decoded(b);
+      return typeof d === "string" ? d : "pixels";
+    }),
     ["invalid", "pixels", "invalid", "invalid", "invalid"],
+  );
+  // Corrupt data is told only as it is inflated, the same each time.
+  assert.equal(corrupt.type, "lossless");
+  assert.equal(empty.type, "invalid");
+});
+
+test("a lossless bitmap is read without inflating it, and inflates the same each time", () => {
+  const [argb] = bitmaps(
+    w.tag(
+      36,
+      Uint8Array.from([
+        ...u16(1),
+        5,
+        ...u16(2),
+        ...u16(1),
+        ...zlib([0x80, 0x40, 0x20, 0x10, 0xff, 1, 2, 3]),
+      ]),
+      true,
+    ),
+  );
+  assert.ok(argb.type === "lossless");
+  assert.deepEqual([argb.width, argb.height, argb.transparent], [2, 1, true]);
+  const first = decodeLossless(argb);
+  const second = decodeLossless(argb);
+  assert.ok(first && second);
+  assert.notEqual(first.pixels, second.pixels);
+  assert.deepEqual([...first.pixels], [...second.pixels]);
+  assert.deepEqual(
+    [...first.pixels].map((p) => p.toString(16)),
+    ["80402010", "ff010203"],
   );
 });
 

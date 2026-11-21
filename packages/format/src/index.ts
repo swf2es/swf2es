@@ -37,7 +37,13 @@ export {
   checkApiVersion,
   isAirApiVersion,
 } from "./api-versions.js";
-export { type Bitmap, isBitmapTag, readBitmap } from "./bitmap.js";
+export {
+  type Bitmap,
+  type BitmapPixelData,
+  decodeLossless,
+  isBitmapTag,
+  readBitmap,
+} from "./bitmap.js";
 export {
   BUTTON_DOWN,
   BUTTON_HIT_TEST,

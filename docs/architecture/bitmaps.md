@@ -211,10 +211,25 @@ with it. Without a renderer, as in node, a store is the CPU's alone.
 
 A SWF's bitmap characters are `DefineBits` with
 `JPEGTables`, `DefineBitsJPEG2`, 3 and 4, and `DefineBitsLossless` and 2.
-`format` reads a tag into either pixels or an image to decode. The
-lossless formats are pixels, inflated with the zlib `format` already has:
-format 3 a palette of RGB, or RGBA with the 2 tag, and rows of indices
-padded to 4 bytes; format 4 15-bit RGB, each 5-bit channel v widened
+`format` reads a tag into either compressed pixels or an image to
+decode. The lossless formats are pixels, inflated with the zlib `format`
+already has, not as the SWF is read but when something first wants them
+(a texture, a `BitmapData` of the symbol, a read): most of the bitmaps a
+large application's SWFs define are never shown. They are held only
+while a store holds them: a store of a lossless bitmap, which nothing
+has written, lets go of them once a renderer has made its texture of
+them, and inflates them again from the tag, the same pixels, when
+something reads them (`getPixel`, a draw, a texture made again after it
+went idle or with a lost context, Stage3D's upload). A bitmap a script
+or a new store wants again after a collection took its pixels is kept
+from then on, being wanted again and again; a texture made again does not
+keep it, as one lost context would keep every bitmap shown. A store a
+script wrote is its own and never let go of. An image is decoded once, as
+the SWF is linked (below), and kept: the browser decodes only
+asynchronously, and a script may read a bitmap's pixels at any time.
+Format 3 holds a
+palette of RGB, or RGBA with the 2 tag, and rows of indices padded to 4
+bytes; format 4 15-bit RGB, each 5-bit channel v widened
 to v · 8 + 7 and 0 kept at 0; format 5 xRGB, or with the 2 tag ARGB
 already premultiplied, which the store takes as it is. The JPEG tags are
 an image: the JPEG, PNG or GIF bytes, with a JPEG's stray `FF D9 FF D8`
