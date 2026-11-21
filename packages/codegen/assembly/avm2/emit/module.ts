@@ -33,7 +33,7 @@
 // compile it, it comes out as it is in the module.
 
 import { Output } from "../../output";
-import { BodyDecoder, bodyDecoder, verifyMethods } from "../abc/code";
+import { BodyDecoder, bodyDecoder, Verifier } from "../abc/code";
 import * as C from "../abc/constants";
 import { Domain, NS_Private } from "../link/domain";
 import { BKIND_Method, TRAITS_Class, TRAITS_Instance } from "../link/traits";
@@ -62,6 +62,20 @@ import { identifierOf, stackName } from "./stack-names";
  */
 const FILL_SLOTS: u32 = 1 << 16;
 
+/** Where step is in a module: verifying its methods, writing F, writing A, or done. */
+const PHASE_Verify: u8 = 0;
+const PHASE_Methods: u8 = 1;
+const PHASE_Tables: u8 = 2;
+const PHASE_Done: u8 = 3;
+
+/**
+ * The garbage, roughly, in bytes, that verifying a byte of a body's code
+ * makes, and that writing a byte of a method's entry does, its text
+ * included, as measured on large ABCs: what step's budget counts.
+ */
+const VERIFY_COST: u64 = 5;
+const EMIT_COST: u64 = 3;
+
 @final
 export class ModuleEmitter {
   methods: MethodEmitter;
@@ -78,6 +92,16 @@ export class ModuleEmitter {
   fillChain: u32[] = [];
   /** aliases' scratch: the interface members whose aliases it wrote for a class. */
   aliasMembers: u32[] = [];
+  /** A module written a part at a time: what begin was given, and how far step has got. */
+  private hashes: string[] = [];
+  private linkedOnly: bool = false;
+  private lazy: bool = false;
+  private phase: u8 = PHASE_Done;
+  private verifier: Verifier | null = null;
+  private results: StaticArray<i32> = new StaticArray<i32>(0);
+  private cursor: u32 = 0;
+  /** The garbage the current step has made, roughly, in bytes. */
+  private spent: u64 = 0;
 
   constructor(domain: Domain, index: u32) {
     const methods = new MethodEmitter(domain, index);
@@ -101,9 +125,31 @@ export class ModuleEmitter {
     lazy: bool = false,
     results: StaticArray<i32> | null = null,
   ): void {
+    this.begin(hashes, linkedOnly, lazy, results);
+    while (!this.step(u64.MAX_VALUE, false)) {}
+  }
+
+  /**
+   * Start writing the module a part at a time, as module() writes it
+   * whole: its head now, then the rest by step. Garbage is collected only
+   * between calls from JS, so a large ABC written in one call held every
+   * method's garbage at once: parts written by calls of their own let the
+   * host collect each part's before the next, and hand out each part's
+   * text, so that codegen's memory, which never shrinks, holds one part's.
+   */
+  begin(
+    hashes: string[],
+    linkedOnly: bool = false,
+    lazy: bool = false,
+    results: StaticArray<i32> | null = null,
+  ): void {
     const out = this.out;
     out.reset();
     this.methods.map.reset();
+    this.hashes = hashes;
+    this.linkedOnly = linkedOnly;
+    this.lazy = lazy;
+    this.cursor = 0;
     out.text(lazy ? "export default function (rt, jit) {\n" : "export default function (rt) {\n");
     // A null check's throw, an expression where a check reads its register
     // (MethodEmitter.checkedRead), and an argument count's (checkEntry); not
@@ -123,7 +169,74 @@ export class ModuleEmitter {
       out.text("    return f(...args);\n  }; };\n");
     }
 
-    this.functions(lazy, results);
+    // Verified after the names are written, as before any method.
+    if (results === null) {
+      this.verifier = new Verifier(this.domain, this.index);
+      this.phase = PHASE_Verify;
+    } else {
+      this.results = results;
+      this.phase = PHASE_Methods;
+      out.text("  const F = [");
+    }
+  }
+
+  /**
+   * Write the next part of the module begin started, after `out`'s text,
+   * or in place of it with `fresh`: until about `budget` bytes of garbage
+   * are made (see VERIFY_COST and EMIT_COST), and at least one body or
+   * piece of the module. Whether the module is done.
+   */
+  step(budget: u64, fresh: bool): bool {
+    const out = this.out;
+    if (fresh) {
+      this.methods.map.rebase(out.length);
+      out.reset();
+    }
+
+    this.spent = 0;
+    if (this.phase === PHASE_Verify) {
+      const verifier = this.verifier;
+      if (verifier !== null) {
+        if (!verifier.run(max<u64>(budget / VERIFY_COST, 1))) {
+          return false;
+        }
+
+        this.spent = verifier.spent * VERIFY_COST;
+        this.results = verifier.results;
+      }
+
+      this.verifier = null;
+      this.phase = PHASE_Methods;
+      out.text("  const F = [");
+    }
+
+    if (this.phase === PHASE_Methods) {
+      if (!this.functions(budget)) {
+        return false;
+      }
+
+      out.text("];\n");
+      this.phase = PHASE_Tables;
+      // A's garbage is about a part's in a large ABC: a call of its own,
+      // unless this one has made little.
+      if (this.spent >= budget / 2) {
+        return false;
+      }
+    }
+
+    if (this.phase === PHASE_Tables) {
+      this.tables();
+      this.phase = PHASE_Done;
+    }
+
+    return true;
+  }
+
+  /** The module's A, after F: the ABC its classes, scripts and activations. */
+  private tables(): void {
+    const out = this.out;
+    const hashes = this.hashes;
+    const linkedOnly = this.linkedOnly;
     out.text("  const A = rt.abc({\n    hash: ");
     const self: u32 = linkedOnly ? 0 : this.index;
     this.text(self < <u32>hashes.length ? hashes[self] : "");
@@ -269,19 +382,28 @@ export class ModuleEmitter {
   }
 
   /**
-   * F: a factory per method, `(scope, sup) => function`, from its verified IR;
-   * a native binds by name, and a method that failed verification throws
-   * its VerifyError when called, as avmplus verifies on the first call.
+   * F's entries from the cursor on, a factory per method, `(scope, sup) =>
+   * function`, from its verified IR; a native binds by name, and a method
+   * that failed verification throws its VerifyError when called, as avmplus
+   * verifies on the first call. Until `spent` reaches `budget`: whether F
+   * is done.
    */
-  functions(lazy: bool = false, verified: StaticArray<i32> | null = null): void {
+  functions(budget: u64): bool {
     const out = this.out;
     const domain = this.domain;
     const abc = domain.abcs[this.index];
-    const results = verified === null ? verifyMethods(domain, this.index) : verified;
+    const results = this.results;
+    const lazy = this.lazy;
+    // Asked for again by each part, as another may have retargeted it.
     const decoder = bodyDecoder(domain, this.index);
     const start = domain.methodStart[this.index];
-    out.text("  const F = [");
-    for (let m: u32 = 0; m < abc.methodCount; m++) {
+    while (this.cursor < abc.methodCount) {
+      if (this.spent >= budget) {
+        return false;
+      }
+
+      const m = this.cursor++;
+      const before = out.length;
       out.text(m ? ",\n    " : "\n    ");
       const global = start + m;
       const body = abc.methodBody[m];
@@ -325,9 +447,10 @@ export class ModuleEmitter {
       this.entryStart.push(out.length);
       this.factory(m, global, decoder);
       this.entryEnd.push(out.length);
+      this.spent += <u64>(out.length - before) * EMIT_COST;
     }
 
-    out.text("];\n");
+    return true;
   }
 
   /**

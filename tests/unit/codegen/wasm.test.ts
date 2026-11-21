@@ -233,6 +233,54 @@ test("a module's source map and entries are written when asked for, from it alon
   assert.equal(testing.domainModuleEntries(), "");
 });
 
+test("a module written a part at a time is the module written whole", { skip }, async () => {
+  const builtin = new Uint8Array(await readFile(new URL("builtin.abc", generated)));
+  const utf8 = new TextDecoder();
+  // Its parts, each next one asked for until it is done.
+  const parts = (hashes: string, index: number, keep: boolean) => {
+    const got = [utf8.decode(testing.domainModuleBytes(hashes, index, keep, false))];
+    while (!testing.domainModuleDone()) {
+      got.push(utf8.decode(testing.domainModuleMoreBytes()));
+    }
+
+    return got;
+  };
+
+  testing.domainReset(50);
+  testing.domainAdd(builtin, true);
+  testing.domainAdd(script([0x24, 7, 0x24, 5, 0xa0, 0x48]), false);
+  const builtinModule = testing.domainModule("b", 0, false);
+  const module = testing.domainModule("b\na");
+  const sourceMap = testing.domainSourceMap();
+  const entries = testing.domainModuleEntries();
+  // The default budget: a small ABC in one part.
+  assert.deepEqual(parts("b\na", -1, false), [module]);
+
+  // The smallest: a part for each body verified and each entry written,
+  // so that the module is cut at every place it can be.
+  testing.domainPartBudget(1);
+  try {
+    for (const keep of [false, true]) {
+      assert.equal(parts("b\na", -1, keep).join(""), module, `kept: ${keep}`);
+      assert.equal(testing.domainSourceMap(), keep ? sourceMap : "");
+      assert.equal(testing.domainModuleEntries(), keep ? entries : "");
+    }
+
+    const builtinParts = parts("b", 0, false);
+    assert.equal(builtinParts.join(""), builtinModule);
+    assert.ok(builtinParts.length > 1000, `${builtinParts.length} parts`);
+
+    // Left as the domain changes: nothing more to hand out.
+    testing.domainModuleBytes("b\na", -1, false, false);
+    assert.equal(testing.domainModuleDone(), false);
+    testing.domainAdd(script([0x47]), false);
+    assert.equal(testing.domainModuleDone(), true);
+    assert.equal(testing.domainModuleMoreBytes().length, 0);
+  } finally {
+    testing.domainPartBudget(0);
+  }
+});
+
 test("compiling before an ABC is added is an error, not a trap", async () => {
   const codegen = await createCodegen(module);
   codegen.reset();

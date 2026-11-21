@@ -35,6 +35,23 @@ export class SourceMap {
     this.line.length = count;
   }
 
+  /**
+   * Forget every mark but the last, made `by` bytes earlier, as the text
+   * before it is handed out (ModuleEmitter.step): marking compares the
+   * last mark's offset with the next's, and the two stay as far apart.
+   */
+  rebase(by: u32): void {
+    const n = this.offset.length;
+    if (n === 0) {
+      return;
+    }
+
+    this.offset[0] = this.offset[n - 1] - by;
+    this.file[0] = this.file[n - 1];
+    this.line[0] = this.line[n - 1];
+    this.truncate(1);
+  }
+
   /** The marks from `from` on moved `by` bytes later, for text put in before them. */
   shift(from: i32, by: u32): void {
     for (let m = from; m < this.offset.length; m++) {

@@ -376,6 +376,13 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     );
   }
 
+  // Or before it wrote a module a part at a time.
+  if (!WebAssembly.Module.exports(module).some((e) => e.name === "domainModuleMoreBytes")) {
+    throw new Error(
+      "codegen.wasm has no domainModuleMoreBytes export, which the wrapper expects: it is older than the wrapper",
+    );
+  }
+
   // codegen.wasm uses AssemblyScript's minimal runtime, which collects
   // garbage only when asked. Nothing runs in wasm between calls, so that is
   // when: every COLLECT_EVERY calls, and after a call that grew memory.
@@ -415,10 +422,24 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     // Its bytes decoded here: lifted as a string, a module of megabytes took
     // longer than compiling it. The emitter writes only ASCII, which decodes
     // alike either way, and to a string the engine keeps a byte a character.
-    const address = lazy
-      ? wasm.domainLazyModuleBytes(named.join("\n"), at)
-      : wasm.domainModuleBytes(named.join("\n"), at, keep, true);
-    const module = collected(handed(address, wasm.outputLength()), lazy);
+    let module: string;
+    if (lazy) {
+      const address = wasm.domainLazyModuleBytes(named.join("\n"), at);
+      module = collected(handed(address, wasm.outputLength()), true);
+    } else {
+      // A large ABC's module comes a part at a time, each part's garbage
+      // collected before the next is written (see domainModuleBytes).
+      const parts = [
+        handed(wasm.domainModuleBytes(named.join("\n"), at, keep, true), wasm.outputLength()),
+      ];
+      while (!wasm.domainModuleDone()) {
+        wasm.__collect();
+        parts.push(handed(wasm.domainModuleMoreBytes(), wasm.outputLength()));
+      }
+
+      module = collected(parts.length === 1 ? parts[0] : parts.join(""), parts.length > 1);
+    }
+
     if (module === "") {
       throw new Error(`ABC ${index}: its application domain was dropped`);
     }

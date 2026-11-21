@@ -53,6 +53,7 @@ let written: ModuleEmitter | null = null;
  * series, Flash Player's or AIR's, is the domain's.
  */
 export function domainReset(apiVersion: i32): void {
+  abandon();
   domain = new Domain();
   lazyVerified.clear();
   domain.apiVersion = <u8>apiVersion;
@@ -67,6 +68,7 @@ export function domainReset(apiVersion: i32): void {
  * rejected with; -1 for an application domain never made or dropped.
  */
 export function domainAdd(bytes: Uint8Array, builtin: bool, appDomain: i32 = 0): i32 {
+  abandon();
   if (!isLive(appDomain)) {
     return -1;
   }
@@ -97,6 +99,7 @@ function isLive(appDomain: i32): bool {
  * by domainCompact.
  */
 export function domainDrop(appDomain: i32): void {
+  abandon();
   if (appDomain >= 0) {
     drop(domain, <u32>appDomain);
     pruneLazyVerification();
@@ -111,6 +114,7 @@ export function domainDrop(appDomain: i32): void {
  * bytes to give again.
  */
 export function domainEvict(appDomain: i32): void {
+  abandon();
   if (appDomain >= 0) {
     evict(domain, <u32>appDomain);
     pruneLazyVerification();
@@ -130,6 +134,7 @@ export function domainState(appDomain: i32): i32 {
  * they were rejected with, or -1 if the ABC is not of an evicted domain.
  */
 export function domainRestore(index: i32, bytes: Uint8Array): i32 {
+  abandon();
   if (index < 0) {
     return -1;
   }
@@ -148,6 +153,7 @@ export function domainRestore(index: i32, bytes: Uint8Array): i32 {
  * evicted, if they cannot be.
  */
 export function domainRevive(appDomain: i32): i32 {
+  abandon();
   if (appDomain < 0) {
     return -1;
   }
@@ -184,6 +190,7 @@ export function domainCompact(): bool {
  * or not, as the fuzzers ask; false, leaving it, if one did not link.
  */
 export function domainRebuild(): bool {
+  abandon();
   const fresh = rebuilt(domain);
   if (fresh === null) {
     return false;
@@ -215,6 +222,7 @@ export function domainFound(
   abc: i32,
   asType: bool,
 ): void {
+  abandon();
   verified = null;
   domain.addFound(<u32>appDomain, <u8>nsKind, uri, name, <u32>abc, asType);
 }
@@ -281,7 +289,13 @@ export function domainModule(
  * domainModule's module as its UTF-8 bytes, which the host decodes: a
  * module of megabytes is decoded there many times faster than made a
  * string here and lifted a code unit at a time. Handed out where they are
- * (handOut), none where it is "".
+ * (handOut), none where it is "". Only its first part, if domainModuleDone
+ * is then false: domainModuleMoreBytes hands out each next, a call each,
+ * so that the host collects each part's garbage before the next, and
+ * codegen's memory, which never shrinks, need hold no more than a part
+ * (see ModuleEmitter.begin). Nothing else may be called in between but
+ * __collect: anything else that compiles or changes the domain abandons
+ * the module, what it fixed in the domain so far left as it is.
  */
 export function domainModuleBytes(
   hashes: string = "",
@@ -289,12 +303,100 @@ export function domainModuleBytes(
   keep: bool = true,
   linkedOnly: bool = false,
 ): usize {
-  return handOut(writeModule(hashes, index, keep, linkedOnly));
+  const emitter = startModule(hashes, index, keep, linkedOnly);
+  if (emitter === null) {
+    return handOut(null);
+  }
+
+  stepModule(emitter, false);
+  return handOut(emitter.out);
+}
+
+/** The next part of the module domainModuleBytes started, handed out as it hands out the first; none once it is done. */
+export function domainModuleMoreBytes(): usize {
+  const emitter = pending;
+  if (emitter === null) {
+    return handOut(null);
+  }
+
+  // A module kept keeps all its text, for its source map and entries.
+  const from = pendingKeep ? emitter.out.length : 0;
+  stepModule(emitter, !pendingKeep);
+  return handOut(emitter.out, from);
+}
+
+/** Whether the module domainModuleBytes started is done: no part of it is left to hand out, or it was abandoned. */
+export function domainModuleDone(): bool {
+  return pending === null;
 }
 
 /** A module's tables and lazy method factories, handed out as domainModuleBytes's; method entries are emitted separately. */
 export function domainLazyModuleBytes(hashes: string = "", index: i32 = -1): usize {
   return handOut(writeModule(hashes, index, false, true, true));
+}
+
+/**
+ * The bytes of garbage, roughly, a part of a module makes (see
+ * ModuleEmitter.step). A collection between parts takes about half a
+ * millisecond with a large application's tables live, so smaller parts
+ * cost time: at 2 MiB as3pb and the LZ4 program compiled 3 to 4% slower
+ * than whole, and the player's libraries in 8 MiB of memory where whole
+ * they took 32; at 4 MiB the libraries took 16, and at 1 MiB no less
+ * than at 2.
+ */
+const PART_BUDGET: u64 = 2 << 20;
+
+let partBudget = PART_BUDGET;
+
+/** For tests: each part's budget, as step counts it; PART_BUDGET for 0 or less. Not in codegen.wasm. */
+export function domainPartBudget(bytes: i32): void {
+  partBudget = bytes > 0 ? <u64>bytes : PART_BUDGET;
+}
+
+/** The module being written a part at a time, what it was started with, and the domain's rows before it. */
+let pending: ModuleEmitter | null = null;
+let pendingIndex: u32 = 0;
+let pendingKeep: bool = false;
+let pendingRows: u64 = 0;
+
+/** Leave the module being written a part at a time, as the domain changes under it. */
+function abandon(): void {
+  pending = null;
+}
+
+function startModule(
+  hashes: string,
+  index: i32,
+  keep: bool,
+  linkedOnly: bool,
+): ModuleEmitter | null {
+  written = null;
+  abandon();
+  // No ABC, no module: the caller asked before adding one.
+  const at = abcIndex(index);
+  if (at < 0) {
+    return null;
+  }
+
+  const emitter = new ModuleEmitter(domain, <u32>at);
+  pending = emitter;
+  pendingIndex = <u32>at;
+  pendingKeep = keep;
+  pendingRows = domain.rows();
+  emitter.begin(hashes.length ? hashes.split("\n") : [], linkedOnly);
+  return emitter;
+}
+
+function stepModule(emitter: ModuleEmitter, fresh: bool): void {
+  if (!emitter.step(partBudget, fresh)) {
+    return;
+  }
+
+  pending = null;
+  weigh(domain, pendingIndex, pendingRows);
+  if (pendingKeep) {
+    written = emitter;
+  }
 }
 
 function writeModule(
@@ -305,6 +407,7 @@ function writeModule(
   lazy: bool = false,
 ): Output | null {
   written = null;
+  abandon();
   // No ABC, no module: the caller asked before adding one.
   const at = abcIndex(index);
   if (at < 0) {
@@ -382,6 +485,7 @@ export function domainEmitEachBytes(bodies: string, reuse: bool, which: i32 = -1
 }
 
 function emitEach(bodies: string, reuse: bool, which: i32): Output {
+  abandon();
   const at = abcIndex(which);
   if (at < 0) {
     return new Output();
@@ -652,6 +756,7 @@ export function domainLogSince(mark: i32, index: i32 = -1): string {
  * out an error; the entries before it are done.
  */
 export function domainReplay(log: string, index: i32 = -1): bool {
+  abandon();
   const at = abcIndex(index);
   if (at < 0) {
     return false;

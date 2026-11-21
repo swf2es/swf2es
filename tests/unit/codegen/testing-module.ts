@@ -15,6 +15,7 @@ const COLLECT_EVERY = 64;
 /** The exports that hand UTF-8 out where it is in memory, by address, outputLength bytes of it. */
 const HANDED_OUT = new Set([
   "domainModuleBytes",
+  "domainModuleMoreBytes",
   "domainLazyModuleBytes",
   "domainEmitEachBytes",
   "actionsModuleBytes",

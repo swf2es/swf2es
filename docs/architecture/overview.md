@@ -36,10 +36,19 @@ compiler's API; besides `identity`, `epoch`, `abcVersion`, `usage` and
 - `context`, `revision`, `compileModuleLogged` and `replay` serve a cache
   of modules (see [Caching modules](modules.md#caching-modules)).
 
-The source map and the entries are written each in a call of its own,
-after the module's garbage is collected, and only when asked for: written
-with the module, a large ABC's entries alone took codegen's memory from 128
-to 256 MiB, which wasm never gives back. All go through
+A module is written a part at a time, a call each, the wrapper collecting
+each part's garbage and decoding its text before it asks for the next:
+verifying an ABC's methods and writing all their entries in one call
+held every method's garbage and the whole module's text at once, and
+wasm never gives memory back. A part makes about 2 MiB of garbage, so
+the player's libraries and as3pb each compile in 8 MiB where they took
+32, and a large application's compile little more than the tables it
+keeps live. The parts are cut only between bodies, so the module
+is the same however it is cut (`ModuleEmitter.begin` and `step`). The
+source map and the entries are written each in a call of its own, after
+the module's garbage is collected, and only when asked for: written with
+the module, a large ABC's entries alone took codegen's memory from 128
+to 256 MiB. All go through
 `assembly/compile.ts`, which the test build (`assembly/testing.ts`, with
 the reader, verifier and emitter exposed for the node tests by its parts in
 `assembly/testing/`) exports too,
