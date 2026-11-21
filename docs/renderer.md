@@ -287,11 +287,12 @@ whose entries go once unused for their idle frames:
   seconds of a busy SWF. An atlas left empty is filled again from its
   start, in the buffers it has. Advanced text's glyph quads are kept and
   moved alike in an atlas of their own. On a busy real-content recording
-  the arrays let go of were 17 to 23 MB, for 4 to 6 MB of indices kept,
-  and the page's array buffers after a full collection went from 88 to
-  95 MiB to 75 to 77; on `bench.ts --still-shapes 2000`, 2,000 distinct
-  shapes standing still, from 43.7 to 20.1 MB, and on `--town 200` from
-  35.8 to 28.2 MB.
+  the arrays let go of, of geometries too large to merge, were about 12
+  to 15 MB, and the page's array buffers after a full collection went
+  from 88 to 92 MiB to 79 to 81; on `bench.ts --still-shapes 2000`, 2,000
+  distinct shapes standing still, from 41.7 to 33.8 MB, two thirds of
+  its geometries' bytes being in ones small enough to merge; `--town 200`, all of whose
+  geometries merge, holds what it did.
 - **Textures** (`textures.ts`): bitmaps, device text, gradients, their
   pixels uploaded and then let go of on the CPU
   (`webgl/gpu-textures.ts`).

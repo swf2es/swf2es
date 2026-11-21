@@ -272,6 +272,7 @@ export class GeometryAtlas {
     this.places[id] = null;
     // Its geometry's own, where it has not settled: a settling entry would keep them alive.
     place.local = NO_INDICES;
+    place.batch = null;
     if (place.glyphs) {
       this.glyphs.live -= place.vertices;
       this.glyphs.holes += place.vertices;
