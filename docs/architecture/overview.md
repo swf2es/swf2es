@@ -97,7 +97,7 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `native`  | the WebAssembly modules, each a sub-path with its own binary: `compress` (zlib and LZMA), `mp3` (minimp3), `audio` (ADPCM and Nellymoser, in Zig), `render` (fills with libtess2, lines and BitmapData's CPU kernels) and `atf` (Stage3D's ATF textures, their JPEG XR images by jxrlib), C and Zig built by one Zig project | — |
+| `native`  | the WebAssembly modules, each a sub-path with its own binary: `compress` (zlib and LZMA), `mp3` (minimp3), `audio` (ADPCM and Nellymoser, in Zig), `render` (fills with libtess2, and lyon for densely crossing ones, lines and BitmapData's CPU kernels) and `atf` (Stage3D's ATF textures, their JPEG XR images by jxrlib), C and Zig built by one Zig project | — |
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | native |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
@@ -298,7 +298,11 @@ Third-party C swf2es forks lives in `vendor/`, a git submodule each, kept
 apart from `packages/` because it is neither swf2es's code nor under its
 licence: zlib, the LZMA SDK, minimp3, libtess2 and jxrlib, compiled into
 `native`'s binaries (above), never linked by pnpm. The boundaries test
-checks that `vendor/` holds those alone.
+checks that `vendor/` holds those alone. lyon's fill tessellator, which is
+Rust, is not there: [swf2es/tessellate](https://github.com/swf2es/tessellate)
+builds it into a wasm32 static library, and `native` checks in that
+release's archive with its digest and notices
+(`packages/native/src/render/lyon/`), so swf2es builds no Rust.
 
 ## Milestone 1
 
