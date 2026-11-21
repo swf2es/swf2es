@@ -37,3 +37,11 @@ test("every SWF version maps to a version ABCs run at, of its series, never lowe
 
   assert.equal(ok, true);
 });
+
+test("an AIR root never runs at 0, which the compiler and the cache read as Flash Player's", () => {
+  const swfs = [-Infinity, -1, 0, 1, 8.9, 9, 9.5, 10, 31, 1e9, Infinity, Number.NaN];
+  for (const swf of swfs) {
+    assert.notEqual(apiVersionOf(swf, true), 0, `SWF ${swf}`);
+    assert.ok(isAirApiVersion(apiVersionOf(swf, true)), `SWF ${swf}`);
+  }
+});

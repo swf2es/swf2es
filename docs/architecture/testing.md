@@ -51,13 +51,23 @@
   Scripting's `apiVersion`), which is the player's default, the latest.
   A case marked `root` runs as the application's content instead
   (`FlashJob.root`, `node oracle/flash.ts --root file.swf [frames]`), at
-  its own SWF version, and the player plays it at that version
-  (`versioned-isplaying`, a SWF 12 class with its own `isPlaying`, which
-  the harness refuses with VerifyError #1053). With no harness around it,
+  its own SWF version, and the player plays it at the version it takes
+  from the SWF's header (Scripting's `apiVersion: "root"`):
+  `versioned-isplaying`, a SWF 12 class with its own `isPlaying`, which
+  the harness refuses with VerifyError #1053; `versioned-loaded`, that
+  class in a SWF 30 loaded by a SWF 12 root, which runs it at the root's
+  (loaded by a later root, adl stops at its VerifyError with the dialog); `versioned-worker`, whose
+  worker adl runs at the latest, not at its root's. adl runs a root in AIR's series of versions and
+  the page in Flash Player's, which differ for SWF 9 and 10 and for AIR's
+  own names: a case there is `air` too. With no harness around it,
   `oracle/flash/Swf2esOracleRoot.as`'s ABC, put first in its SWF, marks
-  its traces and quits after its frames: such a case is traced only, and
-  an error it leaves uncaught before its first frame ends stops it with
-  AIR's dialog. adl is not in CI (here it runs the Windows AIR
+  its traces and quits after its frames: such a case is traced only, of
+  an AS3 SWF, and runs two frames at least, as the helper's end of the
+  first frame comes before the EXIT_FRAME listeners the SWF adds in it
+  (`run.ts` and `runFlash` refuse others, the latter for that job alone).
+  An error it leaves uncaught before its first frame ends stops it with
+  AIR's dialog, and it comes back incomplete, not run again; a root job
+  times out a while after its last output. adl is not in CI (here it runs the Windows AIR
   runtime under Wine), so what the player's tests compare against is drawn
   once and committed (`tests/player/references`, `node tests/player/run.ts
   --update`); CI needs only Chrome.
@@ -77,8 +87,10 @@
   debugger player, since Ruffle recorded its traces with one and adl is
   one: an uncaught error's line carries its text, "Error #1010: A term is
   undefined and has no properties.", where the release player's and
-  avmshell's has the number alone. `baseline.json` records each test's
-  standing, as `tests/tamarin/swf2es-baseline.json` records swf2es's on
+  avmshell's has the number alone. Flash recorded each test as its own
+  root, so the player plays each at its root's API version (`apiVersion:
+  "root"`), not at the player's default, the latest. `baseline.json`
+  records each test's standing, as `tests/tamarin/swf2es-baseline.json` records swf2es's on
   Tamarin: the lines matched before the first difference, of how many,
   and what stopped the player, if anything. A change may not lower a
   standing, and one that raises it updates the baseline with
@@ -101,7 +113,7 @@
   A test that does not finish in its time is a timeout, a standing of its
   own. The corpus is fetched, not committed: CI's `corpus` job, beside
   the test jobs on every pull request and every push to main or dev,
-  fetches it at
+  plays it checked (`SWF2ES_CHECKED=1`, below), fetches it at
   `RUFFLE_COMMIT`, caches it by that commit, and fails on a lowered
   standing, naming the test, its standing before and after, and where its
   trace parts from Flash's. It is what says, in order of what real SWFs
@@ -144,7 +156,16 @@ work beside it and throws where the two differ, on in the checked build
   advances before a late mark;
 - `Scripting.checkPicks` makes a full pick, without kept bounds, beside
   each pick that used them, and picks at a frame end that would have
-  skipped it.
+  skipped it;
+- `RenderView.checkSpans` walks each object whose span of the scene list
+  the frame took from the frame before, and compares the two entry for
+  entry and row for row ([renderer.md](../renderer.md#spans)).
+  `tests/player/spans-fuzz.ts` feeds it seeded random changes (moves,
+  shapes drawn anew, added and removed, objects moved to other parents and
+  places, visibility, colour, masks, bitmap caches, blends, BitmapData
+  draws, the view's scale and viewport) and compares each frame with a
+  view that takes no span, checked and unchecked; `pnpm test` runs 60
+  seeds of 40 frames, and its arguments run more.
 
 Unit tests are checked only when `tests/unit/checked.ts` is loaded, as
 `tests/unit`'s test script and `pnpm test:checked` do; `SWF2ES_CHECKED=1

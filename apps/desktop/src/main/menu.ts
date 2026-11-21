@@ -1,10 +1,19 @@
 // The application menu, built again as what plays and the settings change.
-import { app, Menu, type MenuItemConstructorOptions } from "electron";
+import { app, Menu, type MenuItemConstructorOptions, nativeTheme } from "electron";
 import { capturing, stopCapture } from "./capture.ts";
 import { chooseLibrary, refuse, resetLibrary, showOpenDialog, showUrlDialog } from "./dialogs.ts";
 import { closeMovie, current, openEntry, reloadMovie } from "./open.ts";
 import { httpCache, settings, window } from "./state.ts";
 import { network } from "./switches.ts";
+import { type Theme, themeMenu } from "./theme.ts";
+
+/** View › Theme's choice: the look from now on, over --theme's, and kept for the next run. */
+function chooseTheme(theme: Theme): void {
+  nativeTheme.themeSource = theme;
+  if (!settings.setTheme(theme)) {
+    refuse("The settings could not be saved.", "The theme holds until you quit.");
+  }
+}
 
 export function buildMenu(): void {
   const recent = settings.settings.recent;
@@ -95,6 +104,7 @@ export function buildMenu(): void {
           click: stopCapture,
         },
         { role: "togglefullscreen", accelerator: "F11" },
+        themeMenu(nativeTheme.themeSource, chooseTheme),
         { type: "separator" },
         {
           id: "stage3d",

@@ -1,7 +1,8 @@
 // Checks bench.ts --census in Chrome (page.ts, installCensus): on masked lists, with and without
 // WEBGL_multi_draw, and on blends drawn direct, what it counted of the runs it read from the
-// renderer must add up to the sub-draws GL was asked for, and a walk of what changed must visit
-// no more than the walk did. A renaming in the renderer that the census reads throws here.
+// renderer must add up to the sub-draws GL was asked for, a walk of what changed must visit no
+// more than the walk did, and a still scene's walk must take spans. A renaming in the renderer
+// that the census reads throws here.
 //
 //   node tests/player/census-check.ts
 import { execFileSync } from "node:child_process";
@@ -61,6 +62,14 @@ same(
   blends["path.blended"] ?? 0,
   blends["blend.direct"] ?? 0,
 );
+
+// A scene that mostly stands still takes most of its objects' spans whole (docs/renderer.md, "Spans").
+const crowd = census("--still-crowd", "64");
+if (!crowd["walk.copied"] || crowd["walk.copied"] < crowd["walk.visited"] / 4) {
+  failures.push(
+    `--still-crowd 64: took ${crowd["walk.copied"] ?? 0} spans, walking ${crowd["walk.visited"]} objects`,
+  );
+}
 
 if (failures.length > 0) {
   console.error(`census-check: ${failures.join("; ")}`);

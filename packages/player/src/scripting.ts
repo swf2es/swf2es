@@ -10,7 +10,7 @@
 // goings, loads and timers.
 
 import { AIR_API_VERSION, API_VERSION, type Codegen } from "@swf2es/codegen";
-import { apiVersionOf, type Swf } from "@swf2es/format";
+import { apiVersionOf, isAirApiVersion, type Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "./as3/types.js";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
@@ -95,6 +95,60 @@ export { airLibrary, builtinLibrary, playerglobalLibrary };
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
+
+/**
+ * The API version a player's SWFs run at, of the series `air` picks.
+ * Flash runs the root SWF and everything it loads at the root's
+ * (apiVersionOf), which hides what the root's version predates.
+ * - "latest", the default: the series' latest, whatever the root.
+ * - "root": the root's, from its SWF version, Scripting's `swfVersion`. An
+ *   AIR application (one given `application`) stays at the latest until
+ *   adl has shown whether its descriptor's namespace gates the API.
+ * - a SWF version: a root of that version's, for content whose real root
+ *   was another, as a wrapper of another version.
+ * A background worker runs at the latest whatever its primordial's, as adl
+ * runs one, its root's version or its own SWF's notwithstanding.
+ */
+export type ApiVersionOption = "latest" | "root" | number;
+
+/** The API version a Scripting's runtime and compiler run at. */
+function runtimeApiVersion(
+  options: {
+    apiVersion?: ApiVersionOption;
+    swfVersion?: number;
+    application?: AirApplication | null;
+    workerParent?: ParentLink | null;
+  },
+  air: boolean,
+): number {
+  const option = options.apiVersion ?? "latest";
+  let version: number;
+  if (
+    options.workerParent ||
+    option === "latest" ||
+    (option === "root" && air && options.application)
+  ) {
+    version = air ? AIR_API_VERSION : API_VERSION;
+  } else if (option === "root") {
+    if (options.swfVersion === undefined) {
+      throw new TypeError('swf2es: apiVersion "root" needs the root\'s swfVersion');
+    }
+
+    version = apiVersionOf(options.swfVersion, air);
+  } else {
+    version = apiVersionOf(option, air);
+  }
+
+  // A version of the other series would name other names: for AIR, 0 is
+  // Flash Player's VM_ALLVERSIONS in the compiler and the module cache.
+  if (isAirApiVersion(version) !== air) {
+    throw new RangeError(
+      `swf2es: API version ${version} is not of ${air ? "AIR" : "Flash Player"}'s series`,
+    );
+  }
+
+  return version;
+}
 
 /** AS3 classes placed children are instances of when SymbolClass binds none. */
 const DEFAULT_CLASS = {
@@ -407,13 +461,8 @@ export class Scripting {
   constructor(
     readonly codegen: Codegen,
     options: Omit<avm2.RuntimeOptions, "apiVersion"> & {
-      /**
-       * The API version the SWFs run at, of the series `air` picks: "latest",
-       * its latest, by default; or a root SWF's version, which Flash runs
-       * the root and everything it loads at the API version of
-       * (apiVersionOf), as the tests pin a SWF to their oracle's root's.
-       */
-      apiVersion?: "latest" | number;
+      /** The API version the SWFs run at (ApiVersionOption): "latest" by default. */
+      apiVersion?: ApiVersionOption;
       fetch?: FetchHost;
       url?: string;
       localConnections?: LocalConnections;
@@ -568,7 +617,9 @@ export class Scripting {
     );
     this.fsCommand = options.fsCommand ?? null;
     this.workers = new Workers(this, options);
-    if (options.handedModules) {
+    const apiVersion = runtimeApiVersion(options, options.air ?? false);
+    // Modules compiled at another version than this VM's would see other names.
+    if (options.handedModules && options.handedModules.apiVersion === apiVersion) {
       const handover = new ModuleHandover(options.handedModules);
       this.code.handover = handover;
       this.codegen = handover.guard(codegen);
@@ -609,12 +660,7 @@ export class Scripting {
         // What a SWF's catch swallowed is still said, as an uncaught one is.
         onUnsupported: (message) => console.warn(`${message} (caught by the SWF)`),
         ...options,
-        apiVersion:
-          options.apiVersion === undefined || options.apiVersion === "latest"
-            ? this.air
-              ? AIR_API_VERSION
-              : API_VERSION
-            : apiVersionOf(options.apiVersion, this.air),
+        apiVersion,
       },
     );
     this.mainDomain = this.rt.childDomain(this.rt.root);

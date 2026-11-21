@@ -1,0 +1,2 @@
+primordial stopAllMovieClips 0 browserZoomFactor 0
+worker stopAllMovieClips 1 browserZoomFactor 1

@@ -3,10 +3,11 @@
 import { readFileSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { createCodegen } from "@swf2es/codegen";
+import { API_VERSION, createCodegen } from "@swf2es/codegen";
+import { apiVersionOf } from "@swf2es/format";
 import { builtinLibrary, createRuntime, type ShellFiles } from "@swf2es/runtime/avm2";
 import { InputError, RejectedError, readInput } from "../aot.js";
-import { COMMON_OPTIONS, COMMON_USAGE, type Command, parse } from "../args.js";
+import { apiVersionArgument, COMMON_OPTIONS, COMMON_USAGE, type Command, parse } from "../args.js";
 import { codegenModule, read, readLibraries } from "../files.js";
 import { fail, usageError } from "../output.js";
 import { runShell } from "../shell.js";
@@ -28,6 +29,12 @@ options:
                        the order given; repeat for each. Default:
                        avmshell's builtin.abc and shell_toplevel.abc,
                        which swf2es ships
+  --api <version>      the API version the ABCs run at: latest, Flash
+                       Player's, by default; or a SWF version, that of a
+                       root of that version, as avmshell's -api SWF_<n>
+                       (VM_ALLVERSIONS for 9 and below, FP_10_1 for 10,
+                       FP_10_2 for 11), which hides from them what it
+                       predates. Their workers run at it too
 ${COMMON_USAGE}
 
 exit status: 0 when every ABC ran to its end, 1 as avmshell's for a
@@ -45,6 +52,7 @@ const SWF_SIGNATURES = new Set(["FWS", "CWS", "ZWS"]);
 
 const OPTIONS = {
   lib: { type: "string", multiple: true },
+  api: { type: "string" },
   ...COMMON_OPTIONS,
 } as const;
 
@@ -89,6 +97,9 @@ export const run: Command = {
       usageError("expected an ABC file to run", "run");
     }
 
+    const api = apiVersionArgument(values.api, "run", false);
+    const apiVersion = typeof api === "number" ? apiVersionOf(api) : API_VERSION;
+
     const abcs: { name: string; abc: Uint8Array }[] = [];
     for (const file of positionals) {
       const abc = await read(file, "input");
@@ -110,7 +121,7 @@ export const run: Command = {
     const compiler = await createCodegen(codegen);
     // A line at a time, as avmshell's console writes it; its workers' threads write their own.
     const print = (line: string) => writeSync(1, `${line}\n`);
-    const threads = nodeShellThreads({ codegen, libraries: libs, abcs });
+    const threads = nodeShellThreads({ codegen, libraries: libs, abcs, apiVersion });
     try {
       process.exitCode = await runShell(libs, abcs, {
         compiler,
@@ -118,6 +129,7 @@ export const run: Command = {
         print,
         files: workingFiles(),
         workers: threads.host,
+        apiVersion,
       });
       await threads.close();
     } catch (e) {

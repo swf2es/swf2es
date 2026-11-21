@@ -92,6 +92,11 @@
 // one child each frame; the rest stay still, as scenery beside animated art.
 // --toggle-branches N removes and reattaches those N branches every --toggle-every K frames.
 //
+// --still-crowd N plays instead a large scene that mostly stands still: N clips of 12 outlined
+// shapes, in 8 groups, as a crowded room's scenery and idle characters are, of which one in 32
+// plays, moving one part and swapping another's shape each frame, as a few animated characters
+// do: what walking a scene costs when 1% of its objects change (docs/renderer.md, "Spans").
+//
 // --town N plays instead a busy town: N characters, each of its own parts
 // (outlined in hairlines, as a game's are), on loops of different lengths:
 // every eighth one's body breathing, a uniform pulse of a few percent, limbs that turn
@@ -188,7 +193,7 @@
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --blends N [--blend-fills K] [--blend-clips]
-//     | --scripted N [--still] | --town N
+//     | --scripted N [--still] | --town N | --still-crowd N
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
 //     | --triangles N [--culled] | --redraw N | --burst N [--every K] | --vectors N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--census] [--pace MS]
@@ -250,6 +255,7 @@ const blendClips = args.includes("--blend-clips");
 const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
 const town = option("town", 0);
+const stillCrowd = option("still-crowd", 0);
 const scrolled = option("scroll", 0);
 const stamps = option("stamps", 0);
 const readback = option("readback", 0);
@@ -1628,6 +1634,68 @@ const quantile = (values: number[], q: number) => {
   return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0;
 };
 
+/**
+ * --still-crowd: `count` clips of 12 outlined shapes in 8 groups, each clip a quarter of its size and
+ * coloured, every 32nd one playing a loop of 24 frames that moves a part and swaps another's shape.
+ */
+function stillCrowdSwf(count: number): Uint8Array {
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
+  for (let id = 1; id <= 8; id++) {
+    tags.push(character(id));
+  }
+
+  // A clip's 12 parts, 4 across and 3 down, 800 twips apart.
+  const parts = (): Uint8Array[] =>
+    Array.from({ length: 12 }, (_, i) =>
+      w.place({
+        depth: i + 1,
+        character: 1 + ((i * 3) % 8),
+        matrix: { tx: (i % 4) * 800 + 400, ty: Math.floor(i / 4) * 800 + 400 },
+      }),
+    );
+  tags.push(w.sprite(20, 1, [...parts(), w.showFrame(), w.end()]));
+  const playing = [...parts(), w.showFrame()];
+  for (let frame = 1; frame < 24; frame++) {
+    playing.push(
+      w.place({ depth: 1, move: true, matrix: { tx: 400 + (frame % 8) * 40, ty: 400 } }),
+      w.place({ depth: 6, move: true, character: 1 + (frame % 8) }),
+      w.showFrame(),
+    );
+  }
+
+  tags.push(w.sprite(21, 24, [...playing, w.end()]));
+
+  // Clips on a grid over the stage, a cell each, a clip 3200 by 2400 twips scaled into it.
+  const across = Math.max(1, Math.ceil(Math.sqrt((count * WIDTH) / HEIGHT)));
+  const cell = (WIDTH * TWIPS) / across;
+  const scale = cell / 3200;
+  const groups = 8;
+  for (let g = 0; g < groups; g++) {
+    const contents: Uint8Array[] = [];
+    for (let k = g, depth = 1; k < count; k += groups, depth++) {
+      contents.push(
+        w.place({
+          depth,
+          character: k % 32 === 0 ? 21 : 20,
+          matrix: {
+            a: scale,
+            d: scale,
+            tx: Math.round((k % across) * cell),
+            ty: Math.round(Math.floor(k / across) * cell * 0.75),
+          },
+          colorTransform: { add: [(k * 37) % 64, -((k * 17) % 48), (k * 29) % 64, 0] },
+        }),
+      );
+    }
+
+    contents.push(w.showFrame(), w.end());
+    tags.push(w.sprite(30 + g, 1, contents), w.place({ depth: g + 1, character: 30 + g }));
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
 /** Detailed, coloured branches whose independent timelines should not repack each other's art. */
 function branchSwf(count: number): Uint8Array {
   const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
@@ -1932,36 +2000,38 @@ const swf =
                     ? stampsSwf(stamps)
                     : town > 0
                       ? townSwf(town)
-                      : toggleBranches > 0
-                        ? branchSwf(toggleBranches)
-                        : toggle > 0
-                          ? toggleSwf(toggle)
-                          : toggleStatic > 0
-                            ? toggleStaticSwf(toggleStatic)
-                            : scripted > 0
-                              ? scriptedSwf(scripted, args.includes("--still"))
-                              : pulse > 0
-                                ? pulseSwf(
-                                    pulse,
-                                    option("loop", 96),
-                                    option("line", 1),
-                                    option("squash", 1),
-                                  )
-                                : masks > 0
-                                  ? masksSwf(masks, args.includes("--unmasked"))
-                                  : blends > 0
-                                    ? blendsSwf(blends, blendFills, blendClips)
-                                    : branches > 0
-                                      ? branchSwf(branches)
-                                      : rig > 0
-                                        ? rigSwf(
-                                            rig,
-                                            args.includes("--swap"),
-                                            args.includes("--fresh"),
-                                            args.includes("--blurred") || filtered > 0,
-                                            args.includes("--glide"),
-                                          )
-                                        : synthetic();
+                      : stillCrowd > 0
+                        ? stillCrowdSwf(stillCrowd)
+                        : toggleBranches > 0
+                          ? branchSwf(toggleBranches)
+                          : toggle > 0
+                            ? toggleSwf(toggle)
+                            : toggleStatic > 0
+                              ? toggleStaticSwf(toggleStatic)
+                              : scripted > 0
+                                ? scriptedSwf(scripted, args.includes("--still"))
+                                : pulse > 0
+                                  ? pulseSwf(
+                                      pulse,
+                                      option("loop", 96),
+                                      option("line", 1),
+                                      option("squash", 1),
+                                    )
+                                  : masks > 0
+                                    ? masksSwf(masks, args.includes("--unmasked"))
+                                    : blends > 0
+                                      ? blendsSwf(blends, blendFills, blendClips)
+                                      : branches > 0
+                                        ? branchSwf(branches)
+                                        : rig > 0
+                                          ? rigSwf(
+                                              rig,
+                                              args.includes("--swap"),
+                                              args.includes("--fresh"),
+                                              args.includes("--blurred") || filtered > 0,
+                                              args.includes("--glide"),
+                                            )
+                                          : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -2029,25 +2099,27 @@ const summary = {
                     ? `readback of ${readback} edges${args.includes("--opaque") ? ", opaque" : ""}`
                     : town > 0
                       ? `town of ${town}`
-                      : toggleBranches > 0
-                        ? `toggle of ${toggleBranches} branches`
-                        : toggle > 0
-                          ? `toggle of ${toggle}`
-                          : toggleStatic > 0
-                            ? `static toggle of ${toggleStatic}`
-                            : scripted > 0
-                              ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
-                              : pulse > 0
-                                ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
-                                : masks > 0
-                                  ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                                  : blends > 0
-                                    ? `${blends} blended shapes${blendFills > 1 ? `, ${blendFills} fills to a coloured one` : ""}${blendClips ? ", each in a blended clip" : ""}`
-                                    : branches > 0
-                                      ? `${branches} branches`
-                                      : rig > 0
-                                        ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
-                                        : shapes,
+                      : stillCrowd > 0
+                        ? `still crowd of ${stillCrowd}, one in 32 playing`
+                        : toggleBranches > 0
+                          ? `toggle of ${toggleBranches} branches`
+                          : toggle > 0
+                            ? `toggle of ${toggle}`
+                            : toggleStatic > 0
+                              ? `static toggle of ${toggleStatic}`
+                              : scripted > 0
+                                ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
+                                : pulse > 0
+                                  ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+                                  : masks > 0
+                                    ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                                    : blends > 0
+                                      ? `${blends} blended shapes${blendFills > 1 ? `, ${blendFills} fills to a coloured one` : ""}${blendClips ? ", each in a blended clip" : ""}`
+                                      : branches > 0
+                                        ? `${branches} branches`
+                                        : rig > 0
+                                          ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
+                                          : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   retainedMb: {

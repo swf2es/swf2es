@@ -1,0 +1,85 @@
+// A root that loads scripts/VersionedIsPlaying.as's SWF, of another SWF
+// version than its own, whose class has its own getter named isPlaying:
+// Flash runs what a root loads at the root's API version, whatever the
+// loaded SWF's header says, so under a SWF 12 root the class loads, as
+// MovieClip's isPlaying is not seen. Under a SWF 30 root it is refused
+// with VerifyError #1053, which adl stops at with its dialog rather than
+// tell the Loader, so that is no case. The inner SWF's bytes are put in as
+// base64 by tests/player/cases.ts.
+package
+{
+	import flash.display.Loader;
+	import flash.display.Sprite;
+	import flash.events.Event;
+	import flash.events.UncaughtErrorEvent;
+	import flash.system.ApplicationDomain;
+	import flash.system.LoaderContext;
+	import flash.utils.ByteArray;
+	import flash.utils.getQualifiedClassName;
+
+	public class VersionedLoads extends Sprite
+	{
+		private static const INNER:String = "@@INNER@@";
+		private var loader:Loader;
+
+		public function VersionedLoads()
+		{
+			// Nothing escapes: an error before the first frame ends would stop adl with a dialog.
+			try
+			{
+				loader = new Loader();
+				loader.uncaughtErrorEvents.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, uncaught);
+				loader.contentLoaderInfo.addEventListener(Event.INIT, init);
+				// A domain of its own, so that its Main is its own and not a parent's.
+				var context:LoaderContext = new LoaderContext(false, new ApplicationDomain(ApplicationDomain.currentDomain));
+				context.allowCodeImport = true;
+				loader.loadBytes(decode(INNER), context);
+				addChild(loader);
+			}
+			catch (e:Error)
+			{
+				trace(getQualifiedClassName(e) + " " + e.errorID);
+			}
+		}
+
+		private function init(e:Event):void
+		{
+			trace("init", loader.contentLoaderInfo.swfVersion, getQualifiedClassName(loader.content));
+		}
+
+		private function uncaught(e:UncaughtErrorEvent):void
+		{
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			var error:Error = e.error as Error;
+			trace("uncaught", error ? getQualifiedClassName(error) + " " + error.errorID : String(e.error));
+		}
+
+		private static function decode(text:String):ByteArray
+		{
+			const ALPHABET:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+			var out:ByteArray = new ByteArray();
+			var bits:int = 0;
+			var have:int = 0;
+			for (var i:int = 0; i < text.length; i++)
+			{
+				var c:String = text.charAt(i);
+				if (c == "=")
+				{
+					break;
+				}
+
+				bits = ((bits << 6) | ALPHABET.indexOf(c)) & 0xffff;
+				have += 6;
+				if (have >= 8)
+				{
+					have -= 8;
+					out.writeByte((bits >> have) & 0xff);
+				}
+			}
+
+			out.position = 0;
+			return out;
+		}
+	}
+}

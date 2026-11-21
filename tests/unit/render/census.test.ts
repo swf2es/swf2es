@@ -346,6 +346,7 @@ test("the walk is counted against what it visited, what it did not apart", () =>
     "walk.again": 1,
     "walk.hidden": 1,
     "walk.masks": 0,
+    "walk.copied": 0,
     "walk.dirty": 1,
     "walk.transform": 1,
     "walk.needed": 4,

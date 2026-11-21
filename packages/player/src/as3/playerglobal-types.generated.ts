@@ -21,6 +21,7 @@ type As3___AS3___vec_Vector$int = avm2.BuiltinClasses["__AS3__.vec::Vector$int"]
 type As3___AS3___vec_Vector$object = avm2.BuiltinClasses["__AS3__.vec::Vector$object"];
 type As3___AS3___vec_Vector$uint = avm2.BuiltinClasses["__AS3__.vec::Vector$uint"];
 type As3_flash_utils_ByteArray = avm2.BuiltinClasses["flash.utils::ByteArray"];
+type As3_flash_utils_Dictionary = avm2.BuiltinClasses["flash.utils::Dictionary"];
 type As3_flash_utils_IDataInput = avm2.BuiltinClasses["flash.utils::IDataInput"];
 type As3_flash_utils_IDataOutput = avm2.BuiltinClasses["flash.utils::IDataOutput"];
 
@@ -98,6 +99,7 @@ export interface PlayerglobalClasses {
   "flash.display3D::IndexBuffer3D": As3_flash_display3D_IndexBuffer3D;
   "flash.display3D::Program3D": As3_flash_display3D_Program3D;
   "flash.display3D::VertexBuffer3D": As3_flash_display3D_VertexBuffer3D;
+  "flash.display::AVLoader": As3_flash_display_AVLoader;
   "flash.display::AVM1Movie": As3_flash_display_AVM1Movie;
   "flash.display::ActionScriptVersion": As3_flash_display_ActionScriptVersion;
   "flash.display::Bitmap": As3_flash_display_Bitmap;
@@ -180,6 +182,14 @@ export interface PlayerglobalClasses {
   "flash.errors::SQLErrorOperation": As3_flash_errors_SQLErrorOperation;
   "flash.errors::ScriptTimeoutError": As3_flash_errors_ScriptTimeoutError;
   "flash.errors::StackOverflowError": As3_flash_errors_StackOverflowError;
+  "flash.events::AVDictionaryDataEvent": As3_flash_events_AVDictionaryDataEvent;
+  "flash.events::AVHTTPStatusEvent": As3_flash_events_AVHTTPStatusEvent;
+  "flash.events::AVLoadInfoEvent": As3_flash_events_AVLoadInfoEvent;
+  "flash.events::AVManifestLoadEvent": As3_flash_events_AVManifestLoadEvent;
+  "flash.events::AVPauseAtPeriodEndEvent": As3_flash_events_AVPauseAtPeriodEndEvent;
+  "flash.events::AVPlayStateEvent": As3_flash_events_AVPlayStateEvent;
+  "flash.events::AVStatusEvent": As3_flash_events_AVStatusEvent;
+  "flash.events::AVStreamSwitchEvent": As3_flash_events_AVStreamSwitchEvent;
   "flash.events::AccelerometerEvent": As3_flash_events_AccelerometerEvent;
   "flash.events::ActivityEvent": As3_flash_events_ActivityEvent;
   "flash.events::AsyncErrorEvent": As3_flash_events_AsyncErrorEvent;
@@ -193,6 +203,7 @@ export interface PlayerglobalClasses {
   "flash.events::DRMDeviceGroupEvent": As3_flash_events_DRMDeviceGroupEvent;
   "flash.events::DRMErrorEvent": As3_flash_events_DRMErrorEvent;
   "flash.events::DRMLicenseRequestEvent": As3_flash_events_DRMLicenseRequestEvent;
+  "flash.events::DRMMetadataEvent": As3_flash_events_DRMMetadataEvent;
   "flash.events::DRMReturnVoucherCompleteEvent": As3_flash_events_DRMReturnVoucherCompleteEvent;
   "flash.events::DRMReturnVoucherErrorEvent": As3_flash_events_DRMReturnVoucherErrorEvent;
   "flash.events::DRMStatusEvent": As3_flash_events_DRMStatusEvent;
@@ -257,6 +268,7 @@ export interface PlayerglobalClasses {
   "flash.events::UncaughtErrorEvent": As3_flash_events_UncaughtErrorEvent;
   "flash.events::UncaughtErrorEvents": As3_flash_events_UncaughtErrorEvents;
   "flash.events::VideoEvent": As3_flash_events_VideoEvent;
+  "flash.events::VideoTextureEvent": As3_flash_events_VideoTextureEvent;
   "flash.external::ExtensionContext": As3_flash_external_ExtensionContext;
   "flash.external::ExternalInterface": As3_flash_external_ExternalInterface;
   "flash.filesystem::File": As3_flash_filesystem_File;
@@ -308,6 +320,8 @@ export interface PlayerglobalClasses {
   "flash.html::HTMLPDFCapability": As3_flash_html_HTMLPDFCapability;
   "flash.html::HTMLSWFCapability": As3_flash_html_HTMLSWFCapability;
   "flash.html::HTMLWindowCreateOptions": As3_flash_html_HTMLWindowCreateOptions;
+  "flash.media::AVPlayState": As3_flash_media_AVPlayState;
+  "flash.media::AVResult": As3_flash_media_AVResult;
   "flash.media::AudioDecoder": As3_flash_media_AudioDecoder;
   "flash.media::AudioPlaybackMode": As3_flash_media_AudioPlaybackMode;
   "flash.media::Camera": As3_flash_media_Camera;
@@ -600,6 +614,7 @@ export interface PlayerglobalStatics {
   "flash.display3D::IndexBuffer3D": As3_flash_display3D_IndexBuffer3D$;
   "flash.display3D::Program3D": As3_flash_display3D_Program3D$;
   "flash.display3D::VertexBuffer3D": As3_flash_display3D_VertexBuffer3D$;
+  "flash.display::AVLoader": As3_flash_display_AVLoader$;
   "flash.display::AVM1Movie": As3_flash_display_AVM1Movie$;
   "flash.display::ActionScriptVersion": As3_flash_display_ActionScriptVersion$;
   "flash.display::Bitmap": As3_flash_display_Bitmap$;
@@ -682,6 +697,14 @@ export interface PlayerglobalStatics {
   "flash.errors::SQLErrorOperation": As3_flash_errors_SQLErrorOperation$;
   "flash.errors::ScriptTimeoutError": As3_flash_errors_ScriptTimeoutError$;
   "flash.errors::StackOverflowError": As3_flash_errors_StackOverflowError$;
+  "flash.events::AVDictionaryDataEvent": As3_flash_events_AVDictionaryDataEvent$;
+  "flash.events::AVHTTPStatusEvent": As3_flash_events_AVHTTPStatusEvent$;
+  "flash.events::AVLoadInfoEvent": As3_flash_events_AVLoadInfoEvent$;
+  "flash.events::AVManifestLoadEvent": As3_flash_events_AVManifestLoadEvent$;
+  "flash.events::AVPauseAtPeriodEndEvent": As3_flash_events_AVPauseAtPeriodEndEvent$;
+  "flash.events::AVPlayStateEvent": As3_flash_events_AVPlayStateEvent$;
+  "flash.events::AVStatusEvent": As3_flash_events_AVStatusEvent$;
+  "flash.events::AVStreamSwitchEvent": As3_flash_events_AVStreamSwitchEvent$;
   "flash.events::AccelerometerEvent": As3_flash_events_AccelerometerEvent$;
   "flash.events::ActivityEvent": As3_flash_events_ActivityEvent$;
   "flash.events::AsyncErrorEvent": As3_flash_events_AsyncErrorEvent$;
@@ -695,6 +718,7 @@ export interface PlayerglobalStatics {
   "flash.events::DRMDeviceGroupEvent": As3_flash_events_DRMDeviceGroupEvent$;
   "flash.events::DRMErrorEvent": As3_flash_events_DRMErrorEvent$;
   "flash.events::DRMLicenseRequestEvent": As3_flash_events_DRMLicenseRequestEvent$;
+  "flash.events::DRMMetadataEvent": As3_flash_events_DRMMetadataEvent$;
   "flash.events::DRMReturnVoucherCompleteEvent": As3_flash_events_DRMReturnVoucherCompleteEvent$;
   "flash.events::DRMReturnVoucherErrorEvent": As3_flash_events_DRMReturnVoucherErrorEvent$;
   "flash.events::DRMStatusEvent": As3_flash_events_DRMStatusEvent$;
@@ -759,6 +783,7 @@ export interface PlayerglobalStatics {
   "flash.events::UncaughtErrorEvent": As3_flash_events_UncaughtErrorEvent$;
   "flash.events::UncaughtErrorEvents": As3_flash_events_UncaughtErrorEvents$;
   "flash.events::VideoEvent": As3_flash_events_VideoEvent$;
+  "flash.events::VideoTextureEvent": As3_flash_events_VideoTextureEvent$;
   "flash.external::ExtensionContext": As3_flash_external_ExtensionContext$;
   "flash.external::ExternalInterface": As3_flash_external_ExternalInterface$;
   "flash.filesystem::File": As3_flash_filesystem_File$;
@@ -810,6 +835,8 @@ export interface PlayerglobalStatics {
   "flash.html::HTMLPDFCapability": As3_flash_html_HTMLPDFCapability$;
   "flash.html::HTMLSWFCapability": As3_flash_html_HTMLSWFCapability$;
   "flash.html::HTMLWindowCreateOptions": As3_flash_html_HTMLWindowCreateOptions$;
+  "flash.media::AVPlayState": As3_flash_media_AVPlayState$;
+  "flash.media::AVResult": As3_flash_media_AVResult$;
   "flash.media::AudioDecoder": As3_flash_media_AudioDecoder$;
   "flash.media::AudioPlaybackMode": As3_flash_media_AudioPlaybackMode$;
   "flash.media::Camera": As3_flash_media_Camera$;
@@ -1778,6 +1805,10 @@ export interface As3_flash_display3D_VertexBuffer3D extends As3_Object {
 }
 
 export interface As3_flash_display3D_VertexBuffer3D$ {}
+
+export interface As3_flash_display_AVLoader extends As3_flash_display_Loader {}
+
+export interface As3_flash_display_AVLoader$ {}
 
 export interface As3_flash_display_AVM1Movie extends As3_flash_display_DisplayObject {
   addCallback(name: string | null, fn: avm2.Ref<As3_Function> | null): void;
@@ -2757,6 +2788,100 @@ export interface As3_flash_errors_StackOverflowError extends As3_Error {}
 
 export interface As3_flash_errors_StackOverflowError$ {}
 
+export interface As3_flash_events_AVDictionaryDataEvent extends As3_flash_events_Event {
+  readonly dictionary: avm2.Ref<As3_flash_utils_Dictionary> | null;
+  readonly time: number;
+}
+
+export interface As3_flash_events_AVDictionaryDataEvent$ {
+  readonly AV_DICTIONARY_DATA: string | null;
+}
+
+export interface As3_flash_events_AVHTTPStatusEvent extends As3_flash_events_Event {
+  responseHeaders: avm2.Ref<As3_Array> | null;
+  responseURL: string | null;
+  readonly status: number;
+}
+
+export interface As3_flash_events_AVHTTPStatusEvent$ {
+  readonly AV_HTTP_RESPONSE_STATUS: string | null;
+}
+
+export interface As3_flash_events_AVLoadInfoEvent extends As3_flash_events_Event {
+  readonly loadInfo: avm2.Ref<As3_flash_utils_Dictionary> | null;
+}
+
+export interface As3_flash_events_AVLoadInfoEvent$ {
+  readonly AV_LOAD_INFO: avm2.Value;
+}
+
+export interface As3_flash_events_AVManifestLoadEvent extends As3_flash_events_Event {
+  readonly duration: number;
+  readonly handle: number;
+  readonly result: avm2.Ref<As3_flash_media_AVResult> | null;
+  readonly userData: number;
+}
+
+export interface As3_flash_events_AVManifestLoadEvent$ {
+  readonly AV_MANIFEST_LOAD: string | null;
+}
+
+export interface As3_flash_events_AVPauseAtPeriodEndEvent extends As3_flash_events_Event {
+  readonly userData: number;
+}
+
+export interface As3_flash_events_AVPauseAtPeriodEndEvent$ {
+  readonly AV_PAUSE_AT_PERIOD_END: string | null;
+}
+
+export interface As3_flash_events_AVPlayStateEvent extends As3_flash_events_Event {
+  readonly playState: avm2.Ref<As3_flash_media_AVPlayState> | null;
+}
+
+export interface As3_flash_events_AVPlayStateEvent$ {
+  readonly AV_PLAY_STATE: string | null;
+}
+
+export interface As3_flash_events_AVStatusEvent extends As3_flash_events_Event {
+  readonly description: string | null;
+  readonly notificationType: string | null;
+  readonly result: avm2.Ref<As3_flash_media_AVResult> | null;
+}
+
+export interface As3_flash_events_AVStatusEvent$ {
+  readonly AV_STATUS: string | null;
+  readonly BACKGROUND_MANIFEST_ERROR: string | null;
+  readonly BACKGROUND_MANIFEST_WARNING: string | null;
+  readonly BUFFER_STATE: string | null;
+  readonly DECODER_TYPE: string | null;
+  readonly DIMENSION_CHANGE: string | null;
+  readonly ERROR: string | null;
+  readonly INSERTION_COMPLETE: string | null;
+  readonly LOAD_COMPLETE: string | null;
+  readonly MANIFEST_UPDATE: string | null;
+  readonly PLAY_STATE: string | null;
+  readonly RENDER_TYPE: string | null;
+  readonly SEEK_COMPLETE: string | null;
+  readonly STEP_COMPLETE: string | null;
+  readonly STREAM_SWITCH: string | null;
+  readonly TRICKPLAY_ENDED: string | null;
+  readonly WARNING: string | null;
+}
+
+export interface As3_flash_events_AVStreamSwitchEvent extends As3_flash_events_Event {
+  readonly bitrate: number;
+  readonly description: string | null;
+  readonly switchType: number;
+  readonly time: number;
+  readonly userData: number;
+}
+
+export interface As3_flash_events_AVStreamSwitchEvent$ {
+  readonly ABR_SWITCH: number;
+  readonly AV_STREAM_SWITCH: string | null;
+  readonly PERIOD_SWITCH: number;
+}
+
 export interface As3_flash_events_AccelerometerEvent extends As3_flash_events_Event {
   accelerationX: number;
   accelerationY: number;
@@ -2890,6 +3015,15 @@ export interface As3_flash_events_DRMLicenseRequestEvent extends As3_flash_event
 
 export interface As3_flash_events_DRMLicenseRequestEvent$ {
   readonly LICENSE_REQUEST: string | null;
+}
+
+export interface As3_flash_events_DRMMetadataEvent extends As3_flash_events_Event {
+  readonly drmMetadata: avm2.Ref<As3_flash_net_drm_DRMContentData> | null;
+  readonly timestamp: number;
+}
+
+export interface As3_flash_events_DRMMetadataEvent$ {
+  readonly DRM_METADATA: string | null;
 }
 
 export interface As3_flash_events_DRMReturnVoucherCompleteEvent extends As3_flash_events_Event {
@@ -3688,6 +3822,16 @@ export interface As3_flash_events_VideoEvent$ {
   readonly RENDER_STATUS_ACCELERATED: string | null;
   readonly RENDER_STATUS_SOFTWARE: string | null;
   readonly RENDER_STATUS_UNAVAILABLE: string | null;
+}
+
+export interface As3_flash_events_VideoTextureEvent extends As3_flash_events_Event {
+  readonly codecInfo: string | null;
+  readonly colorSpace: string | null;
+  readonly status: string | null;
+}
+
+export interface As3_flash_events_VideoTextureEvent$ {
+  readonly RENDER_STATE: string | null;
 }
 
 export interface As3_flash_external_ExtensionContext extends As3_flash_events_EventDispatcher {
@@ -4521,6 +4665,130 @@ export interface As3_flash_html_HTMLWindowCreateOptions extends As3_Object {
 }
 
 export interface As3_flash_html_HTMLWindowCreateOptions$ {}
+
+export interface As3_flash_media_AVPlayState extends As3_Object {
+  readonly state: number;
+}
+
+export interface As3_flash_media_AVPlayState$ {
+  readonly BUFFERING: number;
+  readonly EOF: number;
+  readonly PAUSED: number;
+  readonly PLAYING: number;
+  readonly READY: number;
+  readonly SUSPENDED: number;
+  readonly TRICK_PLAY: number;
+  readonly UNINITIALIZED: number;
+  readonly UNRECOVERABLE_ERROR: number;
+}
+
+export interface As3_flash_media_AVResult extends As3_Object {
+  readonly result: number;
+}
+
+export interface As3_flash_media_AVResult$ {
+  readonly ASYNC_OPERATION_IN_PROGRESS: number;
+  readonly AUDIO_ONLY_STREAM_END: number;
+  readonly AUDIO_ONLY_STREAM_START: number;
+  readonly AUDIO_START_ERROR: number;
+  readonly BAD_MANIFEST_SIGNATURE: number;
+  readonly BAD_MEDIASAMPLE_FOUND: number;
+  readonly BAD_MEDIA_INTERLEAVING: number;
+  readonly CALLED_FROM_WRONG_THREAD: number;
+  readonly CANNOT_ERASE_TIMELINE: number;
+  readonly CANNOT_FAIL_OVER: number;
+  readonly CANNOT_HANDLE_MAIN_MANIFEST_UPDATE: number;
+  readonly CANNOT_LOAD_PLAY_LIST: number;
+  readonly CANNOT_SPLIT_TIMELINE: number;
+  readonly CODEC_NOT_SUPPORTED: number;
+  readonly COMPONENT_CREATION_FAILURE: number;
+  readonly CONTAINER_NOT_SUPPORTED: number;
+  readonly CONTENT_LENGTH_MISMATCH: number;
+  readonly CRYPTO_ALGORITHM_NOT_SUPPORTED: number;
+  readonly CRYPTO_ERROR_BAD_CERTIFICATE: number;
+  readonly CRYPTO_ERROR_BAD_PARAMETER: number;
+  readonly CRYPTO_ERROR_BUFFER_TOO_SMALL: number;
+  readonly CRYPTO_ERROR_CORRUPTED_DATA: number;
+  readonly CRYPTO_ERROR_DIGEST_FINISH: number;
+  readonly CRYPTO_ERROR_DIGEST_UPDATE: number;
+  readonly CRYPTO_ERROR_UNKNOWN: number;
+  readonly CURRENT_PERIOD_EXPIRED: number;
+  readonly DECODER_FAILED: number;
+  readonly DEVICE_OPEN_ERROR: number;
+  readonly DID_NOT_GET_NEXT_FRAGMENT: number;
+  readonly DRM_INIT_ERROR: number;
+  readonly DRM_NOT_AVAILABLE: number;
+  readonly END_OF_PERIOD: number;
+  readonly EOF: number;
+  readonly FILE_NOT_FOUND: number;
+  readonly FILE_OPEN_ERROR: number;
+  readonly FILE_READ_ERROR: number;
+  readonly FILE_STRUCTURE_INVALID: number;
+  readonly FILE_WRITE_ERROR: number;
+  readonly FRAGMENT_READ_ERROR: number;
+  readonly GENERIC_ERROR: number;
+  readonly HTTP_TIME_OUT: number;
+  readonly ID3_PARSE_ERROR: number;
+  readonly INCOMPATIBLE_RENDER_MODE: number;
+  readonly INCOMPATIBLE_VERSION: number;
+  readonly INTERNAL_ERROR: number;
+  readonly INVALID_KEY: number;
+  readonly INVALID_OPERATION: number;
+  readonly INVALID_PARAMETER: number;
+  readonly INVALID_REPLACE_DURATION: number;
+  readonly INVALID_SEEK_TIME: number;
+  readonly INVALID_WITH_AUDIO_ONLY_FILE: number;
+  readonly IRRECOVERABLE_ERROR: number;
+  readonly KEY_NOT_FOUND: number;
+  readonly KEY_SERVER_NOT_FOUND: number;
+  readonly LISTENER_NOT_FOUND: number;
+  readonly LIVE_HOLD: number;
+  readonly LIVE_WINDOW_MOVED_BACKWARD: number;
+  readonly LOST_CONNECTION_RECOVERABLE: number;
+  readonly MAIN_MANIFEST_UPDATE_TO_BE_HANDLED: number;
+  readonly MANIFEST_FILE_UNEXPECTEDLY_CHANGED: number;
+  readonly NETWORK_DOWN: number;
+  readonly NETWORK_ERROR: number;
+  readonly NETWORK_UNAVAILABLE: number;
+  readonly NOT_IMPLEMENTED: number;
+  readonly NO_AUDIO_SINK: number;
+  readonly NO_FIXED_SIZE: number;
+  readonly NO_TIMELINE: number;
+  readonly NO_USEABLE_BITRATE_PROFILE: number;
+  readonly NULL_OPERATION: number;
+  readonly ONLY_ALLOWED_IN_PAUSED_STATE: number;
+  readonly OPERATION_ABORTED: number;
+  readonly OUT_OF_MEMORY: number;
+  readonly OVERFLOW: number;
+  readonly PARSE_ERROR: number;
+  readonly PARTIAL_REPLACEMENT: number;
+  readonly PERIOD_HOLD: number;
+  readonly PERIOD_NOT_LOADED: number;
+  readonly PLAYBACK_NOT_ENABLED: number;
+  readonly POSTROLL_WITH_LIVE_NOT_ALLOWED: number;
+  readonly PREVIOUS_STEP_SEEK_IN_PROGRESS: number;
+  readonly PROTOCOL_NOT_SUPPORTED: number;
+  readonly RANGE_ERROR: number;
+  readonly RANGE_SPANS_READHEAD: number;
+  readonly RENDITION_M3U8_ERROR: number;
+  readonly REPLACEMENT_FAILED: number;
+  readonly RESOURCE_NOT_SPECIFIED: number;
+  readonly SECURITY_ERROR: number;
+  readonly SEEK_FAILED: number;
+  readonly SEGMENT_SKIPPED_ON_FAILURE: number;
+  readonly SIZE_UNKNOWN: number;
+  readonly SPS_PPS_FOUND_OUTSIDE_AVCC: number;
+  readonly SUCCESS: number;
+  readonly SWITCH_TO_ASYMMETRIC_PROFILE: number;
+  readonly TIMELINE_TOO_SHORT: number;
+  readonly UNDERFLOW: number;
+  readonly UNREPORTED_TIME_DISCONTINUITY_FOUND: number;
+  readonly UNSUPPORTED_CONFIGURATION: number;
+  readonly UNSUPPORTED_HLS_VERSION: number;
+  readonly UNSUPPORTED_OPERATION: number;
+  readonly VIDEO_PROFILE_NOT_SUPPORTED: number;
+  readonly WAITING_FOR_INIT: number;
+}
 
 export interface As3_flash_media_AudioDecoder extends As3_Object {}
 

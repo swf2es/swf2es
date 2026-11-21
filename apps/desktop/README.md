@@ -68,6 +68,15 @@ fetch-electron` does so ahead, for the tests.
   Buffer and texture byte allowances follow the shared backend's AIR-backed
   limits, with separate host budgets for target attachments. Supported
   formats and remaining gaps are in [Context3D](../../packages/context3d/README.md).
+- **Theme.** View › Theme is System, the default, Light or Dark: the app's
+  pages, the element's performance meter and context menu, and the URL
+  dialog follow it, as `prefers-color-scheme`, and so do the title bar and
+  menus where the platform lets an app choose (macOS and Windows). The
+  SWF's stage keeps its own background colour, whatever the theme. The app
+  remembers the choice in `settings.json` (`theme`) and applies it before
+  its window opens; `--theme=system`, `--theme=light` or `--theme=dark`
+  sets it for one run, said on stderr, and leaves the saved one as it is unless a
+  theme is then chosen from View › Theme.
 - **Libraries.** ActionScript 3 plays on the `builtin.abc` (avmplus',
   MPL-2.0) and playerglobal that ship with the player, with nothing to set
   up. File › Choose playerglobal.abc… plays on another playerglobal, such

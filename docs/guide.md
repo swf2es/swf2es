@@ -25,7 +25,7 @@ that find one another by relative URL (`packages/swf2es`). One tag
 defines the element:
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.33"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.34"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
@@ -37,7 +37,7 @@ page that configures its players adds them from that script. Until
 1.0 a minor release may break a page, so pin a version: on unpkg at least
 the minor one (`swf2es@0.1` redirects to the newest 0.1 release, whose
 files then load together); on jsDelivr the exact one
-(`https://cdn.jsdelivr.net/npm/swf2es@0.1.33`), as it serves a range
+(`https://cdn.jsdelivr.net/npm/swf2es@0.1.34`), as it serves a range
 without redirecting, and the files loaded later would follow the range.
 `swf2es.js` defines the element; `codegen.wasm`, the renderer and the
 workers' host load with the first player, `worker.js` for a SWF that uses
@@ -132,7 +132,26 @@ element, or `configure({ relativeUrls: "movie" })` for all of them, to
 resolve them against each SWF's own URL instead. Like `base`, the
 attribute is read when a movie loads, not watched while it plays; Flash
 tags have no such parameter, so for players `replaceFlash` makes only
-`configure` sets it. It has `load(url | bytes)` and `destroy()`, which
+`configure` sets it.
+
+Flash ran a SWF, and everything it loaded, at its root SWF's API version:
+a class or member of a later Flash Player than the root's version was not
+there for its code, so an old SWF whose class named a getter of its own
+`isPlaying` loaded, where a later root's would refuse it (VerifyError
+#1053). The player runs every SWF at the latest API version by default,
+which shows all of them whatever the SWF's version. `apiversion="root"`
+on an element, or `configure({ apiVersion: "root" })` for all of them,
+runs each at its root's, as Flash did: the root's version from its
+header, and what it loads at the same; its workers run at the latest, as
+they did in AIR. A number names a
+root's SWF version instead, as `apiversion="12"`, for a SWF whose real
+root was another, such as one a wrapper of another version loaded; and
+`"latest"` the default. An AIR application stays at the latest with
+`"root"`. Like `base`, it is read when a movie loads. Modules compiled
+ahead of time are found only at the version they were compiled at
+(`--api`, below).
+
+It has `load(url | bytes)` and `destroy()`, which
 gives back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events, and with Stage3D on, `stagelayout` as the SWF starts
 and whenever it sets its stage's `scaleMode` or `align` (`event.detail`
@@ -339,10 +358,10 @@ the page's scripts (`crossorigin` lets it load on a cross-origin isolated
 page whose policy is `require-corp`, too):
 
 ```html
-<script src="https://unpkg.com/swf2es@0.1.33/dist/plugin.js" crossorigin></script>
+<script src="https://unpkg.com/swf2es@0.1.34/dist/plugin.js" crossorigin></script>
 <script src="swfobject.js"></script>
 <script type="module">
-  import { watchFlash } from "https://unpkg.com/swf2es@0.1.33";
+  import { watchFlash } from "https://unpkg.com/swf2es@0.1.34";
 
   watchFlash();
 </script>
@@ -398,8 +417,12 @@ swf2es movie.swf -o movie.swf2es --emit-libraries
 against the libraries the player loads: builtin.abc and swf2es's
 playerglobal, and AIR's library too with `--air`, all shipped with the
 command. `--lib` names others in their place, in order, such as Flash
-Player's playerglobal for a player given that one. In a checkout,
-`node packages/cli/dist/main.js` is the command.
+Player's playerglobal for a player given that one. `--api` names the API
+version the player plays at (its `apiVersion`): `latest` by default,
+`root` for a player at `apiversion="root"` that plays the SWF as its main
+movie, the version from the SWF's header, or a SWF version, that of the
+root that loads it. A player at another version compiles the modules
+itself. In a checkout, `node packages/cli/dist/main.js` is the command.
 
 The player reads them as a module cache. Chain an IndexedDB cache behind
 it to keep whatever the command did not compile:
@@ -521,6 +544,8 @@ the builtin.abc and playerglobal the player ships.
 | `--ignore-policy-files` | Lets the SWF read every public host's data, send it headers and open sockets to it as if its cross-domain policy files allowed it, for this run. This machine and private networks still need their own policy file. |
 | `--ignore-policy-files=data.example,localhost` | The same for the hosts named alone, exactly (not their subdomains), this machine's and private networks' too. |
 | `--no-http-cache` | Neither reads nor keeps the HTTP cache, for this run. |
+| `--api-version=root` | Plays the SWF and what it loads at its own SWF version's API version (its workers at the latest), as Flash did, which hides the classes and members of later players; an AIR application stays at the latest. `latest`, the default, shows them all; a number plays them at a root of that SWF version's. |
+| `--theme=dark` | The app's look for this run: `system`, `light` or `dark`, over View › Theme's, which stays as it was unless one is chosen from that menu during the run. |
 | `--software-gl` | Draws with SwiftShader, on the CPU: where Chromium takes no GPU (a server, Xvfb), or one that gives WebGL but not WebGL 2. Only for SWFs you trust. |
 | `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
 | `--proxy=http://user:pass@host:3128` | The same through an HTTP proxy, by a `CONNECT` tunnel for each connection; either kind takes a username and password. |
@@ -651,6 +676,12 @@ content plays with nothing to set up. View › Stage3D turns
 it off, after which a SWF's `requestContext3D` gets Error #3702, "Context3D
 not available", and on again; the app remembers the choice and restarts
 the movie playing.
+
+View › Theme makes the app light or dark, or follows the system, the
+default: its pages, the element's performance meter and context menu
+follow, and the title bar and menus where the platform allows. A SWF's
+stage keeps its own background colour. The app remembers the choice, and
+`--theme=light` or `--theme=dark` sets one for a single run.
 
 On Linux, a local file a SWF or an AIR application names that is not there
 as named is found as Windows and macOS find it, ignoring case, so content

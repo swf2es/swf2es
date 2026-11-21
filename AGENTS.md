@@ -27,7 +27,8 @@ pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
 pnpm test        # unit, conformance, library, program, fuzz, player, web, site, packaging and
                  # desktop tests (needs podman or docker, and Chrome; CHROME names another
                  # browser; the desktop's are skipped without Electron's binary)
-pnpm test:checked # the same with every array access bounds-checked
+pnpm test:checked # the same with every array access bounds-checked, and the player's
+                  # shortcuts and the renderer's spans checked against full walks
 pnpm dlx knip                 # unused files, exports and dependencies (knip.json); before
                               # removing anything, see "Code generated code calls" below
 pnpm determinism              # each module the same however it is compiled, and each method
@@ -45,6 +46,8 @@ pnpm tamarin:swf2es [--update-baseline | --relax] [prefix...]   # the same tests
                               # swf2es-baseline.json (compiles them itself, without avmshell)
 node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
+node oracle/flash.ts --root file.swf [frames, 2 at least]   # what it traces run as the
+                              # application's content, at its own version: traces only, AS3 only
 node tests/player/run.ts [--shard i/n] [case...]   # the player's cases in Chrome vs Flash's
                               # frames (--shard: every n-th from the i-th, as CI splits them)
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
@@ -73,6 +76,9 @@ node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]   # native fills match ind
                               # coverage under both winding rules, including crossing contours
 node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revivals and rebuilds of
                               # application domains change no module against a reference
+node tests/player/spans-fuzz.ts [seeds, 60] [first seed, 1] [frames, 40]   # random changes to a
+                              # tree of containers and shapes in Chrome: the renderer's spans,
+                              # checked on odd seeds, draw each frame as a view that takes none
 SWF2ES_FUZZ_STEPS=50000 SWF2ES_FUZZ_SEED=14 node --test tests/unit/player/playerglobal/flash/display/BitmapData.test.ts
                               # BitmapData's natives and filters fed odd numbers longer, or from
                               # another seed, than pnpm test's 2000 steps from 1; a failure names
@@ -81,12 +87,14 @@ node tests/player/leak.ts [--loads N] [--snapshots DIR] [mode...]   # load SWFs 
                               # Chrome, unloaded or, as a game's gear, dropped (dropped, shared,
                               # churn); the heap after a full collection must stay bounded, and
                               # codegen's memory must not grow (part of pnpm test)
-node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--emit-libraries] [--air]   # AOT:
-                              # the player's modules for the SWF, their logs and a manifest (by default
-                              # against the libraries the player ships; `compile` may be left out)
-node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...]   # avmshell in node: the
-                              # ABCs after builtin and shell_toplevel (the command's own by default),
-                              # their output on stdout, avmshell's exit status
+node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--emit-libraries] [--air]
+                              [--api latest|root|<SWF version>]   # AOT: the player's modules for the
+                              # SWF, their logs and a manifest (by default against the libraries the
+                              # player ships, at the latest API version; `compile` may be left out)
+node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...] [--api <SWF version>]
+                              # avmshell in node: the ABCs after builtin and shell_toplevel (the
+                              # command's own by default), their output on stdout, avmshell's exit
+                              # status; --api runs them at a SWF version's API version, as -api
 node packages/cli/dist/main.js types file.swf [-o file.ts] [--air] [--name prefix]   # TypeScript
                               # declarations of a SWF's or an ABC's classes over the player's libraries'
 node packages/cli/dist/main.js help [command]   # the commands, or one's options

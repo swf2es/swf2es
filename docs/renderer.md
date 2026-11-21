@@ -106,10 +106,109 @@ order, an entry a drawable or a boundary:
   ended in `ALPHA_MASK`, which composites it onto that layer by its alpha
   ([architecture/compositing.md](architecture/compositing.md#masks-and-scroll-rectangles)).
 
-The view writes the list and its rows anew each frame. Keeping a span of
-the list for a subtree that did not change, and writing only rows on a
-frame where only transforms or colours changed, is not built; it waits
-for a profile that shows the walk worth it.
+The view writes the list and its rows anew each frame.
+
+### Spans
+
+An object's **span** is the stretch of the scene list and of the rows
+its subtree wrote in a frame (`scene/spans.ts`). On a busy real-content
+recording the walk visits about 5,000 objects a frame, of which about
+57 (1%) changed, and a walk of only what changed would visit about 300
+(6%); no frame changes transforms and colours alone. So the walk takes
+an unchanged subtree's span from the frame before, its rows moved to
+where they land now (`SceneList.appendDraws`, `Rows.append`), rather than
+walk it again, and walks only what changed.
+
+A span stands for its object only where nothing it was drawn from can
+have changed:
+
+- the object and everything in it unchanged (`clean`: its flags, and
+  `descendantsDirty`, which `invalidate` sets up to the root);
+- the same parent's transform on the stage and colour from its ancestors,
+  compared as numbers, which line stretch, hairlines' width, drawTriangles'
+  facing and bitmaps' whole pixels follow;
+- the same kept outputs' generation: the view's scale, quality and screen
+  scale;
+- every geometry and texture it names still kept, of the generation it
+  had (`Registry.generation`), not let go of and handed out again;
+- nothing in it that draws by more than that (`plain` in `view.ts`): it is
+  all containers, shapes and bitmaps, with no filter, blend, mask, scroll
+  rectangle, 9-slice grid, 3D transform, bitmap cache, stale shape, clip
+  layer or mask's part, and no paint still to come, shader fill or line
+  that stroked to nothing; and it is walked on the stage, not inside an
+  alpha mask, a sliced owner or a blend's only child. The object must be
+  plain now as well as then: the mask walker clears a mask's flags where
+  the mask is used, which may come before its own place on the list, so
+  an object made a mask there is unflagged at its place (the checked
+  mode's first find, on `mask-ancestors` and `avm1-script-masks`).
+
+A context lost and given back drops every span. A 3D object's pass and
+`BitmapData.draw`'s walk from roots of their own into lists of their own
+(`Planes.enter`, the view's `drawScene`), and neither read nor write the
+stage's spans nor the frame before's list they name. Spans follow the
+objects' flags, which a stage's walk clears: a view's spans are read only
+where it walked its display list last (`Spans.begin`, by the list's
+topmost object), so several views of one list, as tests make, walk it
+whole each frame.
+
+Each frame keeps the list and rows the frame before wrote beside its own,
+and the walk writes each object's span as it goes, on the object
+(`DisplayObject.span`, which names its view by a number). An object
+whose span stands for it is not walked: its span is copied, its rows
+moved, every geometry and texture it names used this frame as a walk
+would use them, so that what is drawn keeps its idle frames
+(`IDLE_FRAMES`), and its span noted where it now lies.
+
+What a span stands under is noted once for a parent's children rather
+than for each (`Spans.under`): the transform on the stage and the colour
+they are drawn under at the parent's walk, which their spans written then
+stand under alike while the parent is the one they had. Where it is not
+what they stood under the frame before, as under a parent that moved,
+none of its children's spans is read, nor written. A subtree taken whole
+carries its descendants' spans with it: a parent's walk finds its
+children's spans where they were written, moved as far as its own span
+and those holding it were moved since (`Context`), so that a part
+changed in a character that stood still, taken whole for frames, walks
+the character and that part, and copies the character's other parts.
+A container's span is found inside its parent's that way only where that
+parent is the one it had when its span was written: one moved to another
+parent standing alike, after a frame that carried one parent down the
+list and not the other, would find its children's spans where the new
+parent's copy moved them, not where they lie. Only containers carry what
+their children stand under (`Children`); a leaf's span is its place in the
+lists and its parent.
+Lines are let go of by their geometries' last use rather than the line
+cache's own (`LineCache`'s trim), as a span drawing them never asks the
+cache.
+
+On `bench.ts --still-crowd 400`, where 31 of 5,210 objects change a
+frame, the walk visits 47 objects, what a walk of only what changed
+would visit, against 5,210 before; `--town 100` 4,942 against 6,442 (a
+walk of what changed, 4,922); `--branches 64` 117 against 8,258.
+
+The walk is what clears flags and takes morphs' ratios, which bounds and
+hit tests follow; an object not walked has nothing of either pending, as
+its flags say, which is what `descendantsDirty` promises, as for a hidden
+subtree.
+
+The view's `checked` option (`RenderView.checkSpans`, which `pnpm
+test:checked`'s pages set) walks each object whose span was copied as
+well, where no span is copied nor written, compares the walk with the
+copy entry for entry and row for row (`spanDifference`), takes the walk
+off and throws where they differ, naming the object copied, the object in
+it whose draws or rows differ first, and the first entry and row that
+differ. An object found changed under one whose flags said nothing in it
+had throws too, unless it is hidden and draws nothing (a video's new
+picture flags its ancestors only up to the first hidden one, so that a
+hidden video playing does not wake the stage), and a copy whose draws'
+geometries and textures it did not itself use this frame, before the walk
+uses them and would hide it. `tests/player/spans.ts` breaks a span on
+purpose, a drawing changed with no flag set, and sees it caught;
+`tests/player/spans-fuzz.ts` makes seeded random changes and compares
+each frame with a view that takes no span.
+
+Video is not plain, and stays so: a video's new picture flags its object
+(`VideoObject`) without telling its ancestors, which a span would miss.
 
 ### The planner
 
@@ -426,7 +525,8 @@ with kept outputs; 100 blend layers; and a few masks.
 
 `node tests/player/render-bench.ts <checkout A> <checkout B> --gpu --runs 3`
 compares two built checkouts with the same fixtures, alternating A/B then B/A.
-Its visible, moving, hidden and cached-filter scenes share geometry across 64
+Its visible, moving, tenth (a tenth of the branches moving each frame, the
+rest still), hidden and cached-filter scenes share geometry across 64
 branches of 64 shapes. Thirty frames warm each scene; the measured frames report
 render submission time and the display-list walk separately. It checks pixel
 hashes at two fixed frames across builds and runs. `--branches`, `--frames` and
@@ -459,7 +559,11 @@ translucent circle once, then moves and turns them each frame: it measures
 draw submission without rebuilding geometry. `--town N` draws N hairline-outlined characters and
 scenery instead, some of them glowing, which is nearer a room's lines and
 filters but has none of its bitmap or gradient fills, blend layers or
-masks. `--redraw N` has a script clear and draw N shapes again each
+masks. `--still-crowd N` is a large scene that mostly stands still: N clips of
+12 outlined shapes in 8 groups, one in 32 playing, moving a part and
+swapping another's shape each frame, about 1% of its objects changing, as
+on a busy real-content recording: what the walk costs with spans.
+`--redraw N` has a script clear and draw N shapes again each
 frame, a fill of two curves under a line: what tessellating, stroking and
 uploading shapes anew costs. `--checkout DIR` plays another built
 checkout's packages on the same scene, for runs of two builds in turn. A
@@ -590,8 +694,8 @@ GPU took its framebuffer binds a frame from 1,300 to 255 (#646) and then
 
 - **WebGPU,** behind the same command buffer: a span that stands still
   onto a render bundle.
-- **Spans kept across frames, and plans reused,** only where profiles
-  show the walk or the planner hot.
+- **Spans across layers, masks and text** ([Spans](#spans)), one kind at
+  a time; plans reused only where profiles show the planner hot.
 - **Geometry buffers owned by wasm,** so that the module writes the
   atlas's vertices where the backend reads them, only if profiles ask.
 - **Known differences from adl,** parked: a filtered object with a mask
