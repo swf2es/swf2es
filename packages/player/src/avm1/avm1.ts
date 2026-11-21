@@ -27,7 +27,7 @@
 import type { Codegen } from "@swf2es/codegen";
 import { type ActionList, ClipEvent, isAs3, type Swf } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
-import { BitmapStore } from "../bitmap/bitmap.js";
+import { type BitmapStore, symbolStore } from "../bitmap/bitmap.js";
 import { decodeInBrowser, type ImageDecode } from "../bitmap/images.js";
 import {
   BitmapObject,
@@ -1826,11 +1826,12 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     const swf = this.currentSwf();
     const id = swf.exports.get(asciiLower(name));
     const character = id === undefined ? undefined : swf.library?.characters.get(id);
-    if (character?.type !== "bitmap" || character.pixels === null) {
+    if (character?.type !== "bitmap") {
       return null;
     }
 
-    return BitmapStore.of({ ...character.pixels, transparent: true });
+    const pixels = character.pixels;
+    return pixels === null ? null : symbolStore(character, pixels, true);
   }
 
   /** attachBitmap: `store` shown in `parent` at AVM1 depth `depth`, as a bitmap with no AVM1 object of its own. */

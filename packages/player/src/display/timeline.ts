@@ -7,6 +7,7 @@ import {
   type Bitmap,
   type ButtonRecord,
   type CsmTextSettings,
+  decodeLossless,
   type EditText,
   type Font,
   type Font4,
@@ -243,7 +244,11 @@ export interface BitmapCharacter {
   type: "bitmap";
   id: number;
   definition: Bitmap;
-  /** Set when the SWF is read for the lossless formats, and once decoded for an image; null until then. */
+  /**
+   * A lossless bitmap's, inflated from its tag whenever asked for and held
+   * only while something else holds them (losslessPixels), so a new object
+   * each time though the same pixels; an image's once decoded, null until then.
+   */
   pixels: BitmapPixels | null;
   /** The store bitmap fills draw it from, one for every shape; made when one is first drawn. */
   store?: BitmapStore;
@@ -412,14 +417,76 @@ function sharedBitmap(bytes: Uint8Array, t: Tag, tables: Uint8Array | null): Bit
     }
   }
 
-  const definition = readBitmap(bytes, t, tables);
-  // An image's definition holds its bytes in the SWF's already; a lossless one only its pixels.
-  const own = definition.type === "image" ? tag : tag.slice();
+  // An image's definition holds its bytes in the SWF's; a lossless one is read from a copy of
+  // its tag, which it inflates from whenever its pixels are wanted, so it never holds the SWF's.
+  const lossless = t.code === tags.DefineBitsLossless || t.code === tags.DefineBitsLossless2;
+  const own = lossless ? tag.slice() : tag;
+  const definition = lossless
+    ? readBitmap(own, { ...t, offset: 0 }, tables)
+    : readBitmap(bytes, t, tables);
   const list = sharedBitmaps.get(hash) ?? [];
   list.push({ tag: own, definition: new WeakRef(definition) });
   sharedBitmaps.set(hash, list);
   bitmapsGone.register(definition, { hash, tag: own });
   return definition;
+}
+
+type LosslessBitmap = Extract<Bitmap, { type: "lossless" }>;
+
+/**
+ * Each lossless bitmap's pixels as last inflated, held weakly: a store made
+ * of them holds them till its texture is made of them (BitmapStore's
+ * `uploaded`), and they go once none does, to be inflated again from the
+ * tag if they are wanted again. What Flash cannot read is remembered.
+ */
+const inflated = new WeakMap<LosslessBitmap, WeakRef<Uint32Array>>();
+const unreadable = new WeakSet<LosslessBitmap>();
+
+/** A lossless bitmap's pixels, inflated if nothing holds them. */
+export function losslessPixels(definition: LosslessBitmap): BitmapPixels {
+  const { width, height, transparent } = definition;
+  const held = inflated.get(definition)?.deref();
+  if (held) {
+    return { width, height, transparent, pixels: held };
+  }
+
+  if (unreadable.has(definition)) {
+    return INVALID_PIXELS;
+  }
+
+  const decoded = decodeLossless(definition);
+  if (!decoded) {
+    unreadable.add(definition);
+    return INVALID_PIXELS;
+  }
+
+  inflated.set(definition, new WeakRef(decoded.pixels));
+  return decoded;
+}
+
+/** A lossless bitmap's pixels if something holds them still, without inflating them. */
+export function heldPixels(definition: LosslessBitmap): Uint32Array | null {
+  return inflated.get(definition)?.deref() ?? null;
+}
+
+/** The character of a bitmap tag's definition. */
+function bitmapCharacter(definition: Bitmap): BitmapCharacter {
+  const { id } = definition;
+  switch (definition.type) {
+    case "lossless":
+      return {
+        type: "bitmap",
+        id,
+        definition,
+        get pixels() {
+          return losslessPixels(definition);
+        },
+      };
+    case "invalid":
+      return { type: "bitmap", id, definition, pixels: INVALID_PIXELS };
+    default:
+      return { type: "bitmap", id, definition, pixels: null };
+  }
 }
 
 /**
@@ -852,17 +919,7 @@ function timelineOf(
       default:
         if (isBitmapTag(t.code)) {
           const definition = sharedBitmap(bytes, t, jpeg.tables);
-          library.set(definition.id, {
-            type: "bitmap",
-            id: definition.id,
-            definition,
-            pixels:
-              definition.type === "pixels"
-                ? definition
-                : definition.type === "invalid"
-                  ? INVALID_PIXELS
-                  : null,
-          });
+          library.set(definition.id, bitmapCharacter(definition));
         }
     }
   }

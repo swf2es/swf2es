@@ -145,6 +145,7 @@ export class Paints {
       if (kept.version !== store.version) {
         kept.version = store.version;
         this.textures.set(id, store.width, store.height, this.bytesOf(store, id), idle);
+        store.uploaded();
       } else if (idle !== undefined) {
         this.textures.idleWithin(id, idle);
       }
@@ -170,6 +171,8 @@ export class Paints {
       solid === null
         ? this.textures.add(store.width, store.height, this.bytesOf(store, -1), idle)
         : this.textures.addFilled(store.width, store.height, solid, idle);
+    // The texture holds the pixels now: a library bitmap's go till they are read, made again then.
+    store.uploaded();
     this.stores.set(store, { handle, version: store.version, copy: null, pinned: false });
     return handle;
   }

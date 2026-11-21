@@ -1,13 +1,13 @@
 // What a character makes: the display object a timeline places for it,
 // and its bringing to life once placed.
-import { BitmapStore } from "../bitmap/bitmap.js";
+import { symbolStore } from "../bitmap/bitmap.js";
 import { BitmapObject } from "./bitmapobject.js";
 import { ButtonObject, buttonStates } from "./buttonobject.js";
 import type { DisplayObject } from "./displayobject.js";
 import { MovieClip } from "./movieclip.js";
 import { ShapeObject } from "./shapeobject.js";
 import { StaticTextObject, TextObject } from "./textobjects.js";
-import { type DisplayCharacter, INVALID_PIXELS, type Library } from "./timeline.js";
+import type { DisplayCharacter, Library } from "./timeline.js";
 
 /** A display object for a character, before its first frame: a shape, or a clip. */
 /** `hasImage` is PlaceObject3's flag where a timeline places it, which a bitmap's construction reads. */
@@ -23,9 +23,7 @@ export function displayFor(
       return ShapeObject.ofMorph(character);
     case "bitmap": {
       // With scripts, its Bitmap's constructor gives it its data; without, a copy of the pixels.
-      const bitmap = new BitmapObject(
-        library.construct ? null : BitmapStore.of(character.pixels ?? INVALID_PIXELS),
-      );
+      const bitmap = new BitmapObject(library.construct ? null : symbolStore(character));
       bitmap.character = character;
       bitmap.hasImage = hasImage;
       return bitmap;
