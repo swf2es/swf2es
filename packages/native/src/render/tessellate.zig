@@ -15,6 +15,7 @@ const earclip = @import("earclip.zig");
 const monotone = @import("monotone.zig");
 const crossings = @import("crossings.zig");
 const lyon = @import("lyon.zig");
+const validate = @import("validate.zig");
 
 extern "env" fn failure(code: c_int) noreturn;
 
@@ -40,6 +41,39 @@ var filler: Filler = .none;
 
 export fn filledBy() u32 {
     return @backingInt(filler);
+}
+
+/// For tests: what the next lyon fill does in place of filling. 0 fills; a negative status is
+/// returned as lyon's own; 1 traps, as a panic in lyon does; 2 fills, and its triangles are
+/// taken as having failed the check. It applies once.
+var lyon_fault: i32 = 0;
+
+export fn lyonFault(fault: i32) void {
+    lyon_fault = fault;
+}
+
+/// lyon's fill, checked (validate.zig): its status, or -4 where its triangles failed the check.
+fn lyonChecked(coords: []const f64, ends: []const u32, nonzero: bool) union(enum) { output: lyon.Output, status: i32 } {
+    const fault = lyon_fault;
+    lyon_fault = 0;
+    if (fault < 0) {
+        return .{ .status = fault };
+    }
+
+    if (fault == 1) {
+        @trap();
+    }
+
+    switch (lyon.fill(coords, ends, nonzero)) {
+        .output => |result| {
+            if (fault == 2 or !validate.covers(arena.allocator, coords, ends, nonzero, result.positions, result.indices)) {
+                return .{ .status = -4 };
+            }
+
+            return .{ .output = result };
+        },
+        .status => |status| return .{ .status = status },
+    }
 }
 
 export fn reset() void {
@@ -145,9 +179,11 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
         arena.top = mark;
     }
 
-    // Many contours that cross each other densely, which libtess2 takes seconds over: lyon, or
-    // the bands where it fails, but libtess2 still where lyon refuses the coordinates as past
-    // its range. A trap in lyon is the host's, as one in libtess2 is.
+    // Many contours that cross each other densely, which libtess2 takes seconds over: lyon, its
+    // triangles checked; the bands where it fails; libtess2 where it refuses the coordinates as
+    // past its range, or its triangles fail the check, which the bands cannot fill in good time
+    // (they give up on such decks after a tenth of a second or more). A trap in lyon is the
+    // host's, as one in libtess2 is.
     var dense = false;
     if (libtess and in_range) {
         dense = crossings.dense(arena.allocator, coords, ends);
@@ -155,7 +191,7 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
     }
 
     if (dense) {
-        switch (lyon.fill(coords, ends, nonzero)) {
+        switch (lyonChecked(coords, ends, nonzero)) {
             .output => |result| {
                 out = .{ .positions = result.positions, .indices = result.indices };
                 filler = .lyon;
@@ -163,7 +199,7 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
             },
             .status => |status| {
                 arena.top = mark;
-                dense = status != lyon.refused;
+                dense = status != lyon.refused and status != -4;
             },
         }
     }

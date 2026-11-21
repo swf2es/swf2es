@@ -798,7 +798,7 @@ implementers' names, of nelly2pcm.)
 ==========================================================================
 
 src/render/lyon/libswf2es_tessellate.a, linked into the render module, is
-https://github.com/swf2es/tessellate's release v0.1.0, built by its CI. It holds
+https://github.com/swf2es/tessellate's release v0.1.1, built by its CI. It holds
 lyon's fill tessellator and the code below; the release's notices follow.
 
 Third-party code compiled into libswf2es_tessellate.a, each notice

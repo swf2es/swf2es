@@ -7,8 +7,10 @@
 // the two take a curve in as many chords, and within the flatness where a bend at a whole
 // number of chords rounds the other way; the same fills drawn and the same refused. Last, decks of
 // many wobbly contours that cross densely, which the module gives lyon rather than libtess2
-// (crossings.zig): each must go to lyon, and every sample be covered once where its rule fills
-// it and not at all elsewhere.
+// (crossings.zig), half of them converging to within thousandths of a pixel far from the origin:
+// whichever filler took each, lyon or libtess2 where lyon's triangles failed the module's check,
+// it must have libtess2's area and cover every sample once where its rule fills it and not at all
+// elsewhere, and lyon must have taken most.
 // Run with: node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]
 import assert from "node:assert/strict";
 import { binary } from "../../packages/native/dist/render/binary.js";
@@ -525,14 +527,23 @@ const raw = (
   vertexCount(): number;
   triangleCount(): number;
   filledBy(): number;
+  lyonFault(fault: number): void;
 };
+const LIBTESS2 = 4;
 const LYON = 5;
 
-/** A deck of random wobbly ellipses, each turned a little from the last, every point jittered. */
-function deck(): number[][] {
+/**
+ * A deck of random wobbly ellipses, each turned a little from the last, every point jittered:
+ * turned 0.002 to 0.012 a contour and rounded to twips; or, `converging`, turned 1e-5 to 1e-3, so
+ * that neighbours come within thousandths of a pixel of each other, unrounded and about a centre
+ * up to 3,000 px out, where lyon's precision runs short.
+ */
+function deck(converging: boolean): number[][] {
   const count = 24 + Math.floor(random() * 17);
   const points = 120 + Math.floor(random() * 120);
-  const turn = 0.002 + random() * 0.01;
+  const turn = converging ? 10 ** (-5 + 2 * random()) : 0.002 + random() * 0.01;
+  const centre = converging ? 150 + random() * 3000 : 150;
+  const round = converging ? (v: number) => v : (v: number) => Math.round(v * 20) / 20;
   const lobes = 5 + Math.floor(random() * 8);
   const wobble = 6 + random() * 18;
   const squash = 0.4 + random() * 0.4;
@@ -547,8 +558,8 @@ function deck(): number[][] {
       const x = r * Math.cos(u) * squash + (random() - 0.5) * jitter;
       const y = r * Math.sin(u) + (random() - 0.5) * jitter;
       contour.push(
-        Math.round((150 + x * Math.cos(a) - y * Math.sin(a)) * 20) / 20,
-        Math.round((150 + x * Math.sin(a) + y * Math.cos(a)) * 20) / 20,
+        round(centre + x * Math.cos(a) - y * Math.sin(a)),
+        round(centre + x * Math.sin(a) + y * Math.cos(a)),
       );
     }
 
@@ -582,13 +593,11 @@ function near(contours: number[][], x: number, y: number, margin: number): boole
   return false;
 }
 
-let decks = 0;
-let deckSamples = 0;
-for (let i = 0; i < Math.max(4, Math.floor(cases / 100)); i++) {
-  const contours = deck();
-  const nonZero = i % 2 === 1;
+/** A fill by the raw module, lyon made to fail as `fault` says (lyonFault). */
+function rawFill(contours: number[][], nonZero: boolean, fault = 0) {
   const flat = contours.flat();
   raw.reset();
+  raw.lyonFault(fault);
   const coords = raw.alloc(flat.length * 8);
   const ends = raw.alloc(contours.length * 4);
   new Float64Array(raw.memory.buffer, coords, flat.length).set(flat);
@@ -596,20 +605,65 @@ for (let i = 0; i < Math.max(4, Math.floor(cases / 100)); i++) {
   new Uint32Array(raw.memory.buffer, ends, contours.length).set(
     contours.map((points) => (end += points.length / 2)),
   );
-  const context = `deck ${i} from seed ${seed}, ${nonZero ? "non-zero" : "even-odd"}`;
-  assert.equal(
-    raw.run(coords, flat.length / 2, ends, contours.length, Number(nonZero)),
-    0,
-    context,
-  );
-  assert.equal(raw.filledBy(), LYON, `not lyon's: ${context}`);
+  const status = raw.run(coords, flat.length / 2, ends, contours.length, Number(nonZero));
   const v = new Float64Array(raw.memory.buffer, raw.vertices(), raw.vertexCount() * 2).slice();
   const t = new Int32Array(raw.memory.buffer, raw.indices(), raw.triangleCount() * 3).slice();
+  let area = 0;
+  for (let j = 0; j < t.length; j += 3) {
+    const [a, b, c] = [t[j] * 2, t[j + 1] * 2, t[j + 2] * 2];
+    area += Math.abs((v[b] - v[a]) * (v[c + 1] - v[a + 1]) - (v[b + 1] - v[a + 1]) * (v[c] - v[a]));
+  }
+
+  return { status, by: raw.filledBy(), v, t, area: area / 2 };
+}
+
+let decks = 0;
+let lyonDecks = 0;
+let deckSamples = 0;
+for (let i = 0; i < Math.max(8, Math.floor(cases / 100)); i++) {
+  const converging = i % 2 === 1;
+  const contours = deck(converging);
+  const nonZero = i % 4 >= 2;
+  const context = `deck ${i} from seed ${seed}, ${converging ? "converging, " : ""}${nonZero ? "non-zero" : "even-odd"}`;
+  const { status, by, v, t, area } = rawFill(contours, nonZero);
+  assert.equal(status, 0, context);
+  // lyon's, or libtess2's where lyon's triangles failed the module's check.
+  assert.ok(by === LYON || by === LIBTESS2, `filled by ${by}: ${context}`);
+  if (by === LYON) {
+    lyonDecks++;
+  }
+
+  // The same area as libtess2's, lyon made to refuse it.
+  const reference = rawFill(contours, nonZero, -2);
+  assert.equal(reference.by, LIBTESS2, context);
+  // Within slivers thinner than the module's check's twip, which it lets lyon leave out, and
+  // positions narrowed to f32, along the contours' length.
+  let length = 0;
+  for (const points of contours) {
+    for (let k = 0, j = points.length - 2; k < points.length; j = k, k += 2) {
+      length += Math.hypot(points[k] - points[j], points[k + 1] - points[j + 1]);
+    }
+  }
+
+  assert.ok(
+    Math.abs(area - reference.area) <= 2e-3 * reference.area + 5e-5 * length,
+    `area ${area} against libtess2's ${reference.area}: ${context}`,
+  );
+
+  let [x0, x1, y0, y1] = [Infinity, -Infinity, Infinity, -Infinity];
+  for (const points of contours) {
+    for (let k = 0; k < points.length; k += 2) {
+      [x0, x1] = [Math.min(x0, points[k]), Math.max(x1, points[k])];
+      [y0, y1] = [Math.min(y0, points[k + 1]), Math.max(y1, points[k + 1])];
+    }
+  }
+
+  // lyon's positions are f32s: a sample this close to an edge may fall either side of it.
+  const margin = Math.max(1e-3, Math.max(x1, y1) * 2e-7);
   for (let sample = 0; sample < 40; sample++) {
-    const x = 40 + random() * 220;
-    const y = 40 + random() * 220;
-    // lyon's positions are f32s: a sample this close to an edge may fall either side of it.
-    if (near(contours, x, y, 1e-3)) {
+    const x = x0 + random() * (x1 - x0);
+    const y = y0 + random() * (y1 - y0);
+    if (near(contours, x, y, margin)) {
       continue;
     }
 
@@ -619,16 +673,24 @@ for (let i = 0; i < Math.max(4, Math.floor(cases / 100)); i++) {
       const a = t[j] * 2;
       const b = t[j + 1] * 2;
       const c = t[j + 2] * 2;
-      // A triangle of no area covers nothing.
-      if ((v[b] - v[a]) * (v[c + 1] - v[a + 1]) === (v[b + 1] - v[a + 1]) * (v[c] - v[a])) {
+      if (
+        x < Math.min(v[a], v[b], v[c]) ||
+        x > Math.max(v[a], v[b], v[c]) ||
+        y < Math.min(v[a + 1], v[b + 1], v[c + 1]) ||
+        y > Math.max(v[a + 1], v[b + 1], v[c + 1])
+      ) {
         continue;
       }
 
       const p = (v[b] - v[a]) * (y - v[a + 1]) - (v[b + 1] - v[a + 1]) * (x - v[a]);
       const q = (v[c] - v[b]) * (y - v[b + 1]) - (v[c + 1] - v[b + 1]) * (x - v[b]);
       const r = (v[a] - v[c]) * (y - v[c + 1]) - (v[a + 1] - v[c + 1]) * (x - v[c]);
-      // On a triangle's own edge, where two triangles meet, the sample says nothing.
-      onEdge = Math.min(Math.abs(p), Math.abs(q), Math.abs(r)) < 1e-9;
+      // On a triangle's own edge, where two triangles meet, within a ten-millionth of a pixel of
+      // its line inside its box, the sample says nothing.
+      const ab = Math.hypot(v[b] - v[a], v[b + 1] - v[a + 1]);
+      const bc = Math.hypot(v[c] - v[b], v[c + 1] - v[b + 1]);
+      const ca = Math.hypot(v[a] - v[c], v[a + 1] - v[c + 1]);
+      onEdge = Math.min(Math.abs(p) / ab, Math.abs(q) / bc, Math.abs(r) / ca) < 1e-7;
       if ((p > 0 && q > 0 && r > 0) || (p < 0 && q < 0 && r < 0)) {
         covered++;
       }
@@ -647,6 +709,8 @@ for (let i = 0; i < Math.max(4, Math.floor(cases / 100)); i++) {
   decks++;
 }
 
+// Most decks are lyon's: the fallback is for the few it gets wrong.
+assert.ok(lyonDecks * 2 >= decks, `only ${lyonDecks} of ${decks} decks filled by lyon`);
 console.log(
-  `fuzz tessellate: ${decks} decks of densely crossing contours filled by lyon, ${deckSamples} winding samples each covered once or not at all`,
+  `fuzz tessellate: ${decks} decks of densely crossing contours, half of them converging, ${lyonDecks} filled by lyon and the rest by libtess2, each libtess2's area, ${deckSamples} winding samples each covered once or not at all`,
 );

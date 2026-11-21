@@ -1,8 +1,8 @@
 {
   "repository": "https://github.com/swf2es/tessellate",
-  "tag": "v0.1.0",
-  "commit": "3eace415ef23ce9573bea8d37959be9dc43dc1bd",
+  "tag": "v0.1.1",
+  "commit": "de1cfd419de3c51ae372184ced7c32b890caf0da",
   "file": "libswf2es_tessellate.a",
-  "sha256": "39f3b27011ad0c6950bf2904fbde12bee9fcd28bc089abb06d641ac2c4769895",
+  "sha256": "67203d1269b43fdeb741680a6ae36ad1981fcf95a8ded85da23a27aad5479495",
   "lyon_tessellation": "1.0.23"
 }

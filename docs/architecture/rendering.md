@@ -40,7 +40,9 @@ cannot change the winding, `shared-fill-edges`) and tessellated by
 flattens their curves too. A fill of four contours or more and a thousand
 points or more whose contours stack eight deep or more (their boxes' areas
 over the fill's) and whose edges cross each other 1,000 times or more, as a
-morph of near-identical outlines each turned a little does, goes to lyon instead
+morph of near-identical outlines each turned a little does, goes to lyon instead, its
+triangles checked along scanlines against the contours' winding before they are drawn
+(`native/src/render/validate.zig`), and libtess2 filling what fails the check
 (`native/src/render/crossings.zig`, `lyon.zig`), whose sweep takes a tenth
 of the time libtess2's quadratic one does there; every other fill stays
 with libtess2, which fills a few self-crossing even-odd shapes correctly

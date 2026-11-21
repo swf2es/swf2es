@@ -480,7 +480,8 @@ compose with the display list without copies.
   (`monotone.zig`), and any other simple concave contour of at most 64
   vertices by ear clipping after checking for crossings and touches
   (`earclip.zig`). A fill of many contours that cross each other densely
-  goes to lyon instead of libtess2 (`crossings.zig`, `lyon.zig`).
+  goes to lyon instead of libtess2 (`crossings.zig`, `lyon.zig`), its triangles checked
+  along scanlines before they are drawn (`validate.zig`), libtess2 filling what fails.
   Whatever libtess2 or lyon refuses or fails at goes to bands (`bands.zig`):
   each horizontal band between vertices and crossings filled as disjoint
   trapezoids under its winding rule. Its `LineBuilder` builds a layer's

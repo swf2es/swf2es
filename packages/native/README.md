@@ -453,14 +453,31 @@ archive, as its CI built it, with `release.json` naming its tag and
 SHA-256, which `build.ts` checks, and `LICENSE.third-party` its notices.
 `build.zig` links it into the render module (`addObjectFile`); it imports
 only `malloc`, `realloc` and `free`, which `src/render/arena.zig` exports,
-so its output lives in the arena until the next reset. It fills in twips,
-as lyon's absolute epsilons drop sub-pixel slivers at pixel scale, and
-gives positions back as f32s, which the module widens. Every other fill
-stays with libtess2, which fills a few ordinary self-crossing even-odd
-shapes correctly that lyon covers twice in places. What lyon fails at goes
-to the bands; input it refuses (coordinates past ±838,860.8) to libtess2;
-and a trap in it is the host's, as one in libtess2 is. `filledBy()`
-names what filled the last fill, for tests.
+so its output lives in the arena until the next reset. It fills in twips
+about the centre of the fill's box, as lyon's absolute epsilons drop
+sub-pixel slivers at pixel scale and f32 keeps too few bits far from the
+origin, and gives positions back as f32s, which the module widens. Every
+other fill stays with libtess2, which fills a few ordinary self-crossing
+even-odd shapes correctly that lyon covers twice in places.
+
+lyon can still fill contours that come within hundredths of a pixel of
+each other wrongly, covering wedges of the even-odd rule's fill several
+times or not at all, and say nothing. So `src/render/validate.zig` checks
+its triangles before they are drawn: along 256 scanlines over the fill's
+box, every stretch between two crossings must be covered once where the
+contours' winding there says the rule fills it and not at all elsewhere,
+stretches narrower than a twip (or than the positions' f32 rounding) aside.
+It reads every triangle once, about 11 ms of lyon's 153 on a deck of 95
+contours; lyon's wrong wedges can be under three pixels tall, which 48
+scanlines let through. A fill whose triangles fail it goes to libtess2: the bands give
+up on such decks after a tenth of a second or more without filling them.
+What lyon fails at (-1, or -3 where its own buffers find no memory) goes to
+the bands; input it refuses (coordinates more than ±838,860.8 from its box's
+centre) to libtess2. A trap in it is the host's, as one in libtess2 is:
+lyon traps where it panics and where an allocation of its own fails, which
+-3 does not cover, and the host fills the call again by the bands in a new
+instance. `filledBy()` names what filled the last fill, and `lyonFault()`
+makes the next lyon fill fail, for tests.
 
 What libtess2 fails at, gives output
 unfit to draw for, or cannot take (coordinates outside ±2^23), and what lyon
@@ -489,9 +506,12 @@ and checks each fill against a JS flattening tessellated alone: drawn or
 refused alike, the same geometry bit for bit as JS with plain square roots
 gives, and within the flatness of what `Math.hypot` gives. `zig build
 test` in this folder runs `flatten.zig`'s, `bands.zig`'s and
-`crossings.zig`'s own tests. The fuzz ends with decks of random densely
-crossing contours, each of which must go to lyon and cover every sample
-once where its rule fills it and not at all elsewhere. Synthetic fixtures
+`crossings.zig`'s and `validate.zig`'s own tests. The fuzz ends with decks
+of random densely crossing contours, half of them converging to within
+thousandths of a pixel, unrounded and up to 3,000 px from the origin:
+whichever filler took each, lyon or libtess2, it must have libtess2's area
+and cover every sample once where its rule fills it and not at all
+elsewhere. Synthetic fixtures
 also check coincident edges, holes and detail at large coordinates.
 
 ## lines
