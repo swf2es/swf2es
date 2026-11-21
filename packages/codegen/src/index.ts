@@ -413,8 +413,8 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     }
 
     // Its bytes decoded here: lifted as a string, a module of megabytes took
-    // longer than compiling it. The emitter writes only well-formed UTF-8,
-    // which decodes alike either way.
+    // longer than compiling it. The emitter writes only ASCII, which decodes
+    // alike either way, and to a string the engine keeps a byte a character.
     const address = lazy
       ? wasm.domainLazyModuleBytes(named.join("\n"), at)
       : wasm.domainModuleBytes(named.join("\n"), at, keep, true);
