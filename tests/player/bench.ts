@@ -184,9 +184,10 @@
 // objects changed. Its methods are wrapped only when asked for, as --counts' are, so its frames'
 // times are not to be compared with others'.
 // --allocs samples the heap and gives the KB the frames allocated, the player's start left out;
-// --profile FILE also writes the sampled profile there, for DevTools' Memory panel to open. After
-// the frames, with the renderer still alive, it gives what the page holds after a full collection,
-// the JS heap and array buffers' data apart; --snapshot FILE also writes a heap snapshot then.
+// --profile FILE also writes the sampled profile there, for DevTools' Memory panel to open, and
+// lists the functions that allocated most. After the frames, with the renderer still alive, it
+// gives what the page holds after a full collection, the JS heap and array buffers' data apart;
+// --snapshot FILE also writes a heap snapshot then.
 //
 //   node tests/player/bench.ts [--shapes N | --rig N [--fresh] [--blurred | --filtered K] [--added] [--glide]
 //     [--colored [--fade]]
@@ -2192,6 +2193,45 @@ function selfTimes(path: string, measured: number): { areas: string[]; functions
   return { areas: top(areas, 12), functions: top(functions, 30) };
 }
 
+interface AllocNode {
+  callFrame: { functionName: string; url: string; lineNumber: number };
+  selfSize: number;
+  children: AllocNode[];
+}
+
+/**
+ * A sampled heap profile's bytes by the function that allocated them, in KB a frame: those under
+ * the bench's frames' tick and render alone, as allocatedKbPerFrame counts them.
+ */
+function allocSites(path: string, measured: number): string[] {
+  const profile = JSON.parse(readFileSync(path, "utf8")) as { head: AllocNode };
+  const sites = new Map<string, number>();
+  const walk = (node: AllocNode, inBench: boolean, inFrame: boolean): void => {
+    const { functionName, url, lineNumber } = node.callFrame;
+    const bench = inBench || functionName === "benchSwf";
+    const frame = inFrame || (bench && (functionName === "tick" || functionName === "render"));
+    if (frame && node.selfSize > 0) {
+      const file = url
+        .replace(/[?#].*/, "")
+        .split("/")
+        .slice(-2)
+        .join("/");
+      const name = `${functionName || "(anonymous)"} ${file}:${lineNumber + 1}`;
+      sites.set(name, (sites.get(name) ?? 0) + node.selfSize);
+    }
+
+    for (let i = 0; i < node.children.length; i++) {
+      walk(node.children[i], bench, frame);
+    }
+  };
+  walk(profile.head, false, false);
+
+  return [...sites]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 20)
+    .map(([k, v]) => `${(v / 1024 / measured).toFixed(1).padStart(7)} KB  ${k}`);
+}
+
 if (args.includes("--json")) {
   console.log(JSON.stringify(summary));
 } else {
@@ -2225,6 +2265,18 @@ if (args.includes("--json")) {
   console.log(
     `  frame   median ${ms(summary.frame.median)}  p90 ${ms(summary.frame.p90)}  mean ${ms(summary.frameMean)}`,
   );
+  if (summary.allocatedKbPerFrame !== undefined) {
+    console.log(`  allocs  ${summary.allocatedKbPerFrame} KB a frame, sampled`);
+    if (profile) {
+      console.log("  allocated a frame, by function:");
+      console.log(
+        allocSites(profile, frames - 1)
+          .map((line) => `    ${line}`)
+          .join("\n"),
+      );
+    }
+  }
+
   if (summary.census) {
     console.log(formatCensus(summary.census).join("\n"));
   }
