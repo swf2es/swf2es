@@ -640,7 +640,7 @@ function stream() {
   const state = new GlState(gl);
   const atlas = new GeometryAtlas(gl, state);
   atlas.setUp();
-  const batches = new FillBatches(gl, state, atlas);
+  const batches = new FillBatches(gl, state);
   batches.setUp(64);
   const geometries = new Geometries();
   const uploaded = () => {
