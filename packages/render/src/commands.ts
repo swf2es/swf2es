@@ -99,8 +99,14 @@ export class Commands {
 
   /** Five floats for the operation pushed next (param4). */
   param5(a: number, b: number, c: number, d: number, e: number): number {
-    const at = this.param4(a, b, c, d);
-    this.params[this.paramRoom(1)] = e;
+    // Room taken before the store is read: it may be a new one after.
+    const at = this.paramRoom(5);
+    const params = this.params;
+    params[at] = a;
+    params[at + 1] = b;
+    params[at + 2] = c;
+    params[at + 3] = d;
+    params[at + 4] = e;
     return at;
   }
 
