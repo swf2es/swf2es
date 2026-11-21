@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
-import { readShape, readSwf } from "@swf2es/format";
+import { readShape, readSwf, zlibCompress } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/render";
 import { morphAt } from "../../../../packages/player/dist/display/morph.js";
 import { shapeLayers } from "../../../../packages/player/dist/display/shapes.js";
@@ -265,4 +265,49 @@ test("a shared morph goes, with its blends, once no library holds it", async () 
   // Read again after, a new one, whose blends are made again.
   const again = morphIn(bytes.slice());
   assert.equal(again.blends.size, 0);
+});
+
+test("a morph whose line is filled with a bitmap keeps to its SWF, and draws with that SWF's bitmap", () => {
+  const square = [
+    { move: [0, 0] },
+    { line: [400, 0] },
+    { line: [400, 400] },
+    { line: [0, 0] },
+  ] as w.PathCommand[];
+  const tag = w.morphShape({
+    id: 1,
+    version: 2,
+    startBounds: [0, 400, 0, 400],
+    endBounds: [0, 400, 0, 400],
+    fills: [],
+    lines: [
+      {
+        startWidth: 40,
+        endWidth: 80,
+        startColor: 0,
+        endColor: 0,
+        fill: { type: 0x41, bitmap: 7, startMatrix: { a: 20, d: 20 }, endMatrix: { a: 20, d: 20 } },
+      },
+    ],
+    start: [{ line: 1, commands: square }],
+    end: [square],
+  });
+  // DefineBitsLossless2 7, a pixel of its own colour in each SWF.
+  const bitmap = (argb: number[]) =>
+    w.tag(36, Uint8Array.from([7, 0, 5, 1, 0, 1, 0, ...zlibCompress(Uint8Array.from(argb))]), true);
+  const libraries = [
+    [0xff, 1, 2, 3],
+    [0xff, 4, 5, 6],
+  ].map((argb) => readLibrary(readSwf(movieOf(bitmap(argb), tag))).characters);
+  const [a, b] = libraries.map((characters) => characters.get(1) as MorphCharacter);
+  assert.equal(a.type, "morph");
+  assert.equal(a.morph.lines[0].start.fill?.type, "bitmap");
+  assert.notEqual(a, b);
+  for (const [i, morph] of [a, b].entries()) {
+    const own = libraries[i].get(7);
+    assert.equal(own?.type, "bitmap");
+    assert.equal(morph.bitmap(7), own);
+  }
+
+  assert.notEqual(a.bitmap(7), b.bitmap(7));
 });
