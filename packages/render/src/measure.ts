@@ -29,12 +29,71 @@ export interface MeasureTarget {
 /** A hair, which keeps a padded edge on the pixel it lies on at any resolution. */
 const TEXEL_SNAP = 1e-6;
 
-// Scratch stacks, four numbers an open area: least x and y, greatest x and y, in target pixels.
-const areas: number[] = [];
-const clips: number[] = [];
-const open: number[] = [];
-// Each open layer's cut, four numbers as an area's: an alpha mask's rectangle in it (ALPHA_MASK).
-const cuts: number[] = [];
+/**
+ * A scratch stack of areas, four numbers each: least x and y, greatest x
+ * and y, in target pixels. Typed and grown by doubling, never shortened,
+ * so that a frame neither boxes its numbers nor makes its store again.
+ */
+class Areas {
+  data = new Float64Array(64);
+  /** Numbers in use, four an area. */
+  top = 0;
+
+  /** Room for one more area. */
+  room(): Float64Array {
+    if (this.top + 4 > this.data.length) {
+      const grown = new Float64Array(this.data.length * 2);
+      grown.set(this.data);
+      this.data = grown;
+    }
+
+    return this.data;
+  }
+
+  /** An area of nothing, its least past its greatest. */
+  pushEmpty(): void {
+    this.push(
+      Number.POSITIVE_INFINITY,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+    );
+  }
+
+  push(left: number, top: number, right: number, bottom: number): void {
+    const data = this.room();
+    const n = this.top;
+    data[n] = left;
+    data[n + 1] = top;
+    data[n + 2] = right;
+    data[n + 3] = bottom;
+    this.top = n + 4;
+  }
+
+  /** The top area moved onto `to`. */
+  moveTop(to: Areas): void {
+    const data = to.room();
+    const from = this.data;
+    const n = this.top - 4;
+    const t = to.top;
+    data[t] = from[n];
+    data[t + 1] = from[n + 1];
+    data[t + 2] = from[n + 2];
+    data[t + 3] = from[n + 3];
+    to.top = t + 4;
+    this.top = n;
+  }
+}
+
+const areas = new Areas();
+const clips = new Areas();
+// Each open layer's cut, as an area: an alpha mask's rectangle in it (ALPHA_MASK).
+const cuts = new Areas();
+// The open layers by number, innermost last, `openTop` of them.
+let open = new Int32Array(16);
+let openTop = 0;
+// drawnArea's area as it is measured.
+const drawn = new Float64Array(4);
 
 /**
  * Each layer's rectangle of the target (SceneList.layerRect), from what is
@@ -60,11 +119,11 @@ export function measureLayers(
     return;
   }
 
-  areas.length = 0;
-  clips.length = 0;
-  open.length = 0;
-  cuts.length = 0;
-  pushEmpty(areas);
+  areas.top = 0;
+  clips.top = 0;
+  cuts.top = 0;
+  openTop = 0;
+  areas.pushEmpty();
   const k = target.scale;
   const box = geometries.box;
   const m = rows.data;
@@ -72,16 +131,22 @@ export function measureLayers(
   for (let i = 0; i < scene.length; i++) {
     switch (scene.kind[i]) {
       case DRAW:
-        placeDraw(scene, i, box, m, k, areas);
+        placeDraw(scene, i, box, m, k, areas.data, areas.top);
         break;
 
       case MASK_BEGIN:
         // The mask's own draws, measured apart.
-        pushEmpty(areas);
+        areas.pushEmpty();
         break;
       case LAYER_BEGIN:
-        open.push(scene.geometry[i]);
-        pushEmpty(areas);
+        if (openTop === open.length) {
+          const grown = new Int32Array(open.length * 2);
+          grown.set(open);
+          open = grown;
+        }
+
+        open[openTop++] = scene.geometry[i];
+        areas.pushEmpty();
         cuts.push(
           Number.NEGATIVE_INFINITY,
           Number.NEGATIVE_INFINITY,
@@ -91,18 +156,20 @@ export function measureLayers(
         break;
       case MASK_USE:
         // The mask's draws clip what follows, measured apart till it pops.
-        moveTop(areas, clips);
-        pushEmpty(areas);
+        areas.moveTop(clips);
+        areas.pushEmpty();
         break;
       case MASK_POP: {
-        const n = areas.length;
-        const c = clips.length;
-        const left = Math.max(areas[n - 4], clips[c - 4]);
-        const top = Math.max(areas[n - 3], clips[c - 3]);
-        const right = Math.min(areas[n - 2], clips[c - 2]);
-        const bottom = Math.min(areas[n - 1], clips[c - 1]);
-        areas.length = n - 4;
-        clips.length = c - 4;
+        const a = areas.data;
+        const n = areas.top;
+        const cl = clips.data;
+        const c = clips.top;
+        const left = Math.max(a[n - 4], cl[c - 4]);
+        const top = Math.max(a[n - 3], cl[c - 3]);
+        const right = Math.min(a[n - 2], cl[c - 2]);
+        const bottom = Math.min(a[n - 1], cl[c - 1]);
+        areas.top = n - 4;
+        clips.top = c - 4;
         if (right > left && bottom > top) {
           unionTop(left, top, right, bottom);
         }
@@ -111,17 +178,19 @@ export function measureLayers(
       }
 
       case LAYER_END: {
-        const n = areas.length;
-        const layer = open.pop() as number;
+        const a = areas.data;
+        const n = areas.top;
+        const layer = open[--openTop];
         const pad = scene.pads[layer];
-        const c = cuts.length - 4;
+        const cut = cuts.data;
+        const c = cuts.top - 4;
         if (pad < 0) {
-          const left = Math.max(0, Math.floor(areas[n - 4]) - 1, cuts[c]);
-          const top = Math.max(0, Math.floor(areas[n - 3]) - 1, cuts[c + 1]);
-          const right = Math.min(target.width, Math.ceil(areas[n - 2]) + 1, cuts[c + 2]);
-          const bottom = Math.min(target.height, Math.ceil(areas[n - 1]) + 1, cuts[c + 3]);
-          areas.length = n - 4;
-          cuts.length = c;
+          const left = Math.max(0, Math.floor(a[n - 4]) - 1, cut[c]);
+          const top = Math.max(0, Math.floor(a[n - 3]) - 1, cut[c + 1]);
+          const right = Math.min(target.width, Math.ceil(a[n - 2]) + 1, cut[c + 2]);
+          const bottom = Math.min(target.height, Math.ceil(a[n - 1]) + 1, cut[c + 3]);
+          areas.top = n - 4;
+          cuts.top = c;
           if (scene.geometry[i] === ALPHA_MASK) {
             // Not taken into the layer it ends, which it cuts to its rectangle: to nothing, where it
             // has none.
@@ -131,10 +200,10 @@ export function measureLayers(
 
             const p = c - 4;
             if (p >= 0) {
-              cuts[p] = Math.max(cuts[p], left);
-              cuts[p + 1] = Math.max(cuts[p + 1], top);
-              cuts[p + 2] = Math.min(cuts[p + 2], right);
-              cuts[p + 3] = Math.min(cuts[p + 3], bottom);
+              cut[p] = Math.max(cut[p], left);
+              cut[p + 1] = Math.max(cut[p + 1], top);
+              cut[p + 2] = Math.min(cut[p + 2], right);
+              cut[p + 3] = Math.min(cut[p + 3], bottom);
             }
 
             break;
@@ -150,10 +219,10 @@ export function measureLayers(
 
         // The view puts no alpha mask straight in a filtered layer, which would run its filters on
         // what the mask left (cuts).
-        cuts.length = c;
+        cuts.top = c;
         const kept = scene.areas;
         for (let k = 0; k < 4; k++) {
-          kept[layer * 4 + k] = areas[n - 4 + k];
+          kept[layer * 4 + k] = a[n - 4 + k];
         }
 
         filteredRect(
@@ -166,7 +235,7 @@ export function measureLayers(
           scene.wholes[layer],
           scene.objects,
         );
-        areas.length = n - 4;
+        areas.top = n - 4;
         const r = scene.layers;
         const at = layer * 4;
         if (r[at + 2] > 0) {
@@ -320,14 +389,16 @@ export function drawnArea(
   scale: number,
   out: number[],
 ): void {
-  out.length = 0;
-  pushEmpty(out);
+  drawn[0] = Number.POSITIVE_INFINITY;
+  drawn[1] = Number.POSITIVE_INFINITY;
+  drawn[2] = Number.NEGATIVE_INFINITY;
+  drawn[3] = Number.NEGATIVE_INFINITY;
   let defining = 0;
   for (let i = from; i < scene.length; i++) {
     switch (scene.kind[i]) {
       case DRAW:
         if (defining === 0) {
-          placeDraw(scene, i, geometries.box, rows.data, scale, out);
+          placeDraw(scene, i, geometries.box, rows.data, scale, drawn, 4);
         }
 
         break;
@@ -339,16 +410,25 @@ export function drawnArea(
         break;
     }
   }
+
+  out[0] = drawn[0];
+  out[1] = drawn[1];
+  out[2] = drawn[2];
+  out[3] = drawn[3];
 }
 
-/** Entry `i`'s geometry box placed by its row at `k` target pixels a stage pixel, taken into the area atop `stack`. */
+/**
+ * Entry `i`'s geometry box placed by its row at `k` target pixels a stage
+ * pixel, taken into the area that ends before `stack[n]`.
+ */
 function placeDraw(
   scene: SceneList,
   i: number,
   box: Float32Array,
   m: Float32Array,
   k: number,
-  stack: number[],
+  stack: Float64Array,
+  n: number,
 ): void {
   const g = scene.geometry[i] * 4;
   const x0 = box[g];
@@ -367,34 +447,18 @@ function placeDraw(
   const tx = m[r + 4] * k;
   const ty = m[r + 5] * k;
   // The box's corners placed: each of the least and greatest a coordinate takes, by sign.
-  const n = stack.length;
   stack[n - 4] = Math.min(stack[n - 4], tx + Math.min(a * x0, a * x1) + Math.min(c * y0, c * y1));
   stack[n - 3] = Math.min(stack[n - 3], ty + Math.min(b * x0, b * x1) + Math.min(d * y0, d * y1));
   stack[n - 2] = Math.max(stack[n - 2], tx + Math.max(a * x0, a * x1) + Math.max(c * y0, c * y1));
   stack[n - 1] = Math.max(stack[n - 1], ty + Math.max(b * x0, b * x1) + Math.max(d * y0, d * y1));
 }
 
-function pushEmpty(stack: number[]): void {
-  stack.push(
-    Number.POSITIVE_INFINITY,
-    Number.POSITIVE_INFINITY,
-    Number.NEGATIVE_INFINITY,
-    Number.NEGATIVE_INFINITY,
-  );
-}
-
-/** The top area of `from` moved onto `to`. */
-function moveTop(from: number[], to: number[]): void {
-  const n = from.length;
-  to.push(from[n - 4], from[n - 3], from[n - 2], from[n - 1]);
-  from.length = n - 4;
-}
-
 /** The open area on top grown to take in the rectangle. */
 function unionTop(left: number, top: number, right: number, bottom: number): void {
-  const n = areas.length;
-  areas[n - 4] = Math.min(areas[n - 4], left);
-  areas[n - 3] = Math.min(areas[n - 3], top);
-  areas[n - 2] = Math.max(areas[n - 2], right);
-  areas[n - 1] = Math.max(areas[n - 1], bottom);
+  const a = areas.data;
+  const n = areas.top;
+  a[n - 4] = Math.min(a[n - 4], left);
+  a[n - 3] = Math.min(a[n - 3], top);
+  a[n - 2] = Math.max(a[n - 2], right);
+  a[n - 1] = Math.max(a[n - 1], bottom);
 }
