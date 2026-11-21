@@ -38,10 +38,12 @@ A module is written a part at a time, a call each, the wrapper collecting
 each part's garbage and decoding its text before it asks for the next:
 verifying an ABC's methods and writing all their entries in one call
 held every method's garbage and the whole module's text at once, and
-wasm never gives memory back. A part makes about 2 MiB of garbage, so
-the player's libraries and as3pb each compile in 8 MiB where they took
-32, and a large application's compile little more than the tables it
-keeps live. The parts are cut only between bodies, so the module
+wasm never gives memory back. A part makes about 2 MiB of garbage, so a
+new instance's memory, measured in node, is 8 MiB after compiling the
+player's libraries (builtin and playerglobal) where it was 32, and still
+8 after as3pb's ABC as well, and a large application's compile takes
+little more than the tables it keeps live. A player that has loaded a few
+SWFs after the libraries is at 16 MiB (`tests/player/leak.ts`). The parts are cut only between bodies, so the module
 is the same however it is cut (`ModuleEmitter.begin` and `step`). The
 source map and the entries are written each in a call of its own, after
 the module's garbage is collected, and only when asked for: written with

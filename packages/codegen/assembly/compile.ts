@@ -318,9 +318,9 @@ export function domainModuleDone(): bool {
  * ModuleEmitter.step). A collection between parts takes about half a
  * millisecond with a large application's tables live, so smaller parts
  * cost time: at 2 MiB as3pb and the LZ4 program compiled 3 to 4% slower
- * than whole, and the player's libraries in 8 MiB of memory where whole
- * they took 32; at 4 MiB the libraries took 16, and at 1 MiB no less
- * than at 2.
+ * than whole, and a new instance's memory after compiling the player's
+ * libraries alone was 8 MiB where whole it was 32; at 4 MiB it was 16,
+ * and at 1 MiB no less than at 2.
  */
 const PART_BUDGET: u64 = 2 << 20;
 
