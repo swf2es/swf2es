@@ -184,6 +184,12 @@
 // each frame, so that every frame tessellates it anew, as a tween of such a morph does. The
 // frames' tessellation (tess) is their draw's part spent in the tessellator, for every mode.
 //
+// --bitmaps N plays instead a SWF of N distinct lossless bitmaps, 128 by 128 each
+// (DefineBitsLossless2), of which --drawn K (N / 10 by default) fill shapes on the stage,
+// each moving a pixel each frame: what a library of bitmaps costs, most never shown, as an
+// application's SWFs define them. What the page holds after a full collection is their
+// pixels' memory; the first frame, their reading and drawing.
+//
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens
 // it); the bench prints the functions that took the most time themselves.
@@ -211,7 +217,8 @@
 //     | --scripted N [--still] | --town N | --still-crowd N | --timelines N [--loop K]
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
 //     | --triangles N [--culled] | --redraw N | --burst N [--every K] | --vectors N | --text N [--normal | --device]
-//     | --deck N [--paint solid|gradient|bitmap] [--ratio-change]] [--toggle-every K] [--frames N] [--idle K]
+//     | --deck N [--paint solid|gradient|bitmap] [--ratio-change] | --bitmaps N [--drawn K]]
+//     [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--census] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //     [--checkout DIR] [--no-multi-draw]
@@ -285,6 +292,8 @@ const vectors = option("vectors", 0);
 const triangles = option("triangles", 0);
 const texts = option("text", 0);
 const deck = option("deck", 0);
+const bitmaps = option("bitmaps", 0);
+const drawnBitmaps = Math.min(bitmaps, option("drawn", Math.max(1, Math.floor(bitmaps / 10))));
 const paint = args.includes("--paint") ? args[args.indexOf("--paint") + 1] : "solid";
 const ratioChange = args.includes("--ratio-change");
 if (!["solid", "gradient", "bitmap"].includes(paint)) {
@@ -1953,6 +1962,81 @@ function deckSwf(count: number, paint: string, ratioChange: boolean): Uint8Array
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: frames, tags });
 }
 
+/**
+ * `count` lossless bitmaps of their own pixels, the first `drawn` filling a
+ * square each on the stage, moving a pixel each frame (--bitmaps, --drawn).
+ */
+function bitmapsSwf(count: number, drawn: number): Uint8Array {
+  const SIDE = 128;
+  const tags: Uint8Array[] = [w.backgroundColor(0xf0f0f0)];
+  for (let i = 0; i < count; i++) {
+    // Bands of the bitmap's own colours, and a little noise, as art compresses.
+    const raw = new Uint8Array(SIDE * SIDE * 4);
+    const hue = (i * 47) & 0xff;
+    for (let p = 0; p < SIDE * SIDE; p++) {
+      const band = ((p % SIDE) >> 4) + ((p / SIDE) >> 4);
+      const noise = random() < 0.1 ? 16 : 0;
+      raw[p * 4] = 255;
+      raw[p * 4 + 1] = (hue + band * 23 + noise) & 0xff;
+      raw[p * 4 + 2] = (i + band * 41) & 0xff;
+      raw[p * 4 + 3] = (255 - hue + band * 7) & 0xff;
+    }
+
+    const id = i + 1;
+    tags.push(
+      w.tag(
+        36,
+        Uint8Array.from([id & 0xff, id >> 8, 5, SIDE, 0, SIDE, 0, ...zlibCompress(raw)]),
+        true,
+      ),
+    );
+  }
+
+  const side = SIDE * TWIPS;
+  const square: w.PathCommand[] = [
+    { move: [0, 0] },
+    { line: [side, 0] },
+    { line: [side, side] },
+    { line: [0, side] },
+    { line: [0, 0] },
+  ];
+  const across = Math.max(1, Math.floor(WIDTH / (SIDE / 2)));
+  const at = (k: number) => ({
+    tx: (k % across) * (SIDE / 2) * TWIPS,
+    ty:
+      (Math.floor(k / across) % Math.max(1, Math.floor(HEIGHT / (SIDE / 2)))) * (SIDE / 2) * TWIPS,
+  });
+  for (let k = 0; k < drawn; k++) {
+    tags.push(
+      w.shape({
+        id: count + 1 + k,
+        version: 3,
+        bounds: [0, side, 0, side],
+        fills: [{ bitmap: k + 1, type: 0x41, matrix: { a: TWIPS, d: TWIPS } }],
+        paths: [{ fill1: 1, commands: square }],
+      }),
+    );
+  }
+
+  for (let frame = 0; frame < frames; frame++) {
+    for (let k = 0; k < drawn; k++) {
+      const { tx, ty } = at(k);
+      tags.push(
+        w.place({
+          depth: k + 1,
+          ...(frame === 0 ? { character: count + 1 + k } : { move: true }),
+          matrix: { tx: tx + (frame % 2) * TWIPS, ty },
+        }),
+      );
+    }
+
+    tags.push(w.showFrame());
+  }
+
+  tags.push(w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: frames, tags });
+}
+
 // --checkout DIR plays another built checkout's packages with this harness, for an A/B.
 const checkout = args.includes("--checkout") ? args[args.indexOf("--checkout") + 1] : undefined;
 const mounts: [string, string][] = [];
@@ -2189,64 +2273,66 @@ function within(profile: SampledProfile, from: number, ms: number): string[] {
 }
 
 const swf =
-  deck > 0
-    ? deckSwf(deck, paint, ratioChange)
-    : vectors > 0
-      ? vectorsSwf(vectors)
-      : redraws > 0
-        ? redrawSwf(redraws)
-        : bursts > 0
-          ? burstSwf(bursts, burstEvery)
-          : pen > 0
-            ? penSwf(pen)
-            : texts > 0
-              ? args.includes("--device")
-                ? deviceTextSwf(texts)
-                : textSwf(texts, args.includes("--normal"))
-              : triangles > 0
-                ? trianglesSwf(triangles, args.includes("--culled"))
-                : scrolled > 0
-                  ? scrollSwf(scrolled)
-                  : readback > 0
-                    ? readbackSwf(readback, args.includes("--opaque"))
-                    : stamps > 0
-                      ? stampsSwf(stamps)
-                      : town > 0
-                        ? townSwf(town)
-                        : timelines > 0
-                          ? timelinesSwf(timelines, option("loop", 240))
-                          : stillCrowd > 0
-                            ? stillCrowdSwf(stillCrowd)
-                            : toggleBranches > 0
-                              ? branchSwf(toggleBranches)
-                              : toggle > 0
-                                ? toggleSwf(toggle)
-                                : toggleStatic > 0
-                                  ? toggleStaticSwf(toggleStatic)
-                                  : scripted > 0
-                                    ? scriptedSwf(scripted, args.includes("--still"))
-                                    : pulse > 0
-                                      ? pulseSwf(
-                                          pulse,
-                                          option("loop", 96),
-                                          option("line", 1),
-                                          option("squash", 1),
-                                        )
-                                      : masks > 0
-                                        ? masksSwf(masks, args.includes("--unmasked"))
-                                        : blends > 0
-                                          ? blendsSwf(blends, blendFills, blendClips)
-                                          : branches > 0
-                                            ? branchSwf(branches)
-                                            : rig > 0
-                                              ? rigSwf(
-                                                  rig,
-                                                  args.includes("--swap"),
-                                                  args.includes("--fresh"),
-                                                  args.includes("--blurred") || filtered > 0,
-                                                  args.includes("--glide"),
-                                                )
-                                              : synthetic();
+  bitmaps > 0
+    ? bitmapsSwf(bitmaps, drawnBitmaps)
+    : deck > 0
+      ? deckSwf(deck, paint, ratioChange)
+      : vectors > 0
+        ? vectorsSwf(vectors)
+        : redraws > 0
+          ? redrawSwf(redraws)
+          : bursts > 0
+            ? burstSwf(bursts, burstEvery)
+            : pen > 0
+              ? penSwf(pen)
+              : texts > 0
+                ? args.includes("--device")
+                  ? deviceTextSwf(texts)
+                  : textSwf(texts, args.includes("--normal"))
+                : triangles > 0
+                  ? trianglesSwf(triangles, args.includes("--culled"))
+                  : scrolled > 0
+                    ? scrollSwf(scrolled)
+                    : readback > 0
+                      ? readbackSwf(readback, args.includes("--opaque"))
+                      : stamps > 0
+                        ? stampsSwf(stamps)
+                        : town > 0
+                          ? townSwf(town)
+                          : timelines > 0
+                            ? timelinesSwf(timelines, option("loop", 240))
+                            : stillCrowd > 0
+                              ? stillCrowdSwf(stillCrowd)
+                              : toggleBranches > 0
+                                ? branchSwf(toggleBranches)
+                                : toggle > 0
+                                  ? toggleSwf(toggle)
+                                  : toggleStatic > 0
+                                    ? toggleStaticSwf(toggleStatic)
+                                    : scripted > 0
+                                      ? scriptedSwf(scripted, args.includes("--still"))
+                                      : pulse > 0
+                                        ? pulseSwf(
+                                            pulse,
+                                            option("loop", 96),
+                                            option("line", 1),
+                                            option("squash", 1),
+                                          )
+                                        : masks > 0
+                                          ? masksSwf(masks, args.includes("--unmasked"))
+                                          : blends > 0
+                                            ? blendsSwf(blends, blendFills, blendClips)
+                                            : branches > 0
+                                              ? branchSwf(branches)
+                                              : rig > 0
+                                                ? rigSwf(
+                                                    rig,
+                                                    args.includes("--swap"),
+                                                    args.includes("--fresh"),
+                                                    args.includes("--blurred") || filtered > 0,
+                                                    args.includes("--glide"),
+                                                  )
+                                                : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -2297,49 +2383,51 @@ const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quant
 const tessellation = result.tessellation.slice(WARMUP);
 const summary = {
   shapes:
-    deck > 0
-      ? `deck of ${deck} contours, ${paint}, ${ratioChange ? "a new ratio each frame" : "moving"}`
-      : vectors > 0
-        ? `${vectors} shapes built once, moving and turning`
-        : redraws > 0
-          ? `${redraws} shapes drawn anew each frame`
-          : bursts > 0
-            ? `${bursts} discs drawn anew ${burstEvery > 1 ? `every ${burstEvery} frames` : "each frame"} in add`
-            : pen > 0
-              ? `pen of ${pen}`
-              : texts > 0
-                ? `${texts} text fields, ${args.includes("--device") ? "device font" : args.includes("--normal") ? "normal" : "advanced"}`
-                : triangles > 0
-                  ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
-                  : scrolled > 0
-                    ? `scrolled bitmap of ${scrolled}`
-                    : readback > 0
-                      ? `readback of ${readback} edges${args.includes("--opaque") ? ", opaque" : ""}`
-                      : town > 0
-                        ? `town of ${town}`
-                        : timelines > 0
-                          ? `${timelines} timelines of ${option("loop", 240)} frames`
-                          : stillCrowd > 0
-                            ? `still crowd of ${stillCrowd}, one in 32 playing`
-                            : toggleBranches > 0
-                              ? `toggle of ${toggleBranches} branches`
-                              : toggle > 0
-                                ? `toggle of ${toggle}`
-                                : toggleStatic > 0
-                                  ? `static toggle of ${toggleStatic}`
-                                  : scripted > 0
-                                    ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
-                                    : pulse > 0
-                                      ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
-                                      : masks > 0
-                                        ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                                        : blends > 0
-                                          ? `${blends} blended shapes${blendFills > 1 ? `, ${blendFills} fills to a coloured one` : ""}${blendClips ? ", each in a blended clip" : ""}`
-                                          : branches > 0
-                                            ? `${branches} branches`
-                                            : rig > 0
-                                              ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
-                                              : shapes,
+    bitmaps > 0
+      ? `${bitmaps} bitmaps, ${drawnBitmaps} drawn`
+      : deck > 0
+        ? `deck of ${deck} contours, ${paint}, ${ratioChange ? "a new ratio each frame" : "moving"}`
+        : vectors > 0
+          ? `${vectors} shapes built once, moving and turning`
+          : redraws > 0
+            ? `${redraws} shapes drawn anew each frame`
+            : bursts > 0
+              ? `${bursts} discs drawn anew ${burstEvery > 1 ? `every ${burstEvery} frames` : "each frame"} in add`
+              : pen > 0
+                ? `pen of ${pen}`
+                : texts > 0
+                  ? `${texts} text fields, ${args.includes("--device") ? "device font" : args.includes("--normal") ? "normal" : "advanced"}`
+                  : triangles > 0
+                    ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
+                    : scrolled > 0
+                      ? `scrolled bitmap of ${scrolled}`
+                      : readback > 0
+                        ? `readback of ${readback} edges${args.includes("--opaque") ? ", opaque" : ""}`
+                        : town > 0
+                          ? `town of ${town}`
+                          : timelines > 0
+                            ? `${timelines} timelines of ${option("loop", 240)} frames`
+                            : stillCrowd > 0
+                              ? `still crowd of ${stillCrowd}, one in 32 playing`
+                              : toggleBranches > 0
+                                ? `toggle of ${toggleBranches} branches`
+                                : toggle > 0
+                                  ? `toggle of ${toggle}`
+                                  : toggleStatic > 0
+                                    ? `static toggle of ${toggleStatic}`
+                                    : scripted > 0
+                                      ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
+                                      : pulse > 0
+                                        ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+                                        : masks > 0
+                                          ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                                          : blends > 0
+                                            ? `${blends} blended shapes${blendFills > 1 ? `, ${blendFills} fills to a coloured one` : ""}${blendClips ? ", each in a blended clip" : ""}`
+                                            : branches > 0
+                                              ? `${branches} branches`
+                                              : rig > 0
+                                                ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
+                                                : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   retainedMb: {
