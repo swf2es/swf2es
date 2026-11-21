@@ -29,10 +29,6 @@
 //   class on the stage instead, so that the same SWFs load into it over
 //   and over: its first load's classes are the domain's, as in Flash, and
 //   those after must go once let go of;
-// - lazy: shared, with methods compiled on first use, whose domains the
-//   compiler keeps until they are collected: what its live ABCs hold is
-//   measured after a collection, and its memory's high-water mark, which
-//   follows the collector, is not held to the ceiling;
 // - churn: each gear loaded once into that domain and kept, instances of
 //   its class made and dropped every frame, each a load.
 //
@@ -89,18 +85,25 @@ const WARM = 10;
 const BOUND = 64 * 1024;
 /**
  * What codegen's memory may grow to over the loads without failing, if it
- * was smaller after the warm ones. Wasm memory is a high-water mark, and
- * compiling the libraries, a part of each module at a time, takes it to
- * 16 MiB; read from a module cache, they are not compiled, and it starts
- * at 8. Dead domains building up before a compaction, and a compaction
- * making new tables beside the old, then take it to 16 MiB after some 20
- * loads, and to 32 after some hundreds or not at all (the shared gear,
- * uncached, within 300), never further in 4,000. A leak would pass it, but
- * only a large one: from a start of 8 or 16 MiB, some 80 KB a load over
- * 300 loads is hidden, though the live ABCs' weight, held to BOUND a
- * load, catches one in the compiler's tables.
+ * was smaller after the warm ones. Wasm memory is a high-water mark. On
+ * this page, the libraries compiled a part of each module at a time and
+ * the warm loads after them, it is at 16 MiB; read from a module cache
+ * (--cache), the libraries are not compiled and it starts at 8. Uncached,
+ * it then stays at 16 in every mode but the shared gear's, so 16 MiB is
+ * the ceiling: a leak outside the domain's tables of a few tens of KB a
+ * load crosses it over 300 loads. The live ABCs' weight, held to BOUND a
+ * load, sees one in the tables.
  */
-const CODEGEN_CEILING = 32 * 1024 * 1024;
+const CODEGEN_CEILING = 16 * 1024 * 1024;
+/**
+ * The ceiling where compactions raise the high-water mark: the shared gear
+ * uncached, whose dead domains building up before a compaction, and a
+ * compaction making new tables beside the old, take it from 16 to 32 MiB
+ * within 300 loads; and with the cache, where they take it from 8 to 16
+ * after some 20 loads and to 32 after some hundreds or not at all. Never
+ * further in 4,000.
+ */
+const COMPACTING_CEILING = 32 * 1024 * 1024;
 
 function child(name: string): string {
   const methods = Array.from(
@@ -366,7 +369,6 @@ await withSteppedPage(
       "avm1movie",
       "dropped",
       "shared",
-      "lazy",
       "churn",
     ]) {
       if (modes.length && !modes.includes(mode)) {
@@ -413,12 +415,7 @@ await withSteppedPage(
                   : `/leak/main.swf?kinds=${mode === "same" ? 1 : KINDS}`,
                 cached,
               )
-            : await page.open(
-                gearSwf,
-                `/leak/gear.swf?mode=${mode === "lazy" ? "shared" : mode}&kinds=${KINDS}`,
-                cached,
-                mode === "lazy",
-              );
+            : await page.open(gearSwf, `/leak/gear.swf?mode=${mode}&kinds=${KINDS}`, cached);
         for (const n of [WARM, LOADS]) {
           if (error) {
             break;
@@ -428,8 +425,8 @@ await withSteppedPage(
           error = stepped.error ?? (stepped.lines < n ? `only ${stepped.lines} loads` : null);
           codegen.push(stepped.codegen);
           await measure(n);
-          // After the collection measure made, as what lazy compilation keeps
-          // goes only with its domain.
+          // After the collection measure made, as what codegen keeps of a
+          // domain it has not evicted goes only with the domain.
           live.push((await page.step(0, 0)).live);
         }
 
@@ -447,13 +444,9 @@ await withSteppedPage(
       const ms = (performance.now() - warmed) / loads;
       const ok = perLoad <= BOUND;
       const liveOk = live.length < 2 || (live[1] - live[0]) / loads <= BOUND;
-      // Lazy compilation keeps a domain's ABCs until the domain is collected,
-      // so how high codegen's memory goes follows the collector's timing.
+      const ceiling = cached || mode === "shared" ? COMPACTING_CEILING : CODEGEN_CEILING;
       const codegenOk =
-        liveOk &&
-        (mode === "lazy" ||
-          codegen.length < 2 ||
-          codegen[1] <= Math.max(codegen[0], CODEGEN_CEILING));
+        liveOk && (codegen.length < 2 || codegen[1] <= Math.max(codegen[0], ceiling));
       const memoriesOk = memories.length < 2 || memories[1] <= memories[0];
       failed ||= !ok || !codegenOk || !memoriesOk;
       console.log(

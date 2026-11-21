@@ -80,11 +80,6 @@ function counted(codegen: Codegen): { codegen: Codegen; modules: string[]; logge
       logged.push(args[1] ?? -1);
       return compiled;
     },
-    compileLazyModule: (...args: Parameters<Codegen["compileLazyModule"]>) => {
-      const module = codegen.compileLazyModule(...args);
-      modules.push(module);
-      return module;
-    },
   });
   return { codegen: spy, modules, logged };
 }

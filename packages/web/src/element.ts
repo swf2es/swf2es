@@ -943,7 +943,6 @@ export class Swf2esPlayerElement extends ElementBase {
       },
       onUncaught: (error) => this.#report(session, error),
       fullScreen: this.#fullScreen(session),
-      lazyCompilation: configuration().lazyCompilation,
       apiVersion: apiVersion(attribute(this, "apiversion"), configuration().apiVersion),
       swfVersion,
       workerHost,

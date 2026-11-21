@@ -81,7 +81,8 @@ order:
   verification ([benchmarks.md](benchmarks.md));
 - the dispatcher emitter, then structured control flow, source maps and
   the runtime's hot paths; type references that do not depend on the
-  order methods compile in, and lazy compilation;
+  order methods compile in, and lazy compilation, since removed for
+  modules written a part at a time;
 - JSON through the host's own, faster AMF3, unrolled loops, inline
   caches for untyped property access;
 - the player: display list, timeline, playerglobal of its own (AS3 of

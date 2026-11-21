@@ -2776,20 +2776,17 @@ check(
   },
 );
 
-check(
-  "lazy compilation is opt-in and destroyed players release their compilers",
-  async (evaluate, send) => {
-    await send("HeapProfiler.collectGarbage");
-    await send("HeapProfiler.collectGarbage");
-    const before = await call<{ codegens: number }>(evaluate, "survivors()");
-    assert.equal(await call<number>(evaluate, "lazyChurn(5)"), 5);
-    await send("HeapProfiler.collectGarbage");
-    await send("HeapProfiler.collectGarbage");
-    const after = await call<{ players: number; codegens: number }>(evaluate, "survivors()");
-    assert.equal(after.players, 0);
-    assert.equal(after.codegens, before.codegens);
-  },
-);
+check("destroyed players release their compilers", async (evaluate, send) => {
+  await send("HeapProfiler.collectGarbage");
+  await send("HeapProfiler.collectGarbage");
+  const before = await call<{ codegens: number }>(evaluate, "survivors()");
+  assert.equal(await call<number>(evaluate, "compileChurn(5)"), 5);
+  await send("HeapProfiler.collectGarbage");
+  await send("HeapProfiler.collectGarbage");
+  const after = await call<{ players: number; codegens: number }>(evaluate, "survivors()");
+  assert.equal(after.players, 0);
+  assert.equal(after.codegens, before.codegens);
+});
 
 check(
   "a page's frame listener and the meter each hear the frames, whichever comes first",

@@ -1161,7 +1161,10 @@ export function verifyMethods(domain: Domain, index: u32): StaticArray<i32> {
  * verifyMethods a part at a time, so that a host may collect the garbage
  * of each part before the next: run until it returns true, with nothing
  * else decoding in between. The parts verify what verifyMethods does, in
- * its order, however they are cut.
+ * its order, however they are cut. The constructor counts the ABC as
+ * verified and logs LOG_Verify at once, as verifyMethods does, so one
+ * left before it is done leaves both, and what it resolved, in the domain
+ * (see abandon in compile.ts).
  */
 @final
 export class Verifier {

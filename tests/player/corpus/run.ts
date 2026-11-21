@@ -68,7 +68,6 @@ const results = await runPlayer(
     viewport: t.viewport ?? undefined,
     logFetch: t.logFetch,
     socket: t.socket ? JSON.parse(readFileSync(t.socket, "utf8")) : undefined,
-    lazyCompilation: args.includes("--lazy"),
     air: t.air,
     // Flash recorded each test as its own root, at its own SWF version's API version.
     apiVersion: "root",

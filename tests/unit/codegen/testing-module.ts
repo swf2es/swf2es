@@ -16,7 +16,6 @@ const COLLECT_EVERY = 64;
 const HANDED_OUT = new Set([
   "domainModuleBytes",
   "domainModuleMoreBytes",
-  "domainLazyModuleBytes",
   "domainEmitEachBytes",
   "actionsModuleBytes",
   "actionsEmitEachBytes",

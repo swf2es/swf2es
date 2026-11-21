@@ -12,7 +12,7 @@
 // same bytes. No key is taken: a key names the log, which a worker would
 // have to replay every module's for, and replaying verifies each method
 // again, half a compile. The logs are replayed only if the worker's
-// compiler is used again (a lazy method, a SWF it loads), before that use.
+// compiler is used again (a SWF it loads), before that use.
 import type { Codegen } from "@swf2es/codegen";
 
 /** A module the primordial compiled, read, or imported, and what compiling it fixed in the compiler's domain. */

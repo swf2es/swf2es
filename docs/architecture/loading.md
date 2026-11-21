@@ -13,7 +13,7 @@ dispatches `init`, final `progress`, and then `complete` at the end of its
 first frame, after its scripts and `exitFrame`. A preloader that subscribes
 in frame 1 can advance from that final progress before `complete`, as AIR
 does when a SWF is streamed over HTTP. `MainLoadProgress` checks that order
-in eager and lazy compilation. Content loaded by `loadBytes` keeps its
+in the player. Content loaded by `loadBytes` keeps its
 different sequence: progress precedes its construction, so a listener it
 installs in frame 1 sees only `init` and `complete`.
 

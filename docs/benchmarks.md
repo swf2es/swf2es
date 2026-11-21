@@ -644,18 +644,16 @@ points at:
   compare converts both elements to Number each time, where avmplus'
   ArraySort compares the elements' doubles in C++.
 
-## AVM2 eager and lazy compilation
+## AVM2 startup
 
 `pnpm bench:avm2 [--runs 5] [--frames 600] [--json /tmp/avm2.json]`
-compares the default eager loader with the optional lazy compiler, in
-fresh node processes, alternating their order. The generated movie
+times the player's loader in fresh node processes. The generated movie
 exercises captured functions, arrays, properties and frame events across
 three scenes, with nested bodies left unused; the libraries, startup,
 first-use scenes and warmed ticks are measured apart, each scene's value
-is checked, and warmed ticks must compile no further methods.
+is checked, and warmed ticks must compile no further modules.
 `--swf /path/to/movie.swf` measures a local movie's startup and ticks,
-without interaction. `node tests/player/run.ts --lazy` and `pnpm corpus
---lazy avm2/` run the browser cases lazily.
+without interaction.
 
 ## Reference numbers
 

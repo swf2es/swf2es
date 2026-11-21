@@ -3,8 +3,8 @@ avmshell lacks this type, so they run against AIR's `adl` instead of the
 normal conformance runner.
 
 `node tests/conformance/air.ts` compiles `AirFloat.as` with the installed
-`amxmlc`, compares its output with AIR, and runs the same SWF in swf2es with
-eager and lazy compilation. Add `--update` to regenerate the redistributable
+`amxmlc`, compares its output with AIR, and runs the same SWF in swf2es.
+Add `--update` to regenerate the redistributable
 ABC fixture and reference trace. The ordinary player suite runs that fixture
 as `air-float`, so CI needs no proprietary AIR SDK.
 
