@@ -532,6 +532,75 @@ function shapeOf(
   return character;
 }
 
+/**
+ * Morphs by their tag's bytes, as shapes are: a SWF loaded again blends at
+ * the ratios the first already blended, and its blends' layers are the
+ * first's, which the renderer keeps the triangles of, so a tween a crowd of
+ * loads plays is tessellated once at each ratio, not once a load. A morph
+ * filled with a bitmap keeps to its SWF, whose bitmap it is (and whose
+ * version alone tells whether that bitmap is smoothed). Held weakly: one no
+ * library holds goes, with its blends, and its entry after it.
+ */
+const sharedMorphs = new Map<number, { tag: Uint8Array; morph: WeakRef<MorphCharacter> }[]>();
+const morphsGone = new FinalizationRegistry<{ hash: number; tag: Uint8Array }>(({ hash, tag }) => {
+  const list = sharedMorphs.get(hash)?.filter((entry) => entry.tag !== tag) ?? [];
+  if (list.length > 0) {
+    sharedMorphs.set(hash, list);
+  } else {
+    sharedMorphs.delete(hash);
+  }
+});
+
+/** The morph a DefineMorphShape tag defines, as another SWF defined it alike if one did. */
+function morphOf(
+  bytes: Uint8Array,
+  t: Tag,
+  library: Map<number, Character>,
+  version: number,
+): MorphCharacter {
+  const tag = bytes.subarray(t.offset, t.offset + t.length);
+  const hash = tagHash(t.code, tag);
+  for (const entry of sharedMorphs.get(hash) ?? []) {
+    const shared = entry.morph.deref();
+    if (shared && sameBytes(entry.tag, tag)) {
+      return shared;
+    }
+  }
+
+  const morph = readMorphShape(bytes, t.code, t.offset, t.length, version);
+  // Neither end's records bring styles of their own (readMorphShape).
+  const filled =
+    morph.fills.some(({ start }) => start.type === "bitmap") ||
+    morph.lines.some(({ start }) => start.fill?.type === "bitmap");
+  if (filled) {
+    return {
+      type: "morph",
+      id: morph.id,
+      morph,
+      blends: new Map(),
+      bitmap: (id) => {
+        const c = library.get(id);
+        return c?.type === "bitmap" ? c : null;
+      },
+    };
+  }
+
+  // No reference to this SWF's library or bytes: another library can keep it after it is unloaded.
+  const character: MorphCharacter = {
+    type: "morph",
+    id: morph.id,
+    morph,
+    blends: new Map(),
+    bitmap: () => null,
+  };
+  const own = tag.slice();
+  const list = sharedMorphs.get(hash) ?? [];
+  list.push({ tag: own, morph: new WeakRef(character) });
+  sharedMorphs.set(hash, list);
+  morphsGone.register(character, { hash, tag: own });
+  return character;
+}
+
 function timelineOf(
   bytes: Uint8Array,
   list: Tag[],
@@ -624,17 +693,8 @@ function timelineOf(
       }
       case tags.DefineMorphShape:
       case tags.DefineMorphShape2: {
-        const morph = readMorphShape(bytes, t.code, t.offset, t.length, version);
-        library.set(morph.id, {
-          type: "morph",
-          id: morph.id,
-          morph,
-          blends: new Map(),
-          bitmap: (id) => {
-            const c = library.get(id);
-            return c?.type === "bitmap" ? c : null;
-          },
-        });
+        const morph = morphOf(bytes, t, library, version);
+        library.set(morph.id, morph);
         break;
       }
       case tags.DefineSprite: {

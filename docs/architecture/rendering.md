@@ -14,7 +14,23 @@ A shape layer's fills are geometries of the renderer's, made once for
 the layer and shared by every instance that draws it (`scene/parts.ts`,
 `partsOf`), a
 drawing's for each version of it, and let go of once undrawn for 300
-frames (`IDLE_FRAMES`). They are built from Flash's edges
+frames (`IDLE_FRAMES`). A layer that took 20 ms or more to make
+(`SLOW_PARTS_MS`), as a morph's blend of a hundred crossing contours takes
+libtess2 seconds, keeps its triangles when its geometries go
+(`scene/kept-parts.ts`), so a tween longer than the idle frames adds its
+blends again on each loop rather than tessellating them again; one with a
+fill the tessellator refused keeps nothing, to be tried again. Every view
+shares one budget of 64 MB (`KEPT_PARTS_BYTES`), which counts only the
+triangles whose geometries have gone, as a geometry held is the same
+arrays. Triangles that do not fit as they expire push out those worth
+less, in milliseconds a byte, and are let go of otherwise, a tie too: let
+go of by age, a loop of more blends than fit would find none of them kept.
+They go otherwise with their layer, their view, or as their drawing
+changes or no longer draws them; fewer than 64 KB are never kept
+(`LEAST_KEPT_BYTES`), as a small layer is slow only when a collection
+pauses its making. A morph's
+blend past its 64 to 256 kept (`display/morph.ts`) is collected, its kept
+triangles with it. The geometries are built from Flash's edges
 (`display/shapes.ts`: each edge goes to its right fill forward and its
 left fill reversed, joined into contours; one with the same fill on both
 sides, a seam Flash Pro leaves inside a fill, goes to neither, so it
@@ -135,7 +151,9 @@ bounds and hit-tests as one. The blend mixes where the ends' points lie,
 not their deltas, a straight edge paired with a curve as a curve, and
 keeps them to whole twips, so a closed path stays closed for `display/shapes.ts`
 to join. A morph starts by keeping its 64 latest blends, shared by its
-instances. If an evicted ratio returns, the limit doubles, up to 256;
+instances, and, as shapes are, by every SWF whose tag is alike but for
+one filled with a bitmap, so a SWF loaded again draws the blends the first
+made, tessellated once. If an evicted ratio returns, the limit doubles, up to 256;
 only the latest 256 evicted ratio numbers are remembered. This lets longer
 looping tweens reuse their paths and tessellations without increasing the
 limit for characters whose ratios never repeat. Clearing the blends resets the limit,
