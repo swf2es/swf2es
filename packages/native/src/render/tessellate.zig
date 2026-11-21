@@ -76,9 +76,10 @@ export fn checkFill(coords: [*]const f64, count: usize, ends: [*]const u32, cont
 /// lyon's fill, checked (validate.zig): its status, -3 where the check found no memory for its
 /// scratch, as lyon's own buffers report, or -4 where its triangles failed the check every way.
 /// Contours that come within thousandths of a pixel of each other can come out wrong one way and
-/// right the other, and a try costs a tenth of what libtess2 takes over them: so lyon sweeps
-/// first along the box's shorter side, then along its longer; snapping the points to whole
-/// twips as a third and fourth try rescued none of the decks these two lost. Out of memory for
+/// right the other, and a try costs a tenth of what libtess2 takes over them: so where lyon's
+/// sweep along y, its default and the quicker on decks, fails the check, it sweeps again along x.
+/// Snapping the points to whole twips as a third and fourth try rescued none of the decks these
+/// two lost. Out of memory for
 /// the check is lyon's own: libtess2, in the same nearly full arena, would run out too and unwind
 /// the instance, where the bands fail cleanly and the host fills the call again alone.
 fn lyonChecked(coords: []const f64, ends: []const u32, nonzero: bool) union(enum) { output: lyon.Output, status: i32 } {
@@ -92,22 +93,8 @@ fn lyonChecked(coords: []const f64, ends: []const u32, nonzero: bool) union(enum
         @trap();
     }
 
-    var left = coords[0];
-    var right = coords[0];
-    var top = coords[1];
-    var bottom = coords[1];
-    for (0..coords.len / 2) |i| {
-        const x = coords[i * 2];
-        const y = coords[i * 2 + 1];
-        if (x < left) left = x;
-        if (x > right) right = x;
-        if (y < top) top = y;
-        if (y > bottom) bottom = y;
-    }
-
-    const first: i32 = if (bottom - top > right - left) lyon.horizontal else 0;
     const mark = arena.top;
-    for ([_]i32{ first, first ^ lyon.horizontal }) |flags| {
+    for ([_]i32{ 0, lyon.horizontal }) |flags| {
         arena.top = mark;
         switch (lyon.fill(coords, ends, nonzero, flags)) {
             .output => |result| {

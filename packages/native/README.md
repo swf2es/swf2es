@@ -476,13 +476,15 @@ can still fall between scanlines. It reads every triangle once, about 11 ms
 of lyon's 153 on a deck of 95 contours; lyon's wrong wedges can be under
 three pixels tall, which 48 scanlines let through.
 
-lyon sweeps first along the box's shorter side and, where its triangles
-fail the check, again along the longer (swf2es/tessellate's `HORIZONTAL`
-flag): converging contours can come out wrong one way and right the other.
+lyon sweeps along y and, where its triangles fail the check, again along x
+(swf2es/tessellate's `HORIZONTAL` flag): converging contours can come out
+wrong one way and right the other, and the sweep along y is the quicker on
+decks, by a tenth.
 A fill that fails both ways goes to libtess2, as the bands give up on such
-decks after a tenth of a second or more without filling them. On even-odd
-decks of 80 to 100 contours turned 1e-5 to 1e-3 apart, the size of a real
-morph's, about one in eight still fails both ways and takes libtess2's 2 to 4 s.
+decks after a tenth of a second or more without filling them. Of 100
+even-odd decks of 80 to 100 contours turned 1e-5 to 1e-3 apart, the size of
+a real morph's, 22 still fail both ways and take libtess2's 2 to 4 s, most
+of them turned 1e-4 or less; the fuzz's random ones fail one in eight.
 What lyon fails at (-1, or -3 where its own buffers or the check's scratch
 find no memory) goes to the bands: libtess2, in the same nearly full arena,
 would run out too and unwind the instance, where the bands fail cleanly and
