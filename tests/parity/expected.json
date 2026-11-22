@@ -23,5 +23,10 @@
   "verify-tests",
   "verify-swfs",
   "verify-mutated",
-  "verify-fuzz"
+  "verify-fuzz",
+  "emit-libraries",
+  "emit-tests",
+  "emit-swfs",
+  "emit-mutated",
+  "emit-fuzz"
 ]
