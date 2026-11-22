@@ -1083,7 +1083,7 @@ pub fn nameParts(pool: *const ConstantPool, index: u32) u8 {
 /// run (code.ts tells the order). The result is each body's VerifyError, 0
 /// if it verified, or -1 if nothing could run it.
 pub fn verifyMethods(domain: *Domain, index: u32) Error![]i32 {
-    var verifier = try Verifier.init(domain, index);
+    var verifier = try Verifier.init(domain, domain.scratch, index);
     _ = try verifier.run(std.math.maxInt(u64));
     return verifier.results;
 }
@@ -1092,6 +1092,9 @@ pub fn verifyMethods(domain: *Domain, index: u32) Error![]i32 {
 /// returns true, with nothing else decoding in between.
 pub const Verifier = struct {
     domain: *Domain,
+    /// Where its results and queue are, which a module written a part at a
+    /// time keeps from one call to the next, past the call's arena.
+    gpa: Allocator,
     index: u32,
     /// Each body's VerifyError, 0 if it verified, -1 if nothing runs it; complete once run returns true.
     results: []i32 = &.{},
@@ -1105,12 +1108,13 @@ pub const Verifier = struct {
     /// The bytes of code the last run verified, as its budget counts them.
     spent: u64 = 0,
 
-    pub fn init(domain: *Domain, index: u32) Error!Verifier {
+    pub fn init(domain: *Domain, gpa: Allocator, index: u32) Error!Verifier {
         // Logged before what it resolves, as what it captures is a function's
         // scope before its signature; kept if it is the ABC's first, or finds
         // a scope the first did not.
         var self: Verifier = .{
             .domain = domain,
+            .gpa = gpa,
             .index = index,
             .first = domain.abcVerified.get(index) == 0,
             .entry = domain.logKind.len,
@@ -1153,7 +1157,7 @@ pub const Verifier = struct {
                 const b: u32 = @intCast(body);
                 self.results[b] = (try decoder.decode(b, scope)).@"error";
                 self.spent += @max(@as(u64, abc.bodyCodeLength.get(b)), BODY_COST);
-                try self.queue.appendSlice(domain.scratch, decoder.captured.items);
+                try self.queue.appendSlice(self.gpa, decoder.captured.items);
             }
 
             if (self.pass >= SETTLE_PASSES or !try settleContests(domain, index)) {
@@ -1187,12 +1191,12 @@ pub const Verifier = struct {
         const domain = self.domain;
         const index = self.index;
         const abc = domain.abcs.get(index);
-        const results = try domain.scratch.alloc(i32, abc.bodyCount());
+        const results = try self.gpa.alloc(i32, abc.bodyCount());
         @memset(results, -1);
         var queue: std.ArrayList(u32) = .empty;
         const scripts = domain.scriptTraits.get(index);
         for (0..abc.scriptCount()) |s| {
-            try domain.methodsOf(scripts[s], &queue);
+            try domain.methodsOf(self.gpa, scripts[s], &queue);
         }
 
         self.results = results;

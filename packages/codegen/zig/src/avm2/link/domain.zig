@@ -614,21 +614,21 @@ pub const Domain = struct {
     }
 
     /// Add to `out` the methods bound to traits t: its initializer, methods, getters and setters.
-    pub fn methodsOf(self: *const Domain, t: u32, out: *std.ArrayList(u32)) Allocator.Error!void {
+    pub fn methodsOf(self: *const Domain, gpa: Allocator, t: u32, out: *std.ArrayList(u32)) Allocator.Error!void {
         const traits = &self.traits;
         const index = traits.abc.get(t);
         const abc = self.abcs.get(index);
         const methods = self.methodStart.get(index);
         const initializer = traits.init.get(t);
         if (initializer >= 0) {
-            try out.append(self.scratch, @intCast(initializer));
+            try out.append(gpa, @intCast(initializer));
         }
 
         var i = traits.first.get(t);
         while (i < traits.end.get(t)) : (i += 1) {
             const kind = abc.traitTag.get(i) & 0x0f;
             if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
-                try out.append(self.scratch, methods + abc.traitIndex.get(i));
+                try out.append(gpa, methods + abc.traitIndex.get(i));
             }
         }
     }

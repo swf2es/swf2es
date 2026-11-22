@@ -686,7 +686,7 @@ fn captureClass(bd: *BodyDecoder, i: u32) Error!bool {
         domain.captures += 1;
     }
 
-    try domain.methodsOf(@intCast(ctraits), &bd.captured);
-    try domain.methodsOf(@intCast(itraits), &bd.captured);
+    try domain.methodsOf(domain.scratch, @intCast(ctraits), &bd.captured);
+    try domain.methodsOf(domain.scratch, @intCast(itraits), &bd.captured);
     return true;
 }
