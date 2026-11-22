@@ -32,6 +32,7 @@ var failure: u32 = 0;
 
 /// The call's allocator, which input() reset.
 pub fn gpa() Allocator {
+    std.debug.assert(memory.arenasReady());
     return memory.call.allocator();
 }
 

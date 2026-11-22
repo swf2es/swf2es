@@ -140,11 +140,13 @@ const READS_LAST_CALL = new Set(["outputLength", "codegenError"]);
 /**
  * The exports of a Zig build of the compiler, instantiated from `module`,
  * as asc's glue would give them: `signatures` names them, and the test
- * build's add theirs.
+ * build's add theirs, with those of theirs that read what the last call
+ * left rather than start a call (`readsLastCall`).
  */
 export async function bind<T>(
   module: WebAssembly.Module,
   signatures: { readonly [name: string]: Signature },
+  readsLastCall: readonly string[] = [],
 ): Promise<T & { panicked(): string | null }> {
   let panic: string | null = null;
   let raw: Raw | null = null;
@@ -203,7 +205,7 @@ export async function bind<T>(
 
     const params = parameters(spec);
     // These read the last call, and start none (see root.zig).
-    const starts = !READS_LAST_CALL.has(name);
+    const starts = !READS_LAST_CALL.has(name) && !readsLastCall.includes(name);
     bound[name] = (...args: unknown[]) => {
       alive();
       // A default where the argument is left out, as asc's glue passes arguments.length.
@@ -233,33 +235,33 @@ export async function bind<T>(
       }
 
       const flat: number[] = [];
-      const value = guarded(() => {
-        if (starts) {
-          const base = exports.input(size) >>> 0;
-          if (base === 0) {
-            throw new Error(`codegen-zig.wasm: ${name} ran out of memory`);
-          }
-
-          // Read after input, which may have grown memory.
-          const memory = new Uint8Array(exports.memory.buffer);
-          let at = 0;
-          for (const [i, part] of parts.entries()) {
-            if (part === null) {
-              flat.push(Number(values[i]));
-              continue;
-            }
-
-            at = align8(at);
-            memory.set(part, base + at);
-            flat.push(base + at, params[i].kind === "i32s" ? part.length / 4 : part.length);
-            at += part.length;
-          }
-        } else {
-          flat.push(...values.map(Number));
+      // Only the module's own code is guarded: running out of memory is a
+      // plain Error, which leaves the instance as usable as asc's left it.
+      if (starts) {
+        const base = guarded(() => exports.input(size)) >>> 0;
+        if (base === 0) {
+          throw new Error(`codegen-zig.wasm: ${name} ran out of memory`);
         }
 
-        return call(...flat);
-      });
+        // Read after input, which may have grown memory.
+        const memory = new Uint8Array(exports.memory.buffer);
+        let at = 0;
+        for (const [i, part] of parts.entries()) {
+          if (part === null) {
+            flat.push(Number(values[i]));
+            continue;
+          }
+
+          at = align8(at);
+          memory.set(part, base + at);
+          flat.push(base + at, params[i].kind === "i32s" ? part.length / 4 : part.length);
+          at += part.length;
+        }
+      } else {
+        flat.push(...values.map(Number));
+      }
+
+      const value = guarded(() => call(...flat));
       if (starts && exports.codegenError() !== 0) {
         throw new Error(`codegen-zig.wasm: ${name} ran out of memory`);
       }

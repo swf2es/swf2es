@@ -26,5 +26,9 @@ export async function zigTestingModule(poison: boolean): Promise<WebAssembly.Mod
 /** An instance of a Zig test build, with a memory of its own. */
 // biome-ignore lint/suspicious/noExplicitAny: as untyped as asc's bindings for the AssemblyScript build
 export function bindTesting(module: WebAssembly.Module): Promise<any> {
-  return bind(module, { ...SIGNATURES, ...TESTING_SIGNATURES });
+  return bind(module, { ...SIGNATURES, ...TESTING_SIGNATURES }, [
+    "memoryChunksUsed",
+    "memoryReached",
+    "stackDeepest",
+  ]);
 }

@@ -71,6 +71,16 @@ test("a call that runs out of memory hands out nothing and says so, and does not
   assert.equal(raw.codegenError(), 0);
 });
 
+test("running out of memory through the wrapper is a plain Error, and the instance lives on", async () => {
+  const testing = await bindTesting(await zigTestingModule(false));
+  assert.throws(
+    () => testing.abcVersion(new Uint8Array(0xfff0_0000)),
+    (e) => !(e instanceof CodegenPanic) && /ran out of memory/.test((e as Error).message),
+  );
+  assert.equal(testing.panicked(), null);
+  assert.equal(testing.compilerVersion(), "0.0.0");
+});
+
 test("a panic is thrown as a CodegenPanic, and the instance is dead after it", async () => {
   const testing = await bindTesting(await zigTestingModule(false));
   assert.equal(testing.panicked(), null);

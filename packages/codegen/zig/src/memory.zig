@@ -72,6 +72,11 @@ pub const Pages = struct {
 
         var self: Pages = .{ .base = base, .limit = moduleLimit(base), .free_bits = bits };
         const chunks: u32 = @intCast((end - base) / chunk_size);
+        if (poison) {
+            const at: [*]u8 = @ptrFromInt(base);
+            @memset(at[0 .. @as(usize, chunks) * chunk_size], poison_byte);
+        }
+
         self.mark(0, chunks, true);
         self.chunks = chunks;
         return self;
@@ -639,6 +644,10 @@ pub var call: Arena = undefined;
 /// What outlives domains.
 pub var global: Arena = undefined;
 var arenas_ready = false;
+
+pub fn arenasReady() bool {
+    return arenas_ready;
+}
 
 /// The arenas over the module's pages, made the first time.
 pub fn arenas() void {
