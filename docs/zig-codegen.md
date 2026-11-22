@@ -7,6 +7,19 @@ The earlier spikes are on local branches, `experiment/zig-abc` and
 for this draft; where it says "to check", the code was not read to
 confirm it.
 
+Decided since the draft:
+
+- **Stacked pull requests, nothing merged to `dev` until the port is
+  complete.** Each stage is a pull request on the one before it (stage
+  0's on `dev`), reviewed as it comes, and the stack is merged only once
+  the whole compiler is at parity. `dev` never carries a half-ported
+  compiler, the switch or the parity job; they arrive with the stack.
+  When a stage below is merged into its base, the ones above are
+  retargeted first, before its branch is deleted.
+- **`assembly/` is frozen** from the start of the port (after #1185
+  lands) until the swap, but for fixes, each of which is made in both.
+  Section 10's first question is answered by this.
+
 ## Why
 
 A long session of busy real content that loads about 1,500 SWFs left
@@ -614,9 +627,10 @@ touched `assembly/` in the last month), so each is ported twice unless
 the compiler is frozen. Two to three weeks to the swap is the honest
 figure, and M2 a week after.
 
-**During the port, changes to `assembly/`** are either held back
-(section 10) or made in both, the parity job failing a pull request
-that changes one alone once its stage is ported.
+**During the port, `assembly/` is frozen** but for fixes, which are made
+in both; each stage's pull request is rebased on `dev` as `dev` moves,
+and the parity job runs on the stack's top. Nothing reaches `dev` until
+the stack is complete and merged.
 
 **Swap.** One commit: `SWF2ES_CODEGEN` defaults to `zig`,
 `dist/codegen.wasm` is the Zig build, and the AssemblyScript one is
@@ -667,9 +681,8 @@ Risks:
 
 For the user to decide:
 
-1. **Freeze or dual-write?** Freeze `assembly/` for the port but for
-   fixes (shorter, simpler), or let it move and port each change twice?
-   Proposed: freeze once phase C starts, and land #1185 first.
+1. **Freeze or dual-write?** Decided: freeze, after #1185 lands, with
+   the port on stacked pull requests merged to `dev` only when complete.
 2. **Check in the wasm, or build it?** The decision recorded here is
    checked-in binaries with digests, as native. Given how often the
    compiler changes, the alternative is to check in only the digest of
