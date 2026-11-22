@@ -26,6 +26,8 @@ import {
   instantiate as instantiateZig,
   SIGNATURES,
 } from "../../packages/codegen/dist/zig.js";
+import { isAs3, readActions, readSwf } from "../../packages/format/dist/index.js";
+import { type Avm1Swf, avm1Swfs, testBlocks } from "../conformance/determinism-avm1.ts";
 import { bindTesting, zigTestingModule } from "../unit/codegen/zig-testing.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -157,6 +159,152 @@ function libraries(c: Compiler, r: Results, version: number, list: [string, Uint
   }
 }
 
+const AVM1_EXPORTS = [
+  "actionsModuleBytes",
+  "actionsModuleEntries",
+  "actionsModuleUnits",
+  "actionsEmitEachBytes",
+  "actionsUnitBytes",
+  "actionsUnitLimits",
+  "actionsHold",
+  "actionsHeldEmitEachBytes",
+  "actionsHeldUnitBytes",
+  "actionsHeldCount",
+  "actionsRelease",
+];
+
+/**
+ * Everything the AVM1 compiler gives for a SWF: its module kept, its
+ * entries and units, every block alone (one emitter and one each), every
+ * unit alone with its limits, and the same from the SWF held.
+ */
+function avm1(c: Compiler, r: Results, swf: Avm1Swf): void {
+  const { name, bytes, offsets, lengths, version } = swf;
+  const all = Array.from(offsets, (_, k) => k).join(",");
+  r.case(`${name}: module`, () =>
+    r.blob(
+      `${name}: module`,
+      handed(c, c.actionsModuleBytes(bytes, offsets, lengths, version, true)),
+    ),
+  );
+  r.case(`${name}: entries`, () =>
+    r.blob(`${name}: entries`, Buffer.from(c.actionsModuleEntries())),
+  );
+  let units = "";
+  r.case(`${name}: units`, () => {
+    units = c.actionsModuleUnits();
+    return r.blob(`${name}: units`, Buffer.from(units));
+  });
+  for (const reuse of [true, false]) {
+    r.case(`${name}: each block, reuse ${reuse}`, () =>
+      r.blob(
+        `${name}: each block, reuse ${reuse}`,
+        handed(c, c.actionsEmitEachBytes(bytes, offsets, lengths, version, all, reuse)),
+      ),
+    );
+  }
+
+  const keys = units
+    .split("\u0002")
+    .map((item) => item.split("\u0001"))
+    .filter((parts) => parts.length === 4)
+    .map(([key, numbers]) => [key, numbers.split(",").map(Number)] as const);
+  for (const [key, [at, end, bound, five]] of keys) {
+    r.case(`${name}: unit ${key}`, () => {
+      const code = r.blob(
+        `${name}: unit ${key}`,
+        handed(c, c.actionsUnitBytes(bytes, offsets, lengths, version, at, end, bound, five !== 0)),
+      );
+      return `${code} ${c.actionsUnitLimits().join(",")}`;
+    });
+  }
+
+  r.case(`${name}: held`, () => {
+    c.actionsHold(7, bytes, offsets, lengths);
+    return c.actionsHeldCount();
+  });
+  r.case(`${name}: held blocks`, () =>
+    r.blob(`${name}: held blocks`, handed(c, c.actionsHeldEmitEachBytes(7, version, all))),
+  );
+  for (const [key, [at, end, bound, five]] of keys) {
+    r.case(`${name}: held unit ${key}`, () => {
+      const code = r.blob(
+        `${name}: held unit ${key}`,
+        handed(c, c.actionsHeldUnitBytes(7, version, at, end, bound, five !== 0)),
+      );
+      return `${code} ${c.actionsUnitLimits().join(",")}`;
+    });
+  }
+
+  r.case(`${name}: released`, () => {
+    c.actionsRelease(7);
+    return `${c.actionsHeldCount()} ${c.actionsHeldUnitBytes(7, version, 0, 0, 0, false)}`;
+  });
+}
+
+/** SWFs named by SWF2ES_PRIVATE, space-separated: reported only as "private", never by name. */
+function privateSwfs(): Avm1Swf[] {
+  return (process.env.SWF2ES_PRIVATE ?? "")
+    .split(" ")
+    .filter(Boolean)
+    .flatMap((file, i) => {
+      const swf = readSwf(new Uint8Array(readFileSync(file)));
+      const { version, blocks } = readActions(swf);
+      return isAs3(swf) || blocks.length === 0
+        ? []
+        : [
+            {
+              name: `private ${i}`,
+              bytes: swf.bytes,
+              version,
+              offsets: Int32Array.from(blocks, (b) => b.offset),
+              lengths: Int32Array.from(blocks, (b) => b.length),
+            },
+          ];
+    });
+}
+
+/** The tests' blocks mutated, seeded: each a SWF of one block, of SWF 5 or 10 by turns. */
+function mutatedBlocks(count: number): Avm1Swf[] {
+  const seeds = testBlocks();
+  let state = 1;
+  const below = (n: number) => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) % n;
+  };
+  const swfs: Avm1Swf[] = [];
+  for (let k = 0; k < count; k++) {
+    const bytes = [...seeds[below(seeds.length)]];
+    for (let edits = 1 + below(4); edits > 0; edits--) {
+      const at = below(bytes.length + 1);
+      switch (below(3)) {
+        case 0:
+          bytes.splice(at, 0, below(256));
+          break;
+        case 1:
+          bytes.splice(at, 1);
+          break;
+        default:
+          bytes[at] = below(256);
+          break;
+      }
+    }
+
+    const block = Uint8Array.from(bytes);
+    swfs.push({
+      name: `mutated ${k}`,
+      bytes: block,
+      version: k % 2 ? 5 : 10,
+      offsets: Int32Array.of(0),
+      lengths: Int32Array.of(block.length),
+    });
+  }
+
+  return swfs;
+}
+
 const SUITES: Suite[] = [
   {
     name: "version",
@@ -171,6 +319,54 @@ const SUITES: Suite[] = [
     run: (c, r) => {
       for (const [name, bytes] of [...abcs(), ...odd()]) {
         r.case(name, () => c.abcVersion(bytes));
+      }
+    },
+  },
+  {
+    name: "avm1",
+    build: "release",
+    needs: AVM1_EXPORTS,
+    run: (c, r) => {
+      for (const swf of [...avm1Swfs(), ...privateSwfs()]) {
+        avm1(c, r, swf);
+      }
+    },
+  },
+  {
+    name: "avm1-mutated",
+    build: "release",
+    needs: AVM1_EXPORTS,
+    run: (c, r) => {
+      for (const swf of mutatedBlocks(2000)) {
+        avm1(c, r, swf);
+      }
+    },
+  },
+  {
+    name: "avm1-dumps",
+    build: "testing",
+    needs: ["avm1Opcodes", "avm1Dump", "avm1Check", "avm1Action"],
+    run: (c, r) => {
+      r.case("opcodes", () => c.avm1Opcodes());
+      const blocks = [
+        ...testBlocks(),
+        ...mutatedBlocks(2000).map((swf) => swf.bytes),
+        ...avm1Swfs().flatMap((swf) =>
+          Array.from(swf.offsets, (offset, k) =>
+            swf.bytes.subarray(offset, offset + swf.lengths[k]),
+          ),
+        ),
+      ];
+      for (const [k, block] of blocks.entries()) {
+        r.case(`block ${k}: dump`, () =>
+          r.blob(`block ${k}: dump`, Buffer.from(c.avm1Dump(block))),
+        );
+        r.case(`block ${k}: check`, () => c.avm1Check(block));
+        for (const offset of [0, 1, 3, block.length >> 1]) {
+          if (offset < block.length) {
+            r.case(`block ${k}: action at ${offset}`, () => c.avm1Action(block, offset));
+          }
+        }
       }
     },
   },

@@ -24,7 +24,7 @@ import { backwardActions, unitActions } from "../avm1-backward.ts";
 import { CODEGEN_WASM } from "../compiler.ts";
 import { testingInstances } from "../unit/codegen/testing-module.ts";
 
-interface Avm1Swf {
+export interface Avm1Swf {
   name: string;
   bytes: Uint8Array;
   version: number;
@@ -55,7 +55,7 @@ function assembled(name: string, version: number, blocks: Uint8Array[]): Avm1Swf
 }
 
 /** The tests' blocks: every action the emitter writes, nested regions, and malformed input. */
-function testBlocks(): Uint8Array[] {
+export function testBlocks(): Uint8Array[] {
   const asm = () => new Avm1Assembler();
   const body = asm().push("body").trace().bytes();
   // A With whose body jumps back before the With, opening it again.
@@ -245,14 +245,14 @@ function parseEntries(text: string): Map<number, string> {
 const utf8 = new TextDecoder();
 
 /** The SWFs compared in every way: how many, how many blocks, and how many differ. */
-export async function avm1Determinism(): Promise<{
-  swfs: number;
-  blocks: number;
-  units: number;
-  differences: number;
-}> {
+/**
+ * The AVM1 SWFs there are: the tests' blocks as SWFs of three versions,
+ * code before a block, and the corpus's, where it was fetched. The parity
+ * harness compiles them too (tests/parity).
+ */
+export function avm1Swfs(): Avm1Swf[] {
   const tests = testBlocks();
-  const swfs = [
+  return [
     assembled("the tests' blocks, SWF 4", 4, tests),
     assembled("the tests' blocks, SWF 5", 5, tests),
     assembled("the tests' blocks, SWF 10", 10, tests),
@@ -274,6 +274,15 @@ export async function avm1Determinism(): Promise<{
     ),
     ...corpusSwfs(),
   ];
+}
+
+export async function avm1Determinism(): Promise<{
+  swfs: number;
+  blocks: number;
+  units: number;
+  differences: number;
+}> {
+  const swfs = avm1Swfs();
   let differences = 0;
   const differ = (swf: Avm1Swf, way: string, got: string, want: string) => {
     if (got === want) {

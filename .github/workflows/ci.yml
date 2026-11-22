@@ -42,6 +42,19 @@ jobs:
           submodules: true
       - uses: ./.github/actions/setup
       - run: node packages/codegen/zig/build.ts --verify
+      # Ruffle's corpus, whose AVM1 SWFs the harness compiles, as the corpus job keeps it.
+      - id: ruffle
+        run: |
+          commit=$(sed -n 's/^export const RUFFLE_COMMIT = "\(.*\)";$/\1/p' tests/player/corpus/ruffle.ts)
+          test -n "$commit"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: tests/player/corpus/ruffle
+          key: ruffle-corpus-${{ steps.ruffle.outputs.commit }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: node tests/player/corpus/fetch-ruffle.ts
       - run: pnpm --filter ./tests/parity test
   # pnpm test and pnpm test:checked, split into parts that run side by side: the
   # player's cases, a third each, the player's other checks, and the other test
