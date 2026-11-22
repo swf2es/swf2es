@@ -211,6 +211,15 @@ importers:
 
   tests/packages: {}
 
+  tests/parity:
+    dependencies:
+      '@swf2es/codegen':
+        specifier: workspace:*
+        version: link:../../packages/codegen
+      '@swf2es/player':
+        specifier: workspace:*
+        version: link:../../packages/player
+
   tests/player:
     dependencies:
       '@swf2es/codegen':

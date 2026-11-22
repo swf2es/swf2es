@@ -1,0 +1,12 @@
+{
+  "name": "@swf2es/tests-parity",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node run.ts"
+  },
+  "dependencies": {
+    "@swf2es/codegen": "workspace:*",
+    "@swf2es/player": "workspace:*"
+  }
+}
