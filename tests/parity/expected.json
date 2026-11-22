@@ -8,5 +8,11 @@
   "avm1-dumps",
   "abc-dumps",
   "abc-sweep",
-  "abc-mutated"
+  "abc-mutated",
+  "link-libraries",
+  "link-tests",
+  "link-swfs",
+  "link-mutated",
+  "link-sweep",
+  "link-lifetimes"
 ]

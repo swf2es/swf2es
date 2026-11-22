@@ -15,11 +15,13 @@
 //
 //   node tests/parity/run.ts [suite...]
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AIR_API_VERSION, API_VERSION } from "@swf2es/codegen";
 import { airLibrary, builtinLibrary, playerglobalLibrary } from "@swf2es/player/libraries";
+import { shellToplevelLibrary } from "../../packages/cli/dist/shell-toplevel-library.js";
 import { instantiate as instantiateAs } from "../../packages/codegen/dist/codegen.js";
 import {
   type CodegenExports,
@@ -28,7 +30,9 @@ import {
 } from "../../packages/codegen/dist/zig.js";
 import { isAs3, readActions, readDoAbc, readSwf } from "../../packages/format/dist/index.js";
 import { type Avm1Swf, avm1Swfs, testBlocks } from "../conformance/determinism-avm1.ts";
+import { linkCases, resolveCases } from "../unit/codegen/link-cases.ts";
 import { bindTesting, zigTestingModule } from "../unit/codegen/zig-testing.ts";
+import { linkAbcs } from "./link-abc.ts";
 import { richAbc } from "./rich-abc.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -85,6 +89,8 @@ type Compiler = CodegenExports & Record<string, any>;
 
 interface Suite {
   name: string;
+  /** Why the suite cannot run here, if it cannot: one of what only some hosts have, which the ratchet leaves out. */
+  unavailable?: () => string | null;
   /** The release builds, or the test builds with their dumps. */
   build: "release" | "testing";
   /** The exports it calls. */
@@ -808,6 +814,346 @@ function abcDumps(c: Compiler, r: Results, name: string, bytes: Uint8Array): voi
   r.case(`${name}: reads`, () => Array.from(c.readAll(bytes.subarray(0, 96), KINDS)).join(","));
 }
 
+/**
+ * The link cases whose results AssemblyScript leaves unspecified: an empty
+ * last namespace set read past its end for a name's first namespace, where
+ * AssemblyScript's unchecked read takes whatever memory follows and Zig's
+ * takes namespace 0, counting it (unspecifiedReads). Zig's decides (it
+ * runs first); the case is then compared as unspecified.
+ */
+const unspecifiedLinks = new Set<string>();
+
+/** A link case: unspecified where Zig's read past a set. */
+function linked(c: Compiler, r: Results, name: string, run: () => string | number | boolean): void {
+  r.case(name, () => {
+    const result = run();
+    if (r.compiler !== "as" && c.unspecifiedReads() > 0 && r.compiler === "zig") {
+      unspecifiedLinks.add(name);
+    }
+
+    return unspecifiedLinks.has(name) ? "unspecified" : result;
+  });
+}
+
+/** Libraries to link against: the player's, or avmshell's builtin and shell_toplevel. */
+type Base = { version: number; libraries: Uint8Array[] };
+const PLAYER: Base = { version: API_VERSION, libraries: [builtinLibrary, playerglobalLibrary] };
+const AIR: Base = {
+  version: AIR_API_VERSION,
+  libraries: [builtinLibrary, playerglobalLibrary, airLibrary],
+};
+const SHELL: Base = { version: API_VERSION, libraries: [builtinLibrary, shellToplevelLibrary] };
+
+/** A domain being linked into, and how many ABCs it holds, the next one's index. */
+class Linking {
+  readonly c: Compiler;
+  readonly r: Results;
+  count = 0;
+
+  constructor(c: Compiler, r: Results) {
+    this.c = c;
+    this.r = r;
+  }
+
+  reset(name: string, base: Base): void {
+    this.count = 0;
+    this.r.case(`${name}: reset`, () => {
+      this.c.domainReset(base.version);
+      return base.libraries.map((lib) => this.add(lib, true, 0)).join(",");
+    });
+  }
+
+  add(bytes: Uint8Array, builtin: boolean, domain: number): number {
+    const error = this.c.domainAdd(bytes, builtin, domain);
+    if (error === 0) {
+      this.count++;
+    }
+
+    return error;
+  }
+
+  /**
+   * ABC `bytes` added to application domain `domain`, and what linking
+   * made of it: the error, its traits, their resolution, and its classes'
+   * slot types, which resolve them in their order.
+   */
+  link(name: string, bytes: Uint8Array, domain: number, builtin = false): boolean {
+    const { c, r } = this;
+    let first = 0;
+    let error = -2;
+    linked(c, r, `${name}: add`, () => {
+      first = c.domainTraitsCount();
+      error = this.add(bytes, builtin, domain);
+      return error;
+    });
+    if (error !== 0) {
+      return false;
+    }
+
+    const index = this.count - 1;
+    linked(c, r, `${name}: traits`, () =>
+      r.blob(`${name}: traits`, Buffer.from(c.domainTraits(first))),
+    );
+    linked(c, r, `${name}: linked`, () => c.domainLinked(index));
+    linked(c, r, `${name}: slot types`, () => {
+      const all: string[] = [];
+      for (let cls = 0; cls < 4096; cls++) {
+        const types = c.domainSlotTypes(index, cls);
+        if (types === "none") {
+          break;
+        }
+
+        all.push(types);
+      }
+
+      return r.blob(`${name}: slot types`, Buffer.from(all.join("\n")));
+    });
+    linked(c, r, `${name}: resolve`, () => c.domainResolve(first));
+    linked(c, r, `${name}: after`, () =>
+      r.blob(`${name}: after`, Buffer.from(c.domainTraits(first))),
+    );
+    return true;
+  }
+
+  /** The domain's counts and versioned URIs, its builtins, and what its ABCs weigh. */
+  summary(name: string): void {
+    const { c, r } = this;
+    linked(c, r, `${name}: summary`, () =>
+      r.blob(`${name}: summary`, Buffer.from(c.domainSummary())),
+    );
+    linked(c, r, `${name}: builtins`, () => c.domainBuiltins());
+    // Live and dead weights count rows alike; the memory after them is each compiler's own.
+    linked(c, r, `${name}: usage`, () => c.domainUsage().split(" ").slice(0, 2).join(" "));
+  }
+
+  /** Lookups of names the libraries define, from `domain`. */
+  finds(name: string, domain: number): void {
+    const { c, r } = this;
+    for (const [type, uri, local] of FINDS) {
+      for (const version of [0, 50, 52]) {
+        linked(c, r, `${name}: find ${type} ${uri}::${local} at ${version}`, () =>
+          c.domainFind(type, uri, local, version, domain),
+        );
+      }
+    }
+  }
+}
+
+/** Names to look up: the libraries', the tests', and some no ABC has. */
+const FINDS: [number, string, string][] = [
+  [0, "", "Object"],
+  [0, "", "trace"],
+  [0, "", "Vector"],
+  [0, "__AS3__.vec", "Vector"],
+  [0, "flash.display", "Sprite"],
+  [0, "flash.display", "MovieClip"],
+  [0, "flash.utils", "getTimer"],
+  [0, "avmplus", "System"],
+  [0, "", "print"],
+  [0, "", "Main"],
+  [0, "", "Test"],
+  [1, "", "Object"],
+  [0, "", "nowhere"],
+];
+
+/** The SWFs' ABCs (swfAbcs) by SWF, in their order. */
+function bySwf(list: [string, Uint8Array][]): [string, [string, Uint8Array][]][] {
+  const swfs = new Map<string, [string, Uint8Array][]>();
+  for (const [name, bytes] of list) {
+    const swf = name.replace(/ abc \d+$/, "");
+    swfs.set(swf, [...(swfs.get(swf) ?? []), [name, bytes]]);
+  }
+
+  return [...swfs];
+}
+
+/**
+ * Each SWF's ABCs added as the player adds a loaded SWF's, into a child
+ * of the root, which is dropped after; the domain is made again every few
+ * dozen SWFs, so a case does not depend on every SWF before it.
+ */
+function linkSwfs(
+  c: Compiler,
+  r: Results,
+  base: Base,
+  swfs: [string, [string, Uint8Array][]][],
+): void {
+  const linking = new Linking(c, r);
+  for (const [k, [swf, list]] of swfs.entries()) {
+    if (k % 40 === 0) {
+      linking.reset(`batch ${k}`, base);
+      linking.summary(`batch ${k}`);
+      c.__collect();
+    }
+
+    let child = -1;
+    r.case(`${swf}: child`, () => {
+      child = c.domainChild(0);
+      return child;
+    });
+    for (const [name, bytes] of list) {
+      linking.link(name, bytes, child);
+    }
+
+    linking.summary(swf);
+    linking.finds(swf, child);
+    r.case(`${swf}: drop`, () => {
+      c.domainDrop(child);
+      return c.domainState(child);
+    });
+  }
+}
+
+/** ABCs that link against the player's libraries, or fail to as avmplus does: the tests', the link cases' and the link ABCs'. */
+function linkSeeds(): [string, Uint8Array][] {
+  return [
+    ...abcs().slice(3),
+    ...[...linkCases, ...resolveCases].map((c): [string, Uint8Array] => [`case ${c.name}`, c.abc]),
+    ["link user", linkAbcs().user],
+    ["rich 47.16", richAbc(true)],
+  ];
+}
+
+/**
+ * The link seeds mutated, seeded: mostly a byte or two set past the pool,
+ * where a mutation still parses and links differently, else anywhere.
+ */
+function mutatedLinks(count: number): [string, Uint8Array][] {
+  const seeds = linkSeeds();
+  const { below } = random(13);
+  const found: [string, Uint8Array][] = [];
+  for (let k = 0; k < count; k++) {
+    const [name, seed] = seeds[below(seeds.length)];
+    const bytes = seed.slice();
+    for (let edits = 1 + below(2); edits > 0; edits--) {
+      const from = below(10) < 7 ? bytes.length >> 1 : 0;
+      bytes[from + below(bytes.length - from)] = below(4) === 0 ? below(256) : below(8);
+    }
+
+    found.push([`${name} mutated ${k}`, bytes]);
+  }
+
+  return found;
+}
+
+/** The ABCs ASC compiled for the oracle (Tamarin's tests, the conformance cases), where this host keeps them. */
+function oracleDir(): string {
+  const cache = process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache");
+  return process.env.SWF2ES_ORACLE_CACHE ?? join(cache, "swf2es", "oracle");
+}
+
+function oracleAbcs(): [string, [string, Uint8Array][]][] {
+  const found: [string, [string, Uint8Array][]][] = [];
+  const dir = oracleDir();
+  for (const sub of readdirSync(dir).sort()) {
+    for (const file of readdirSync(join(dir, sub))
+      .filter((f) => f.endsWith(".abc"))
+      .sort()) {
+      found.push([
+        file.slice(0, 16),
+        [[file.slice(0, 16), new Uint8Array(readFileSync(join(dir, sub, file)))]],
+      ]);
+    }
+  }
+
+  return found;
+}
+
+/**
+ * A domain's lifetimes in random steps: child domains made, ABCs added to
+ * them, findings reported, domains dropped, evicted and revived, and after
+ * each step what every domain sees.
+ */
+function lifetimes(c: Compiler, r: Results, sequences: number): void {
+  const seeds = linkSeeds().map(([, bytes]) => bytes);
+  const { below } = random(11);
+  const linking = new Linking(c, r);
+  for (let s = 0; s < sequences; s++) {
+    linking.reset(`sequence ${s}`, PLAYER);
+    let domains = 1;
+    for (let step = 0; step < 40; step++) {
+      const name = `sequence ${s} step ${step}`;
+      const d = below(domains + 1) % Math.max(domains, 1);
+      switch (below(8)) {
+        case 0:
+        case 1:
+          r.case(`${name}: child of ${d}`, () => {
+            const child = c.domainChild(d);
+            if (child >= 0) {
+              domains = child + 1;
+            }
+
+            return child;
+          });
+          break;
+        case 2:
+        case 3: {
+          const k = below(seeds.length);
+          linking.link(`${name}: abc ${k} into ${d}`, seeds[k], d);
+          break;
+        }
+        case 4:
+          r.case(`${name}: drop ${d}`, () => {
+            c.domainDrop(d);
+            return "done";
+          });
+          break;
+        case 5:
+          r.case(`${name}: evict ${d}`, () => {
+            c.domainEvict(d);
+            return "done";
+          });
+          break;
+        case 6:
+          r.case(`${name}: revive ${d}`, () => c.domainRevive(d, false));
+          break;
+        default: {
+          const [type, uri, local] = FINDS[below(FINDS.length)];
+          const abc = below(linking.count + 1);
+          const asType = below(2) === 1;
+          r.case(
+            `${name}: found ${type} ${uri}::${local} in ${abc} by ${d} as type ${asType}`,
+            () => {
+              c.domainFound(d, type, uri, local, abc, asType);
+              return "done";
+            },
+          );
+          break;
+        }
+      }
+
+      r.case(`${name}: domains`, () =>
+        Array.from(
+          { length: domains + 1 },
+          (_, k) => `${c.domainState(k)}/${c.domainParent(k)}`,
+        ).join(" "),
+      );
+      linking.finds(name, d);
+    }
+
+    linking.summary(`sequence ${s}`);
+    c.__collect();
+  }
+}
+
+/** What the link suites call. */
+const LINK_EXPORTS = [
+  "domainReset",
+  "domainAdd",
+  "domainChild",
+  "domainDrop",
+  "domainState",
+  "domainLinked",
+  "domainUsage",
+  "domainFind",
+  "domainSummary",
+  "domainTraits",
+  "domainResolve",
+  "domainBuiltins",
+  "domainSlotTypes",
+  "domainTraitsCount",
+];
+
 const SUITES: Suite[] = [
   {
     name: "version",
@@ -962,6 +1308,126 @@ const SUITES: Suite[] = [
     },
   },
   {
+    name: "link-libraries",
+    build: "testing",
+    needs: LINK_EXPORTS,
+    run: (c, r) => {
+      const linking = new Linking(c, r);
+      for (const [name, base] of Object.entries({ player: PLAYER, air: AIR, shell: SHELL })) {
+        linking.reset(name, { version: base.version, libraries: [] });
+        for (const [k, library] of base.libraries.entries()) {
+          linking.link(`${name} library ${k}`, library, 0, true);
+        }
+
+        linking.summary(name);
+        linking.finds(name, 0);
+        c.__collect();
+      }
+    },
+  },
+  {
+    name: "link-tests",
+    build: "testing",
+    needs: LINK_EXPORTS,
+    run: (c, r) => {
+      const linking = new Linking(c, r);
+      const tests = abcs().slice(3);
+      // Into the root, in turn, as a SWF's DoABCs load, and each into a child of its own.
+      linking.reset("root", PLAYER);
+      for (const [name, bytes] of tests) {
+        linking.link(`${name} in the root`, bytes, 0);
+      }
+
+      linking.summary("root");
+      linking.finds("root", 0);
+      linkSwfs(
+        c,
+        r,
+        PLAYER,
+        linkSeeds().map(([name, bytes]) => [name, [[name, bytes]]]),
+      );
+    },
+  },
+  {
+    name: "link-swfs",
+    build: "testing",
+    needs: LINK_EXPORTS,
+    run: (c, r) => linkSwfs(c, r, PLAYER, bySwf(swfAbcs())),
+  },
+  {
+    name: "link-oracle",
+    build: "testing",
+    needs: LINK_EXPORTS,
+    unavailable: () => (existsSync(oracleDir()) ? null : "no oracle cache"),
+    run: (c, r) => linkSwfs(c, r, SHELL, oracleAbcs()),
+  },
+  {
+    name: "link-mutated",
+    build: "testing",
+    needs: LINK_EXPORTS,
+    run: (c, r) =>
+      linkSwfs(
+        c,
+        r,
+        PLAYER,
+        [...mutatedAbcs(2000), ...mutatedLinks(6000)].map(([name, bytes]) => [
+          name,
+          [[name, bytes]],
+        ]),
+      ),
+  },
+  {
+    name: "link-sweep",
+    build: "testing",
+    needs: LINK_EXPORTS,
+    run: (c, r) => {
+      const cases: [string, [string, Uint8Array][]][] = [];
+      for (const floats of [false, true]) {
+        const seed = richAbc(floats);
+        const name = floats ? "rich 47.16" : "rich 46.16";
+        for (let n = 0; n <= seed.length; n++) {
+          cases.push([`${name} cut ${n}`, [[`${name} cut ${n}`, seed.subarray(0, n)]]]);
+        }
+
+        for (let at = 0; at < seed.length; at++) {
+          for (const v of [0, 1, 2, 0x7f, 0x80, 0xff, seed[at] ^ 1]) {
+            if (v !== seed[at]) {
+              const bytes = seed.slice();
+              bytes[at] = v;
+              cases.push([`${name} set ${at}=${v}`, [[`${name} set ${at}=${v}`, bytes]]]);
+            }
+          }
+        }
+      }
+
+      linkSwfs(c, r, { version: API_VERSION, libraries: [builtinLibrary] }, cases);
+      // The link ABCs' user one, against their builtin one, cut and set alike.
+      const { builtin, user } = linkAbcs();
+      const users: [string, [string, Uint8Array][]][] = [];
+      for (let n = 0; n <= user.length; n++) {
+        users.push([`user cut ${n}`, [[`user cut ${n}`, user.subarray(0, n)]]]);
+      }
+
+      for (let at = 0; at < user.length; at++) {
+        for (const v of [0, 1, 2, 3, 4, 5, 6, 7, 0x80, 0xff]) {
+          if (v !== user[at]) {
+            const bytes = user.slice();
+            bytes[at] = v;
+            users.push([`user set ${at}=${v}`, [[`user set ${at}=${v}`, bytes]]]);
+          }
+        }
+      }
+
+      linkSwfs(c, r, { version: API_VERSION, libraries: [builtin] }, users);
+    },
+  },
+  {
+    name: "link-lifetimes",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainEvict", "domainRevive", "domainFound", "domainParent"],
+    run: (c, r) => lifetimes(c, r, 150),
+  },
+  {
     name: "libraries",
     build: "release",
     needs: [
@@ -1066,6 +1532,13 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 const report: Record<string, string> = {};
 for (const suite of SUITES.filter((s) => wanted.length === 0 || wanted.includes(s.name))) {
+  const unavailable = suite.unavailable?.();
+  if (unavailable) {
+    report[suite.name] = `skipped: ${unavailable}`;
+    console.log(`  ${suite.name}: skipped (${unavailable})`);
+    continue;
+  }
+
   const missing = suite.needs.filter((name) => !has[suite.build].has(name));
   if (missing.length > 0) {
     report[suite.name] = `not ported: ${missing.join(", ")}`;
@@ -1107,7 +1580,7 @@ for (const suite of SUITES.filter((s) => wanted.length === 0 || wanted.includes(
   );
   if (mismatches.length && expected.includes(suite.name)) {
     failed++;
-  } else if (!mismatches.length && !expected.includes(suite.name)) {
+  } else if (!mismatches.length && !expected.includes(suite.name) && !suite.unavailable) {
     // A ratchet: what is the same is held so.
     console.log(`  ${suite.name} is the same now: add it to tests/parity/expected.json`);
     failed++;
