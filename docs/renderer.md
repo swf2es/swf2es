@@ -267,13 +267,29 @@ whose entries go once unused for their idle frames:
   geometry drawn anew each frame, as a script's drawing redrawn every
   frame is, goes whole before then: copying the indices of 1,600 such
   geometries a frame (`bench.ts --redraw 800`) took a millisecond. One
-  small enough to merge (below) keeps its arrays: a moving scene makes its
-  runs anew every frame or few, and staging them needs them. Copying each
+  small enough to merge (below) and drawn more than once, by two objects
+  in a frame or over two frames, keeps its arrays: a moving scene makes
+  its runs anew every frame or few, and staging them needs them. Copying each
   such geometry's vertices from the atlas on the GPU instead, a copy for
   each, made a frame of `--timelines 400` some 6,400 copies and the GL
   wait nearly twice as long (0.1.35); and letting a still scene's go and
   tessellating them again when its runs change, or when the stream is
-  made anew, stalled a frame for each such change. A geometry whose owner
+  made anew, stalled a frame for each such change. One drawn once, as
+  each text changed every frame or a shape shown for one frame is, goes as
+  one too large to merge does, and no longer merges: keeping all of those
+  till they went idle (0.1.36) let a text redrawn each frame's arrays
+  outlive two of V8's young collections, so that the old generation's
+  sweeps of their many buffers stalled frames by up to 100 ms
+  (`players.ts drawing`, text-800, after its still scenes). The batch it
+  merged by (`Place.batch`) lets go of the arrays as it is let go of: a
+  batch let go of in the old generation, where V8 can come to allocate
+  them once a still scene's have lived long (it pretenures what mostly
+  survives), held its arrays through every young collection till the
+  next full one, which alone kept text-800's frames stalling. Keeping only geometries a run had
+  staged within their first three frames, or only those drawn on a later
+  frame, let go of geometries that every sprite of a moving timeline draws
+  for a frame and comes back to later: `--timelines 400` then merged
+  nothing and its GL wait went from 20 to 100 ms on SwiftShader. A geometry whose owner
   changes its arrays in place, a 3D object's quad, is added to be kept
   (`add`'s `keep`). A geometry let go of leaves holes, kept sorted
   and merged with their neighbours (`webgl/free-ranges.ts`); what is added

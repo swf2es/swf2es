@@ -139,7 +139,7 @@ function shape(seed: number, count: number): GeometryData {
 
 /** Frames placed till what was added has stood long enough for its arrays to be let go of. */
 function settle(atlas: GeometryAtlas, geometries: Geometries): void {
-  // Placed on the first, let go of RELEASE_FRAMES of the registry's on, where too large to merge.
+  // Placed on the first, let go of RELEASE_FRAMES of the registry's on, where no run staged them.
   for (let i = 0; i <= RELEASE_FRAMES; i++) {
     atlas.place(geometries);
     drawn(geometries);
@@ -658,6 +658,13 @@ function stream() {
 function run(s: ReturnType<typeof stream>, ids: number[]) {
   const ids2 = [...ids, ids[3]];
   const places = ids2.map((id) => s.atlas.places[id] as Place);
+  // Counted as Draws counts the draws it gathers.
+  for (const place of places) {
+    if (place.batch) {
+      place.batch.draws++;
+    }
+  }
+
   s.batches.reset();
   const segment = s.batches.add(
     places,
@@ -732,37 +739,70 @@ test("a run's stream stages its geometries from their arrays, which merged geome
   assert.equal(s.counts.copies, 0);
 });
 
-test("a geometry too large to merge is let go of at RELEASE_FRAMES, one small enough kept", () => {
+test("a geometry drawn once is let go of at RELEASE_FRAMES, one drawn more than once kept", () => {
   const { gl } = fakeGl();
   const atlas = new GeometryAtlas(gl, new GlState(gl));
   atlas.setUp();
   const geometries = new Geometries();
   // 256 vertices and 1,024 indices at most merge (Place.batch).
-  const small = add(geometries, shape(1, 256));
+  const twice = add(geometries, shape(3, 256));
+  // Small enough, but drawn once, as a text changed every frame is.
+  const once = add(geometries, shape(1, 256));
   const large = add(geometries, shape(2, 257));
   for (let frame = 0; frame < RELEASE_FRAMES; frame++) {
     atlas.place(geometries);
+    // The draws the runs gather (Draws): two of one in its first frame, as two objects drawing
+    // it would make, and one of the other.
+    if (frame === 0) {
+      ((atlas.places[twice] as Place).batch as NonNullable<Place["batch"]>).draws += 2;
+      ((atlas.places[once] as Place).batch as NonNullable<Place["batch"]>).draws += 1;
+    }
+
     drawn(geometries);
-    assert.ok(!geometries.released(small) && !geometries.released(large), `frame ${frame}`);
+    for (const id of [twice, once, large]) {
+      assert.ok(!geometries.released(id), `frame ${frame}`);
+    }
   }
 
+  const onceBatch = (atlas.places[once] as Place).batch;
   atlas.place(geometries);
   assert.ok(geometries.released(large));
   assert.ok(atlas.places[large]?.local instanceof Uint16Array);
-  assert.ok(!geometries.released(small));
-  assert.equal(atlas.places[small]?.batch?.data, made.get(geometries)?.get(small));
+  assert.ok(geometries.released(once));
+  // Nor does the batch let go of hold its arrays, wherever V8 keeps it till a full collection.
+  assert.equal(onceBatch?.data, null);
+  assert.ok(atlas.places[once]?.local instanceof Uint16Array);
+  assert.equal(atlas.places[once]?.batch, null, "no longer merges");
+  assert.ok(!geometries.released(twice));
+  assert.equal(atlas.places[twice]?.batch?.data, made.get(geometries)?.get(twice));
   // However long it stands.
   settle(atlas, geometries);
   settle(atlas, geometries);
-  assert.ok(!geometries.released(small));
+  assert.ok(!geometries.released(twice));
   check(
     atlas,
     geometries,
     new Map([
-      [small, 1],
+      [twice, 3],
+      [once, 1],
       [large, 2],
     ]),
   );
+});
+
+test("a run of geometries let go of after a single draw draws from the atlas", () => {
+  const s = stream();
+  const ids: number[] = [];
+  for (let i = 0; i < 40; i++) {
+    ids.push(add(s.geometries, shape(i + 1, 4 + i)));
+  }
+
+  settle(s.atlas, s.geometries);
+  for (const id of ids) {
+    assert.ok(s.geometries.released(id));
+  }
+
+  assert.equal(run(s, ids).segment, null);
 });
 
 test("geometries copied while the context is lost keep their arrays, for the restore to copy", () => {

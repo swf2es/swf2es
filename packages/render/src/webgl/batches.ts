@@ -1,4 +1,5 @@
 import type { GlState } from "@swf2es/context3d/device";
+import type { GeometryData } from "../geometry.js";
 import type { Place } from "./atlas.js";
 import { COLOR_AT, DRAW_AT, MERGED_LINE, MERGED_UNIT, POSITION_AT, TEXEL_AT } from "./programs.js";
 
@@ -258,7 +259,8 @@ export class FillBatches {
       const place = places[i];
       const batch = place.batch as Batch;
       segment.batches[i] = batch;
-      const data = batch.data;
+      // A place's batch, which holds its arrays while it is the place's (atlas.ts, dropBatch).
+      const data = batch.data as GeometryData;
       const base = this.vertexTop;
       for (let j = 0; j < place.vertices; j++) {
         const at = (base - this.fromVertex + j) * WORDS;
