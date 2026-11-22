@@ -39,13 +39,13 @@ const testing_exports = exports ++ [_][]const u8{
     "memoryChunksUsed",
     "memoryReached",
     "testingPanic",
+    "testingOverflow",
+    "stackPaint",
+    "stackDeepest",
     "avm1Opcodes",
     "avm1Dump",
     "avm1Check",
     "avm1Action",
-    "testingOverflow",
-    "stackPaint",
-    "stackDeepest",
 };
 
 /// The shadow stack, first in memory so that overflowing it traps rather

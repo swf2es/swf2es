@@ -362,18 +362,7 @@ pub const ModuleEmitter = struct {
     }
 };
 
-/// A block with something of every kind, for the tests that fail allocations.
-const test_block = [_]u8{
-    0x88, 6, 0, 2, 0, 'a', 0, 'b', 0, // ConstantPool "a", "b"
-    0x96, 5, 0, 8, 0, 0, 'x', 0, // Push pool 0, "x"
-    0x9b, 8, 0, 'f', 0, 1, 0, 'p', 0, 8, 0, // DefineFunction f(p)
-    0x96, 3, 0, 0, 'p', 0, 0x1c, 0x3e, // its body: return p
-    0x94, 2, 0, 2, 0, 0x06, 0x07, // With { Play; Stop }
-    0x8f, 9, 0, 3, 1, 0, 1, 0, 1, 0, 'e', 0, 0x06, 0x07, 0x06, // Try, catch e, finally
-    0x8a, 3, 0, 1, 0, 1, 0x07, // WaitForFrame 1, skipping a Stop
-    0x96, 2, 0, 5, 1, 0x9d, 2, 0, 0xb5, 0xff, // Push true; If back to the start
-    0x99, 2, 0, 0x00, 0x80, // Jump far back, before the block
-};
+const test_block = @import("block.zig").test_block;
 
 /// The module of two blocks, the second at `at` in the first, whose jump
 /// back before it goes on in units.

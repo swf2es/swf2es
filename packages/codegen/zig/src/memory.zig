@@ -654,6 +654,15 @@ pub fn pages() *Pages {
     return &pages_state.?;
 }
 
+/// The module's pages replaced by `other`, for a test that runs the exports
+/// over pages of its own; the replaced ones returned, to put back. The
+/// arenas must hold nothing then, since they name the pages by address.
+pub fn swapPages(other: Pages) Pages {
+    const old = pages().*;
+    pages_state = other;
+    return old;
+}
+
 fn moduleAllocator(top: bool) Allocator {
     return if (top) pages().topAllocator() else pages().allocator();
 }
@@ -675,12 +684,6 @@ pub fn arenas() void {
         global = .init(moduleAllocator(false));
         arenas_ready = true;
     }
-}
-
-/// A new arena for what outlives calls, freed whole with `deinit`: a
-/// domain's, a module kept for its entries, a SWF held for its units.
-pub fn lastingArena() Arena {
-    return .init(moduleAllocator(false));
 }
 
 const testing = std.testing;

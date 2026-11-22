@@ -8,6 +8,7 @@ const options = @import("options");
 const memory = @import("memory.zig");
 const root = @import("root.zig");
 const avm1 = @import("testing/avm1.zig");
+const avm1_compile = @import("avm1/compile.zig");
 
 pub const panic = root.panic;
 
@@ -95,6 +96,111 @@ export fn avm1Check(bytes: [*]const u8, len: u32) usize {
 /// The action at `offset` of an AVM1 block alone.
 export fn avm1Action(bytes: [*]const u8, len: u32, offset: i32) usize {
     return root.handOut(avm1.action(root.gpa(), bytes[0..len], offset) catch |err| return root.failWriting(err));
+}
+
+/// What the exports keep and hold let go, and the call's and the global
+/// arena given back, as when the module starts.
+fn letGo() void {
+    avm1_compile.forget();
+    avm1_compile.releaseAll();
+    memory.call.reset();
+    memory.global.reset();
+}
+
+/// `bytes` staged at `at` in the room input() gave, 8-aligned as the wrapper stages them.
+fn put(room: usize, at: *usize, bytes: []const u8) usize {
+    at.* = std.mem.alignForward(usize, at.*, 8);
+    const to: [*]u8 = @ptrFromInt(room + at.*);
+    @memcpy(to[0..bytes.len], bytes);
+    defer at.* += bytes.len;
+    return room + at.*;
+}
+
+/// The AVM1 exports and the dumps, called through the byte ABI as the
+/// wrapper calls them, over the module's pages replaced by `p`'s: from
+/// staging to handing out, every allocation they make may fail.
+fn throughExports(_: std.mem.Allocator, p: *memory.Pages) !void {
+    memory.arenas();
+    letGo();
+    const saved = memory.swapPages(p.*);
+    defer {
+        letGo();
+        p.* = memory.swapPages(saved);
+    }
+
+    const block = &@import("avm1/emit/block.zig").test_block;
+    const len: u32 = block.len;
+    const ranges = [_]i32{ 0, @intCast(len) };
+    const list = "0,0,1";
+    const Swf = struct { swf: usize, offsets: usize, lengths: usize, list: usize };
+    const stage = struct {
+        fn call(size: usize) error{OutOfMemory}!Swf {
+            const room = root.input(@intCast(size));
+            if (room == 0) {
+                return error.OutOfMemory;
+            }
+
+            var at: usize = 0;
+            return .{
+                .swf = put(room, &at, block),
+                .offsets = put(room, &at, std.mem.asBytes(&ranges[0])),
+                .lengths = put(room, &at, std.mem.asBytes(&ranges[1])),
+                .list = put(room, &at, list),
+            };
+        }
+    };
+    const size = len + 64;
+    const failed = struct {
+        fn check() error{OutOfMemory}!void {
+            if (root.codegenError() != 0) {
+                return error.OutOfMemory;
+            }
+        }
+    };
+
+    var s = try stage.call(size);
+    _ = root.actionsModuleBytes(@ptrFromInt(s.swf), len, @ptrFromInt(s.offsets), 1, @ptrFromInt(s.lengths), 1, 6, true);
+    try failed.check();
+    _ = root.input(0);
+    _ = root.actionsModuleEntries();
+    try failed.check();
+    _ = root.input(0);
+    _ = root.actionsModuleUnits();
+    try failed.check();
+    s = try stage.call(size);
+    _ = root.actionsEmitEachBytes(@ptrFromInt(s.swf), len, @ptrFromInt(s.offsets), 1, @ptrFromInt(s.lengths), 1, 6, @ptrFromInt(s.list), list.len, false);
+    try failed.check();
+    for (1..4) |handle| {
+        s = try stage.call(size);
+        root.actionsHold(@intCast(handle), @ptrFromInt(s.swf), len, @ptrFromInt(s.offsets), 1, @ptrFromInt(s.lengths), 1);
+        try failed.check();
+    }
+
+    s = try stage.call(size);
+    _ = root.actionsHeldEmitEachBytes(2, 6, @ptrFromInt(s.list), list.len);
+    try failed.check();
+    _ = root.input(0);
+    _ = root.actionsHeldUnitBytes(3, 6, 0, @intCast(len), @intCast(len), false);
+    try failed.check();
+    s = try stage.call(size);
+    _ = root.actionsUnitBytes(@ptrFromInt(s.swf), len, @ptrFromInt(s.offsets), 1, @ptrFromInt(s.lengths), 1, 6, 0, @intCast(len), @intCast(len), false);
+    try failed.check();
+    s = try stage.call(size);
+    _ = avm1Dump(@ptrFromInt(s.swf), len);
+    try failed.check();
+    s = try stage.call(size);
+    _ = avm1Check(@ptrFromInt(s.swf), len);
+    try failed.check();
+    s = try stage.call(size);
+    _ = avm1Action(@ptrFromInt(s.swf), len, 0);
+    try failed.check();
+    _ = root.input(0);
+    _ = avm1Opcodes();
+    try failed.check();
+}
+
+test "the exports, staging to handing out, may run out of memory anywhere and keep nothing" {
+    try memory.atEveryMemorySize(throughExports);
 }
 
 test {
