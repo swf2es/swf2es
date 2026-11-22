@@ -114,10 +114,12 @@ function headerOrigins(dir: string): Set<Origin> {
   return found;
 }
 
-// codegen's assembly/ is compiled into codegen.wasm, which it ships.
+// codegen's assembly/ is compiled into codegen.wasm, and zig/ into codegen-zig.wasm, which it ships.
 const sourcesOf = (name: string) => [
   `${root}packages/${name}/src`,
-  ...(name === "codegen" ? [`${root}packages/codegen/assembly`] : []),
+  ...(name === "codegen"
+    ? [`${root}packages/codegen/assembly`, `${root}packages/codegen/zig/src`]
+    : []),
 ];
 
 test("each package's notices cover what its files' headers say came from elsewhere", () => {
