@@ -930,11 +930,23 @@ MAX_NESTING and past it. What stage 5 changed of the plan:
 - The translation recurses along the dominator tree, as
   AssemblyScript's does, rather than taking a work list: its depth is
   bounded by MAX_NESTING, which `analyze` holds each block to before any
-  code is written. 499 nested merges, the deepest structured, take 13 KB
-  of the shadow stack.
+  code is written. 499 nested merges, the deepest structured, take 21 KB
+  of Zig's shadow stack; 500 conditional branches each over a return to
+  the next, whose targets are written in place a call deeper each, take
+  109 KB of it, and, compiled cold, about 411 KB of the engine's stack
+  (node's `--stack-size`), where AssemblyScript's takes about 311 KB:
+  within node's default of about 984 KB, and within a browser's main
+  thread; a worker given a smaller stack would trap there first.
 - Any call may grow memory, Zig's call arena taking a run as a call
   starts: a host copies or decodes what a call hands out before the next,
   as the host does.
+- All or nothing holds for each call, not for a module written a part at
+  a time: a part that runs out of memory leaves the domain as the parts
+  before it left it, weighs their rows to the ABC, and abandons the
+  module, as a domain change does.
+- For stage 6: the kept emitter holds the ABC's bytes and tables, which
+  are in the domain's arena; a rebuild, a compaction and a load must let
+  it go (`forgetModules`), as AssemblyScript's set `written` to null.
 
 Size of the release, the emitters reached (stage 4's probe in brackets):
 
