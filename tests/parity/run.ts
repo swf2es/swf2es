@@ -1243,9 +1243,10 @@ function nestedAbc(n: number): Uint8Array {
 }
 
 /**
- * An ABC whose script initializer nests `n` ifs, each a merge its
- * dominator's code is a labelled block for: structured code as deep as
- * the emitter goes, to MAX_NESTING, and past it the dispatcher.
+ * An ABC whose script initializer is one block of `n` ifs, each branching
+ * to a merge of its own: `n` labelled blocks nested in its code, which
+ * the emitter recurses into one by one, structured to 499 and dispatched
+ * from MAX_NESTING, 500.
  */
 function nestedIfsAbc(n: number): Uint8Array {
   const code: number[] = [];
@@ -1964,7 +1965,7 @@ const SUITES: Suite[] = [
     needs: [...LINK_EXPORTS, "domainEmit"],
     asStackLimit: true,
     run: async (_, r, fresh) => {
-      for (const n of [10, 100, 200, 240, 248, 249, 250, 251, 300, 2000, 20000]) {
+      for (const n of [10, 100, 300, 498, 499, 500, 501, 2000, 20000]) {
         await deepEmit(r, fresh, `ifs nested ${n}`, nestedIfsAbc(n));
       }
     },
