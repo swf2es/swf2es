@@ -30,6 +30,7 @@ import {
 } from "../../packages/codegen/dist/zig.js";
 import { isAs3, readActions, readDoAbc, readSwf } from "../../packages/format/dist/index.js";
 import { type Avm1Swf, avm1Swfs, testBlocks } from "../conformance/determinism-avm1.ts";
+import { abc as abcOf, tables, u30 } from "../unit/codegen/abc-builder.ts";
 import { linkCases, resolveCases } from "../unit/codegen/link-cases.ts";
 import { bindTesting, zigTestingModule } from "../unit/codegen/zig-testing.ts";
 import { linkAbcs } from "./link-abc.ts";
@@ -95,7 +96,14 @@ interface Suite {
   build: "release" | "testing";
   /** The exports it calls. */
   needs: string[];
-  run(compiler: Compiler, results: Results): void;
+  /** Its cases on `compiler`; `fresh` makes another instance of the same compiler, for a case that may kill one. */
+  run(compiler: Compiler, results: Results, fresh: () => Promise<Compiler>): void | Promise<void>;
+  /**
+   * Cases where AssemblyScript's stack ran out (asc's instance traps where
+   * Zig's, whose linker keeps its own stacks, goes on) are reported rather
+   * than compared.
+   */
+  asStackLimit?: boolean;
 }
 
 /** The ABCs there are without the oracle: the libraries the player ships, and the tests' own. */
@@ -1136,6 +1144,261 @@ function lifetimes(c: Compiler, r: Results, sequences: number): void {
   }
 }
 
+/**
+ * An ABC of `n` classes, each extending the one before (or, `interfaces`,
+ * each an interface extending the one before), and a script with a body:
+ * a chain as deep as the input makes it, which AssemblyScript's linker
+ * recurses along.
+ */
+function chainAbc(n: number, interfaces: boolean): Uint8Array {
+  const out: number[] = [16, 0, 46, 0, 0, 0, 0];
+  const push = (...bytes: number[]) => {
+    for (const b of bytes) {
+      out.push(b);
+    }
+  };
+  push(...u30(n + 2), 0);
+  for (let i = 0; i < n; i++) {
+    const name = `C${i}`;
+    push(name.length, ...[...name].map((ch) => ch.charCodeAt(0)));
+  }
+
+  push(2, 0x16, 1, 0);
+  push(...u30(n + 1));
+  for (let i = 0; i < n; i++) {
+    push(0x07, 1, ...u30(i + 2));
+  }
+
+  push(...u30(2 * n + 1));
+  for (let i = 0; i < 2 * n + 1; i++) {
+    push(0, 0, 0, 0);
+  }
+
+  push(0, ...u30(n));
+  for (let i = 0; i < n; i++) {
+    push(...u30(i + 1), ...(interfaces || i === 0 ? [0] : u30(i)), interfaces ? 0x04 : 0);
+    push(...(interfaces && i > 0 ? [1, ...u30(i)] : [0]));
+    push(...u30(2 * i), 0);
+  }
+
+  for (let i = 0; i < n; i++) {
+    push(...u30(2 * i + 1), 0);
+  }
+
+  push(1, ...u30(2 * n), 0, 1, ...u30(2 * n), 1, 1, 0, 1, 1, 0x47, 0, 0);
+  return new Uint8Array(out);
+}
+
+/**
+ * An ABC whose class C has a slot of type Vector.<Vector.<...<int>>>,
+ * TypeNames nested `n` deep, which AssemblyScript resolves recursively.
+ */
+function nestedAbc(n: number): Uint8Array {
+  const multinames = [
+    [0x07, 2, ...u30(3)],
+    [0x07, 1, ...u30(5)],
+    [0x07, 1, ...u30(2)],
+    [0x07, 1, ...u30(6)],
+    [0x07, 1, ...u30(7)],
+  ];
+  for (let k = 0; k < n; k++) {
+    multinames.push([0x1d, 1, 1, ...u30(k === 0 ? 2 : 5 + k)]);
+  }
+
+  return abcOf(
+    {
+      strings: ["", "Object", "Vector", "__AS3__.vec", "int", "C", "x"],
+      namespaces: [
+        [0x16, ...u30(1)],
+        [0x16, ...u30(4)],
+      ],
+      multinames,
+    },
+    tables({
+      methods: [{}, {}, {}],
+      classes: [
+        {
+          instance: { name: 4, base: 3, init: 0, traits: [{ name: 5, kind: 0, index: 5 + n }] },
+          init: 1,
+        },
+      ],
+      scripts: [{ init: 2, traits: [{ name: 4, kind: 4, id: 1, index: 0 }] }],
+      bodies: [{ method: 2, code: [0x47] }],
+    }),
+  );
+}
+
+/** A deep case, alone in a fresh instance: AssemblyScript's may trap on it. */
+async function deep(
+  r: Results,
+  fresh: () => Promise<Compiler>,
+  name: string,
+  bytes: Uint8Array,
+  libraries: Uint8Array[],
+  last: number,
+): Promise<void> {
+  const c = await fresh();
+  r.case(`${name}: link`, () => {
+    c.domainReset(API_VERSION);
+    for (const library of libraries) {
+      c.domainAdd(library, true, 0);
+    }
+
+    const index = libraries.length;
+    const error = c.domainAdd(bytes, false, 0);
+    if (error !== 0) {
+      return `add ${error}`;
+    }
+
+    // The last class first, which resolves the whole chain at once.
+    const count = c.domainTraitsCount();
+    const types = c.domainSlotTypes(index, last);
+    return `add 0, ${count} traits, class ${last}'s slots ${types}, resolve ${c.domainResolve(0)}, then ${c.domainAdd(chainAbc(3, false), false, 0)}`;
+  });
+}
+
+/**
+ * Host call sequences with wild arguments, from the review of stage 3's
+ * differential fuzz: domains never made, negative and huge ids, restores
+ * of live, held and missing ABCs, odd API versions, findings with bad
+ * kinds and ABCs, and what every domain sees after each step.
+ */
+function calls(c: Compiler, r: Results, sequences: number, steps: number): void {
+  const seeds = linkSeeds().map(([, bytes]) => bytes);
+  seeds.push(linkAbcs().failing);
+  const finds: [number, string, string][] = [
+    [0, "", "Object"],
+    [0, "", "A"],
+    [0, "", "B"],
+    [0, "", "Error"],
+    [0, "flash.display", "Sprite"],
+    [0, "", "nowhere"],
+    [1, "", "Object"],
+    [0, "", "I"],
+  ];
+  const wild = [-1, -2, 0x7fffffff, -2147483648, 1000000, 255, 256, 65536];
+  const versions = [50, 51, 0, 52, 255, -1, 2, 9, 53, 300];
+  for (let s = 0; s < sequences; s++) {
+    const { below } = random(s * 7919 + 1);
+    const name = `calls ${s}`;
+    let abcs = 0;
+    let domains = 1;
+    const add = (bytes: Uint8Array, builtin: boolean, d: number) => {
+      const error = c.domainAdd(bytes, builtin, d);
+      if (error === 0) {
+        abcs++;
+      }
+
+      return error;
+    };
+    const version = below(4) ? 50 : versions[below(versions.length)];
+    r.case(`${name}: reset ${version}`, () => {
+      c.domainReset(version);
+      return below(3) > 0
+        ? add(linkAbcs().builtin, true, 0)
+        : [add(builtinLibrary, true, 0), add(playerglobalLibrary, true, 0)].join();
+    });
+    const anyDomain = () => (below(8) === 0 ? wild[below(wild.length)] : below(domains + 2));
+    for (let step = 0; step < steps; step++) {
+      const at = `${name} step ${step}`;
+      const d = anyDomain();
+      switch (below(12)) {
+        case 0:
+        case 1:
+          r.case(`${at}: child of ${d}`, () => {
+            const child = c.domainChild(d);
+            if (child >= 0) {
+              domains = child + 1;
+            }
+
+            return child;
+          });
+          break;
+        case 2:
+        case 3: {
+          const k = below(seeds.length);
+          const builtin = below(10) === 0;
+          const first = c.domainTraitsCount();
+          r.case(`${at}: add ${k} into ${d}, builtin ${builtin}`, () => add(seeds[k], builtin, d));
+          r.case(`${at}: traits`, () =>
+            r.blob(`${at}: traits`, Buffer.from(c.domainTraits(first))),
+          );
+          if (below(2)) {
+            r.case(`${at}: resolve`, () => c.domainResolve(first));
+          }
+          break;
+        }
+        case 4:
+          r.case(`${at}: drop ${d}`, () => c.domainDrop(d) ?? "done");
+          break;
+        case 5:
+          r.case(`${at}: evict ${d}`, () => c.domainEvict(d) ?? "done");
+          break;
+        case 6:
+          r.case(`${at}: revive ${d}`, () => c.domainRevive(d, below(2) === 1));
+          break;
+        case 7: {
+          const [type, uri, local] = finds[below(finds.length)];
+          const abc = below(6) === 0 ? wild[below(wild.length)] : below(abcs + 2);
+          const kind = below(6) === 0 ? wild[below(wild.length)] : type;
+          const asType = below(2) === 1;
+          r.case(
+            `${at}: found ${kind} ${uri}::${local} of ${abc} by ${d} as type ${asType}`,
+            () => {
+              c.domainFound(d, kind, uri, local, abc, asType);
+              return "done";
+            },
+          );
+          break;
+        }
+        case 8: {
+          const i = below(4) === 0 ? wild[below(wild.length)] : below(abcs + 2);
+          const k = below(seeds.length + 1);
+          const bytes = k === seeds.length ? new Uint8Array(below(6)) : seeds[k];
+          r.case(`${at}: restore ${i} with ${k}`, () => c.domainRestore(i, bytes));
+          break;
+        }
+        case 9: {
+          const i = below(4) === 0 ? wild[below(wild.length)] : below(abcs + 2) - 1;
+          r.case(`${at}: linked ${i}`, () => c.domainLinked(i));
+          break;
+        }
+        case 10: {
+          const i = below(abcs + 1);
+          const cls = below(5);
+          r.case(`${at}: slot types ${i} ${cls}`, () =>
+            i < abcs ? c.domainSlotTypes(i, cls) : "none",
+          );
+          break;
+        }
+        default:
+          r.case(`${at}: usage`, () => c.domainUsage().split(" ").slice(0, 2).join(" "));
+          break;
+      }
+
+      r.case(`${at}: domains`, () =>
+        Array.from(
+          { length: domains + 1 },
+          (_, k) => `${c.domainState(k)}/${c.domainParent(k)}`,
+        ).join(" "),
+      );
+      const from = below(domains);
+      for (const [type, uri, local] of finds) {
+        for (const v of [0, 50, 52]) {
+          r.case(`${at}: find ${type} ${uri}::${local} at ${v} from ${from}`, () =>
+            c.domainFind(type, uri, local, v, from),
+          );
+        }
+      }
+    }
+
+    r.case(`${name}: summary`, () => r.blob(`${name}: summary`, Buffer.from(c.domainSummary())));
+    if (s % 16 === 15) {
+      c.__collect();
+    }
+  }
+}
+
 /** What the link suites call. */
 const LINK_EXPORTS = [
   "domainReset",
@@ -1428,6 +1691,38 @@ const SUITES: Suite[] = [
     run: (c, r) => lifetimes(c, r, 150),
   },
   {
+    name: "link-calls",
+    build: "testing",
+    needs: [
+      ...LINK_EXPORTS,
+      "domainEvict",
+      "domainRevive",
+      "domainFound",
+      "domainParent",
+      "domainRestore",
+    ],
+    run: (c, r) => calls(c, r, 200, 60),
+  },
+  {
+    name: "link-deep",
+    build: "testing",
+    needs: LINK_EXPORTS,
+    asStackLimit: true,
+    run: async (_, r, fresh) => {
+      for (const n of [2000, 8000, 20000]) {
+        await deep(r, fresh, `extends chain ${n}`, chainAbc(n, false), [], n - 1);
+      }
+
+      for (const n of [500, 2000, 4000]) {
+        await deep(r, fresh, `interface chain ${n}`, chainAbc(n, true), [], n - 1);
+      }
+
+      for (const n of [100, 2000, 8000, 20000]) {
+        await deep(r, fresh, `TypeNames nested ${n}`, nestedAbc(n), [builtinLibrary], 0);
+      }
+    },
+  },
+  {
     name: "libraries",
     build: "release",
     needs: [
@@ -1466,6 +1761,20 @@ const exported = (module: WebAssembly.Module) =>
 const has = { release: exported(modules.zig), testing: exported(modules.zigTesting) };
 
 /** Fresh instances of the three, as a host makes one, for each suite. */
+/** A fresh instance of one of the three. */
+async function instance(build: Suite["build"], compiler: string): Promise<Compiler> {
+  switch (compiler) {
+    case "zig":
+      return build === "release" ? instantiateZig(modules.zig) : bindTesting(modules.zigTesting);
+    case "poison":
+      return bindTesting(modules.poison);
+    default:
+      return build === "release"
+        ? instantiateAs(modules.as, { env: {} })
+        : instantiateAsTesting(modules.asTesting, { env: {} });
+  }
+}
+
 async function instances(build: Suite["build"]): Promise<Record<string, Compiler>> {
   // Zig's first: what it writes decides how the others' unspecified parts are compared (poolDumped).
   return build === "release"
@@ -1509,8 +1818,8 @@ function differs(a: string[], b: string[]): number {
 async function showBlobs(suite: Suite, key: string, aName: string, bName: string): Promise<string> {
   const fresh = await instances(suite.build);
   const [a, b] = [new Results(aName, new Set([key])), new Results(bName, new Set([key]))];
-  suite.run(fresh[aName], a);
-  suite.run(fresh[bName], b);
+  await suite.run(fresh[aName], a, () => instance(suite.build, aName));
+  await suite.run(fresh[bName], b, () => instance(suite.build, bName));
   const [aBytes, bBytes] = [a.blobs.get(key), b.blobs.get(key)];
   if (!aBytes || !bBytes) {
     return "";
@@ -1552,10 +1861,25 @@ for (const suite of SUITES.filter((s) => wanted.length === 0 || wanted.includes(
   }
 
   const results: Record<string, Results> = {};
-  for (const [compiler, instance] of Object.entries(await instances(suite.build))) {
+  for (const [compiler, made] of Object.entries(await instances(suite.build))) {
     results[compiler] = new Results(compiler);
-    suite.run(instance, results[compiler]);
+    await suite.run(made, results[compiler], () => instance(suite.build, compiler));
     writeFileSync(join(out, `${suite.name}.${compiler}.txt`), results[compiler].lines.join("\n"));
+  }
+
+  if (suite.asStackLimit) {
+    const ran = results.as.lines.flatMap((line, i) =>
+      /: threw RangeError: Maximum call stack size exceeded/.test(line) ? [i] : [],
+    );
+    for (const i of ran) {
+      results.as.lines[i] = results.zig.lines[i];
+    }
+
+    if (ran.length) {
+      console.log(
+        `  ${suite.name}: AssemblyScript's stack ran out at ${ran.length} cases, where Zig's went on: ${ran.map((i) => results.as.names[i]).join("; ")}`,
+      );
+    }
   }
 
   const mismatches: string[] = [];

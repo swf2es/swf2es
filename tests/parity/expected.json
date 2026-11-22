@@ -14,5 +14,7 @@
   "link-swfs",
   "link-mutated",
   "link-sweep",
-  "link-lifetimes"
+  "link-lifetimes",
+  "link-calls",
+  "link-deep"
 ]
