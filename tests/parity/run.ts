@@ -1270,6 +1270,30 @@ function nestedIfsAbc(n: number): Uint8Array {
   );
 }
 
+/**
+ * An ABC whose script initializer is `n` conditional branches, each over a
+ * return to the next: each target a block entered once, whose code the
+ * emitter writes in place inside the branch, `n` deep: structured to 500,
+ * MAX_NESTING, each level a call deeper through the instruction that
+ * branches, where the merges' levels are one call each.
+ */
+function chainedIfsAbc(n: number): Uint8Array {
+  const code: number[] = [];
+  for (let k = 0; k < n; k++) {
+    code.push(0x26, 0x11, 1, 0, 0, 0x47);
+  }
+
+  code.push(0x47);
+  return abcOf(
+    { strings: [], namespaces: [], multinames: [] },
+    tables({
+      methods: [{}],
+      scripts: [{ init: 0, traits: [] }],
+      bodies: [{ method: 0, code }],
+    }),
+  );
+}
+
 /** Body 0 of a deep ABC compiled alone, in a fresh instance; for Zig, how deep its stack went. */
 async function deepEmit(
   r: Results,
@@ -1296,6 +1320,204 @@ async function deepEmit(
       Buffer.from(`${/L\d+: \{/.test(text) ? "structured" : "dispatched"}\n${text}`),
     );
   });
+}
+
+/**
+ * From the review of stage 5: structured ABCs, a third mutated, each linked
+ * into a child domain and its module written a part at a time with a
+ * random budget, kept or not, sometimes left after its second part for a
+ * child made and dropped and the exports asked of the module abandoned;
+ * then its entries compiled again alone, in order or reversed, with
+ * items that name nothing, and the module whole, linked only.
+ */
+function modulePlans(c: Compiler, r: Results, seed: number, count: number): void {
+  const { below } = random(Math.imul(seed, 2654435761) >>> 0 || 1);
+  const plan = structuredAbcs(count, seed).map((base) => {
+    const bytes = base.slice();
+    if (below(3) === 0) {
+      for (let e = 1 + below(3); e > 0; e--) {
+        const from = bytes.length - (bytes.length >> 2);
+        bytes[from + below(bytes.length - from)] = below(2)
+          ? below(256)
+          : [
+              0x24, 0x2c, 0x30, 0x1d, 0x10, 0x11, 0x47, 0x48, 0x60, 0x66, 0x5d, 0x4f, 0x80, 0xd0,
+              0xd5, 0x1b, 0x5a, 0x40, 1, 2, 3,
+            ][below(21)];
+      }
+    }
+
+    return {
+      bytes,
+      budget: [1, 7, 64, 300, 5000, 0][below(6)],
+      keep: below(4) !== 0,
+      abandon: below(8),
+      reuse: below(2) === 0,
+    };
+  });
+  const digest = (b: Uint8Array | string) => {
+    const x = typeof b === "string" ? Buffer.from(b) : b;
+    return `${x.length}:${createHash("sha1").update(x).digest("hex").slice(0, 12)}`;
+  };
+  const copy = (address: number) => handed(c, address).slice();
+  for (const [k, p] of plan.entries()) {
+    r.case(`plan ${seed}/${k}`, () => {
+      if (k % 40 === 0) {
+        c.domainReset(API_VERSION);
+        c.domainAdd(builtinLibrary, true, 0);
+        c.__collect();
+      }
+
+      const child = c.domainChild(0);
+      const error = c.domainAdd(p.bytes, false, child);
+      let line = `add ${error}`;
+      if (error === 0) {
+        c.domainPartBudget(p.budget);
+        const parts = [copy(c.domainModuleBytes("h0\nh1", -1, p.keep, false))];
+        let n = 0;
+        while (!c.domainModuleDone()) {
+          if (p.abandon === 1 && n === 1) {
+            const other = c.domainChild(0);
+            c.domainDrop(other);
+            line += ` abandoned ${other} ${c.domainModuleDone()} ${copy(c.domainModuleMoreBytes()).length} [${c.domainSourceMap()}] ${c.domainModuleEntries().length} usage ${c.domainUsage().split(" ").slice(0, 2)}`;
+            break;
+          }
+
+          parts.push(copy(c.domainModuleMoreBytes()));
+          n++;
+        }
+
+        line += ` more-after ${copy(c.domainModuleMoreBytes()).length} ${c.domainModuleDone()}`;
+        c.domainPartBudget(0);
+        const entries: string = c.domainModuleEntries();
+        const bodies = entries
+          .split("\u0002")
+          .filter((x) => x.length)
+          .map((x) => x.slice(0, x.indexOf("\u0001")));
+        line += ` parts ${parts.length} ${digest(Buffer.concat(parts))} map ${digest(c.domainSourceMap())} entries ${digest(entries)}`;
+        if (p.abandon === 2) {
+          bodies.reverse();
+        }
+
+        line += ` each ${digest(c.domainEmitEach(`${bodies.join(",")},,-1,99999,x`, p.reuse))}`;
+        line += ` map2 ${digest(c.domainSourceMap())} ent2 ${digest(c.domainModuleEntries())}`;
+        line += ` whole ${digest(c.domainModule("own\nfirst\nsecond", -1, false, true))} ent3 ${digest(c.domainModuleEntries())}`;
+        if (p.abandon === 3) {
+          line += ` whole2 ${digest(c.domainModule("", -1, true, false))} ${digest(c.domainEmitEach(bodies.join(","), !p.reuse))}`;
+        }
+      }
+
+      c.domainDrop(child);
+      return line;
+    });
+  }
+}
+
+/**
+ * From the review of stage 5: random calls of the release's domain and
+ * module exports with wild arguments, application domains never made,
+ * dropped and evicted, indices negative and huge, parts asked for with
+ * none pending.
+ */
+function exportCalls(c: Compiler, r: Results, seed: number, steps: number): void {
+  const { below } = random(Math.imul(seed, 2246822519) >>> 0 || 1);
+  const abcs = structuredAbcs(400, seed + 1000);
+  const digest = (b: Uint8Array | string) => {
+    const x = typeof b === "string" ? Buffer.from(b) : b;
+    return `${x.length}:${createHash("sha1").update(x).digest("hex").slice(0, 10)}`;
+  };
+  const copy = (address: number) => (address === 0 ? "none" : digest(handed(c, address).slice()));
+  let added = 0;
+  let domains = 1;
+  c.domainReset(API_VERSION);
+  c.domainAdd(builtinLibrary, true, 0);
+  added = 1;
+  const index = () =>
+    [-1, -1, below(added + 2) - 1, added - 1, below(5) === 0 ? 1 << 30 : below(added + 1), -5][
+      below(6)
+    ];
+  const domain = () => [0, below(domains + 2) - 1, domains - 1, -3, 1 << 20][below(5)];
+  for (let k = 0; k < steps; k++) {
+    r.case(`call ${seed}/${k}`, () => {
+      switch (below(16)) {
+        case 0:
+          if (below(40) === 0) {
+            c.domainReset(below(2) ? API_VERSION : 50);
+            c.domainAdd(builtinLibrary, true, 0);
+            added = 1;
+            domains = 1;
+            return "reset";
+          }
+
+          return "skip";
+        case 1:
+        case 2: {
+          const d = domain();
+          const e = c.domainAdd(abcs[below(abcs.length)], false, d);
+          if (e >= 0) {
+            added++;
+          }
+
+          return `add ${d} ${e}`;
+        }
+        case 3: {
+          const d = domain();
+          const made = c.domainChild(d);
+          if (made >= 0) {
+            domains++;
+          }
+
+          return `child ${d} ${made}`;
+        }
+        case 4: {
+          const d = domain();
+          if (d !== 0 && below(3) === 0) {
+            c.domainDrop(d);
+            return `drop ${d} ${c.domainState(d)}`;
+          }
+
+          return `state ${c.domainState(d)} ${c.domainParent(d)}`;
+        }
+        case 5: {
+          const d = domain();
+          if (d !== 0 && below(2) === 0) {
+            c.domainEvict(d);
+            return `evict ${d} ${c.domainState(d)}`;
+          }
+
+          return `revive ${d} ${c.domainRevive(d, false)}`;
+        }
+        case 6: {
+          const i = index();
+          return `module ${i} ${digest(c.domainModule(below(2) ? "a\nb\nc" : "", i, below(2) === 0, below(2) === 0))}`;
+        }
+        case 7:
+        case 8: {
+          const i = index();
+          const address = c.domainModuleBytes(
+            below(2) ? "a\nb" : "",
+            i,
+            below(2) === 0,
+            below(2) === 0,
+          );
+          return `bytes ${i} ${copy(address)} ${c.domainModuleDone()}`;
+        }
+        case 9:
+        case 10:
+        case 11:
+          return `more ${copy(c.domainModuleMoreBytes())} ${c.domainModuleDone()}`;
+        case 12:
+          return `entries ${digest(c.domainModuleEntries())}`;
+        case 13:
+          return `map ${digest(c.domainSourceMap())}`;
+        case 14: {
+          const i = index();
+          return `linked ${i} ${c.domainLinked(i)}`;
+        }
+        default:
+          return `usage ${c.domainUsage().split(" ").slice(0, 2).join(" ")} done ${c.domainModuleDone()}`;
+      }
+    });
+  }
 }
 
 /** A deep case, alone in a fresh instance: AssemblyScript's may trap on it. */
@@ -1968,6 +2190,10 @@ const SUITES: Suite[] = [
       for (const n of [10, 100, 300, 498, 499, 500, 501, 2000, 20000]) {
         await deepEmit(r, fresh, `ifs nested ${n}`, nestedIfsAbc(n));
       }
+
+      for (const n of [10, 300, 499, 500, 501, 2000]) {
+        await deepEmit(r, fresh, `ifs chained ${n}`, chainedIfsAbc(n));
+      }
     },
   },
   {
@@ -2186,6 +2412,38 @@ const SUITES: Suite[] = [
         2048,
         moduleLast,
       ),
+  },
+  {
+    name: "modules-plans",
+    build: "testing",
+    needs: [...LINK_EXPORTS, ...MODULE_EXPORTS],
+    run: async (_, r, fresh) => {
+      for (const seed of [7, 8, 9, 10]) {
+        modulePlans(await fresh(), r, seed, 1500);
+      }
+    },
+  },
+  {
+    name: "exports-random",
+    build: "release",
+    needs: [
+      "domainReset",
+      "domainAdd",
+      "domainChild",
+      "domainDrop",
+      "domainEvict",
+      "domainRevive",
+      "domainState",
+      "domainParent",
+      "domainLinked",
+      "domainUsage",
+      ...MODULE_EXPORTS.filter((name) => name !== "domainEmitEach" && name !== "domainPartBudget"),
+    ],
+    run: async (_, r, fresh) => {
+      for (const seed of [3, 4]) {
+        exportCalls(await fresh(), r, seed, 20000);
+      }
+    },
   },
   {
     name: "libraries",
