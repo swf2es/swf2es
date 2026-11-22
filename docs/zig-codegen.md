@@ -277,7 +277,8 @@ and free chunks nothing could use.
   corpus SWFs each linked into a child domain and dropped 2,129 in
   2,121; with 32 chunks, 6, 36 and 2,123, for 0.5 MiB more memory
   reached (3.6, 3.6 and 10.1 MiB with none; AssemblyScript's memory 4.0,
-  8.0 and 16.0). `codegen-session.ts` compiles modules, so it waits for
+  8.0 and 16.0, its size after a collection, which grows by powers of
+  two, so an upper bound on its live heap rather than the heap itself). `codegen-session.ts` compiles modules, so it waits for
   stage 5, as does the choice: the reserve is none until the emitters'
   growing output, which the probe above found taking 13 runs a call, is
   measured with it.
@@ -592,17 +593,42 @@ For AVM2, from reading `assembly/`:
 - **Unaligned little-endian loads** (`load<f64>`, `load<u64>` on ABC
   bytes): `std.mem.readInt` and a bit cast.
 - **`Math.fround`, `Math.imul`**: `@floatCast` and `*%`.
-- **Recursion.** The structure emitter, the dominator walk and
-  `Output.uint` recurse. Frames differ in size, so a pathological input
-  may overflow one compiler's stack and not the other's. Zig 0.17's
-  linker places the stack first in memory (`__stack_pointer` starts at
-  the stack's size, the static data after it), so an overflow traps and
-  cannot write into the heap. Its size, 1 MiB in stage 0, is to be set
-  from the deepest the fuzzers and the corpus reach: the test build's
-  `stackPaint` and `stackDeepest` measure it. Such a trap is not a panic
-  and kills the instance all the same (below).
+- **Recursion.** AssemblyScript recurses on depths the input decides:
+  the linker along a base-class chain (`TraitsTable.resolve`), down an
+  interface hierarchy (`addInterfaces`) and down nested TypeNames
+  (`resolveTypeId`, `resolveType`, `Domain.checkTypeName`); the
+  structure emitter, the dominator walk and `Output.uint` too. Frames
+  differ in size, so such an input overflows one compiler's stack and not
+  the other's, and the engine's stack, not the shadow stack, ran out
+  first in Zig's: a chain of 8,000 classes resolved from the last trapped
+  there where AssemblyScript's returned. So the rule for the port: **no
+  recursion on a depth the input decides.** Such a walk keeps its frames
+  on a stack of its own in the call's arena, in the order the recursion
+  visits them, the first error ending every frame. Stage 3's linker does
+  (the parity suite `link-deep`: chains of 2,000 to 20,000 classes,
+  interface chains to 4,000, TypeNames nested to 20,000, where
+  AssemblyScript's stack runs out at the 20,000s and Zig's goes on);
+  stages 4 and 5 write theirs as work lists from the first. Recursion is
+  left only where the depth is the compiler's own (`Output.uint`'s
+  digits). Zig 0.17's linker places the shadow stack first in memory
+  (`__stack_pointer` starts at the stack's size, the static data after
+  it), so an overflow traps and cannot write into the heap; its size, 1
+  MiB, is to be set from the deepest the fuzzers and the corpus reach
+  (the test build's `stackPaint` and `stackDeepest`). Such a trap is not
+  a panic and kills the instance all the same (below). Known and kept,
+  since the output depends on them only through their answers:
+  AssemblyScript's `allInterfaces` is quadratic in the interfaces
+  (`includes` on a list) and walks the whole base chain for each traits
+  laid out, quadratic along a chain of classes, and the parser's
+  `typeNamesAreAcyclic` is quadratic in nested TypeNames.
 - **`rows()`, `weigh`, `memory.size()`** feed only the compaction
-  policy, never a module. M1 ports them with Zig's own row sizes.
+  policy, never a module. M1 keeps AssemblyScript's constants for a row
+  of each table, so that the weights compare between the two (the
+  parity harness compares `domainUsage`'s live and dead weights); only
+  the memory size is Zig's own. `rows()` counts getBinding's memo, which
+  a rollback empties, so after a call that ran out of memory the next
+  ABC's weight can count fewer memo rows than AssemblyScript's, which
+  trapped there instead; weights decide only when to compact.
 
 Nothing in `assembly/avm2` sorts, and nothing was found that writes an
 address or iterates a hash map into output. The parity harness is the
@@ -753,6 +779,15 @@ ReleaseSafe, the parser now reached through `domainAdd`; the test build
   its room, rather than made anew as AssemblyScript does, so that each
   finding the runtime reports leaves nothing behind; a lookup finds the
   same in either.
+- *Writes outside `put`.* Where nothing that can fail follows a write in
+  the same call, the write is raw: `lifetime.weigh`, `lifetime.restore`
+  (on an ABC a rebuild let go of, after its parse), `leave`, `revive` and
+  `unrevive`. Stages 5 and 6 allocate after some of these (a compile
+  weighs its ABC, a revival rebuilds), and must make them `put` then.
+  The test builds assert that a Change is open in `put`, getBinding,
+  `resolve` and `sign`, and every build that no Change opens inside
+  another. getBinding pushes its memo's rows before the id that names
+  them, where AssemblyScript inserts the id first.
 - *Unspecified reads.* AssemblyScript reads the first member of an empty
   last namespace set past the table's end (a name's first namespace, in
   five places). Zig's reads namespace 0 there and counts it
