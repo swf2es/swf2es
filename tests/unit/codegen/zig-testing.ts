@@ -33,10 +33,16 @@ export async function zigTestingModule(poison: boolean): Promise<WebAssembly.Mod
 
 /** An instance of a Zig test build, with a memory of its own. */
 // biome-ignore lint/suspicious/noExplicitAny: as untyped as asc's bindings for the AssemblyScript build
-export function bindTesting(module: WebAssembly.Module): Promise<any> {
-  return bind(module, { ...SIGNATURES, ...TESTING_SIGNATURES }, [
+export async function bindTesting(module: WebAssembly.Module): Promise<any> {
+  const bound = await bind(module, { ...SIGNATURES, ...TESTING_SIGNATURES }, [
     "memoryChunksUsed",
     "memoryReached",
     "stackDeepest",
   ]);
+  // testing/abc.ts's reader kinds, which asc exports as globals.
+  for (const [i, name] of ["U8", "U16", "S24", "U30", "U32", "S32", "D64", "UTF8"].entries()) {
+    bound[name] = { value: i };
+  }
+
+  return bound;
 }
