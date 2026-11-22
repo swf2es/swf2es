@@ -21,11 +21,11 @@ test("codegen.wasm imports nothing but abort", () => {
   );
 });
 
-// Both by name from dist/, not by the package's export, which SWF2ES_COMPILER=zig redirects.
-const dist = (name: string) =>
-  readFile(new URL(`../../../packages/codegen/dist/${name}`, import.meta.url));
-const zigModule = await WebAssembly.compile(await dist("codegen-zig.wasm"));
-const asModule = await WebAssembly.compile(await dist("codegen.wasm"));
+// Read named references so changing the shipping binary cannot compare a compiler with itself.
+const binary = (name: string) =>
+  readFile(new URL(`../../../packages/codegen/${name}`, import.meta.url));
+const zigModule = await WebAssembly.compile(await binary("dist/codegen-zig.wasm"));
+const asModule = await WebAssembly.compile(await binary("dist-test/codegen-as.wasm"));
 
 test("codegen-zig.wasm, the compiler in Zig, imports nothing but abort too", () => {
   assert.deepEqual(

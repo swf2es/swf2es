@@ -13,13 +13,13 @@ import { verifyErrorAbcs } from "../../parity/verify-errors.ts";
 import { script } from "./ir-cases.ts";
 import { bindTesting, zigTestingModule } from "./zig-testing.ts";
 
-// From dist/ by name, not by the package's export, which SWF2ES_COMPILER=zig redirects (tests/compiler.ts).
+// Read the two named binaries even when the shipping filename is temporarily the Zig build.
 const compile = async (name: string) =>
   WebAssembly.compile(
-    await readFile(new URL(`../../../packages/codegen/dist/${name}`, import.meta.url)),
+    await readFile(new URL(`../../../packages/codegen/${name}`, import.meta.url)),
   );
-const zig = await instantiate(await compile("codegen-zig.wasm"));
-const as = await instantiateAs(await compile("codegen.wasm"), { env: {} });
+const zig = await instantiate(await compile("dist/codegen-zig.wasm"));
+const as = await instantiateAs(await compile("dist-test/codegen-as.wasm"), { env: {} });
 
 test("strings go in as AssemblyScript's String.UTF8.encode wrote them: WTF-8", () => {
   assert.deepEqual([...toUtf8("aé€")], [0x61, 0xc3, 0xa9, 0xe2, 0x82, 0xac]);
@@ -64,15 +64,15 @@ test("the compilers agree on what Zig's has ported", () => {
 test("Zig's compiler has every export of AssemblyScript's but its runtime's", async () => {
   const exports = async (file: string) =>
     WebAssembly.Module.exports(await compile(file)).map((e) => e.name);
-  const zigs = new Set(await exports("codegen-zig.wasm"));
-  const missing = (await exports("codegen.wasm")).filter(
+  const zigs = new Set(await exports("dist/codegen-zig.wasm"));
+  const missing = (await exports("dist-test/codegen-as.wasm")).filter(
     (name) => !name.startsWith("__") && !zigs.has(name),
   );
   assert.deepEqual(missing, []);
 });
 
 test("a call that runs out of memory hands out nothing and says so, and does not trap", async () => {
-  const { exports } = await WebAssembly.instantiate(await compile("codegen-zig.wasm"), {
+  const { exports } = await WebAssembly.instantiate(await compile("dist/codegen-zig.wasm"), {
     env: { abort: () => assert.fail("abort") },
   });
   const raw = exports as { input(size: number): number; codegenError(): number };

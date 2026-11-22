@@ -2648,7 +2648,7 @@ const SUITES: Suite[] = [
 
 const compile = (path: string) => WebAssembly.compile(readFileSync(join(root, path)));
 const modules = {
-  as: await compile("packages/codegen/dist/codegen.wasm"),
+  as: await compile("packages/codegen/dist-test/codegen-as.wasm"),
   asTesting: await compile("packages/codegen/dist-test/testing.wasm"),
   zig: await compile("packages/codegen/dist/codegen-zig.wasm"),
   zigTesting: await zigTestingModule(false),

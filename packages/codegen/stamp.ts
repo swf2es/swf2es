@@ -4,7 +4,7 @@
 // compiler built from other sources never reuses another's output, which
 // COMPILER_VERSION, moved by hand, would not ensure.
 //
-//   node stamp.ts dist/codegen.wasm
+//   node stamp.ts dist/codegen.wasm [dist-test/codegen-as.wasm]
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -62,4 +62,7 @@ const wasm = unstamped(new Uint8Array(readFileSync(path)));
 const digest = createHash("sha256").update(wasm).digest("hex");
 const name = [...Buffer.from(SECTION)];
 const payload = [...leb(name.length), ...name, ...Buffer.from(digest)];
-writeFileSync(path, Buffer.concat([wasm, Buffer.from([0, ...leb(payload.length), ...payload])]));
+const stamped = Buffer.concat([wasm, Buffer.from([0, ...leb(payload.length), ...payload])]);
+for (const output of process.argv.slice(2)) {
+  writeFileSync(output, stamped);
+}
