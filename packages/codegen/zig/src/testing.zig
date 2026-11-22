@@ -409,6 +409,31 @@ fn throughExports(_: std.mem.Allocator, p: *memory.Pages) !void {
     try failed.check();
     _ = root.domainRestore(0, try staging.call(&domain.link_user), domain.link_user.len);
     try failed.check();
+
+    // The modules' exports, whole and a part a method, and the bodies alone.
+    _ = root.domainModule(try staging.call("own\nfirst"), 9, -1, true, false);
+    try failed.check();
+    for ([_]*const fn () callconv(.c) usize{ root.domainSourceMap, root.domainModuleEntries }) |dump| {
+        _ = root.input(0);
+        _ = dump();
+        try failed.check();
+    }
+
+    domainPartBudget(1);
+    defer domainPartBudget(0);
+    _ = root.domainModuleBytes(try staging.call(""), 0, -1, true, true);
+    try failed.check();
+    while (!root.domainModuleDone()) {
+        _ = root.input(0);
+        _ = root.domainModuleMoreBytes();
+        try failed.check();
+    }
+
+    _ = root.input(0);
+    _ = domainEmit(0);
+    try failed.check();
+    _ = domainEmitEach(try staging.call("0,1"), 3, false, -1);
+    try failed.check();
 }
 
 test "the exports, staging to handing out, may run out of memory anywhere and keep nothing" {

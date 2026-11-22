@@ -14,6 +14,7 @@ const ir_ = @import("../avm2/ir/ir.zig");
 const Ir = ir_.Ir;
 const traits_ = @import("../avm2/link/traits.zig");
 const MethodEmitter = @import("../avm2/emit/method.zig").MethodEmitter;
+const ModuleEmitter = @import("../avm2/emit/module.zig").ModuleEmitter;
 const stack_names = @import("../avm2/emit/stack-names.zig");
 
 /// The domain's binding of `name` in the namespace of type `type` (NS_*) and
@@ -1040,14 +1041,55 @@ fn domainLife(_: Allocator, p: *memory.Pages) !void {
                 7 => try compile.domainEvict(1),
                 8 => try testing.expectEqual(0, try compile.domainRevive(1, false)),
                 9 => try testing.expectEqual(0, try compile.domainAdd(&link_user, false, 0)),
+                10 => try testing.expect((try compile.domainModule(memory.call.allocator(), "own\nfirst", -1, true, false)).len > 0),
+                11 => {
+                    // Neither changes the domain: one that runs out leaves it as it was.
+                    _ = try compile.domainSourceMap(memory.call.allocator());
+                    _ = try compile.domainModuleEntries(memory.call.allocator());
+                },
+                12 => {
+                    // A part a method, so that the module comes in many.
+                    compile.domainPartBudget(1);
+                    _ = try compile.domainModuleBytes(memory.call.allocator(), "", -1, true, false);
+                },
+                13 => {
+                    // Each part a call of its own, its domain changes kept as
+                    // the next starts: each checked alone.
+                    while (!compile.domainModuleDone()) {
+                        memory.call.reset();
+                        compile.callStarts();
+                        const dom = try compile.domain();
+                        const before = fingerprint(dom);
+                        _ = compile.domainModuleMoreBytes(memory.call.allocator()) catch {
+                            try testing.expectEqual(before, fingerprint(dom));
+                            return error.PartRanOut;
+                        };
+                    }
+
+                    compile.domainPartBudget(0);
+                },
+                14 => _ = try compile.domainSourceMap(memory.call.allocator()),
+                15 => _ = try compile.domainEmitEach(memory.call.allocator(), "0,1,2,3,9999", false, -1),
+                16 => _ = try compile.domainEmitEach(memory.call.allocator(), "3,2,1,0", true, -1),
                 else => try compile.domainDrop(1),
             }
         }
     };
-    for (0..11) |step| {
+    defer compile.domainPartBudget(0);
+    for (0..18) |step| {
         const dom = try compile.domain();
         const before = fingerprint(dom);
+        const prints = fieldPrints(dom);
         steps.run(@intCast(step)) catch |err| {
+            if (err == error.PartRanOut) {
+                return error.OutOfMemory;
+            }
+
+            if (before != fingerprint(dom)) {
+                std.debug.print("step {d}\n", .{step});
+                printDiffering(prints, fieldPrints(dom));
+            }
+
             try testing.expectEqual(before, fingerprint(dom));
             return err;
         };
@@ -1186,11 +1228,32 @@ fn lifeStep(d: *Domain, a: *memory.Arena, step: u32) !void {
         13 => try testing.expectEqualStrings("verified 5 of 5 bodies", try domain_.changed(d, a, domainVerifyAll, .{d.scratch})),
         14 => _ = try domain_.changed(d, a, domainIrAll, .{d.scratch}),
         15 => _ = try domain_.changed(d, a, domainIr, .{ d.scratch, 3 }),
+        16 => _ = try domain_.changed(d, a, domainEmit, .{ d.scratch, 3 }),
+        17 => _ = try domain_.changed(d, a, wholeModule, .{ d.scratch, d.abcs.len - 1 }),
+        18 => _ = try domain_.changed(d, a, partedModule, .{ d.scratch, 4 }),
         else => try testing.expectEqual(0, try domain_.changed(d, a, lifetime.restore, .{ a, 1, &link_user })),
     }
 }
 
-const life_steps = 17;
+/// ABC `index`'s module, written whole; its length.
+fn wholeModule(dom: *Domain, gpa: Allocator, index: u32) Allocator.Error!usize {
+    var emitter: ModuleEmitter = try .init(gpa, gpa, dom, index);
+    try emitter.module(&.{ "own", "first" }, false);
+    return emitter.out().len();
+}
+
+/// ABC `index`'s module, a part a method, each part's scratch made anew; its length.
+fn partedModule(dom: *Domain, gpa: Allocator, index: u32) Allocator.Error!usize {
+    var emitter: ModuleEmitter = try .init(gpa, gpa, dom, index);
+    try emitter.begin(&.{}, true);
+    while (!try emitter.step(1, false)) {
+        try emitter.prepare(gpa);
+    }
+
+    return emitter.out().len();
+}
+
+const life_steps = 20;
 
 /// linkLife's calls on a domain over `source`, each that runs out of memory
 /// checked to leave the domain and its arena as they were, then made again:
