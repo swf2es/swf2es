@@ -89,8 +89,9 @@ draws on the machine's GPU (on a machine with two,
   collection;
 - `--drawn-once N`: N distinct shapes, `--per-frame K` (20) of them shown
   on each frame and taken away on the next, each once in the loop; with
-  `--allocs` and more frames than a shape's paths stand unread (120),
-  what the shapes drawn keep after a full collection;
+  `--allocs` and a run longer than a shape's paths stand unread (5 s),
+  what the shapes drawn keep after a full collection; with more frames
+  than the loop, what showing them again costs;
 - `--deck N`: one shape of N wobbly contours stacked almost on top of
   each other, filled even-odd, whose crossings make libtess2 slow with
   the square of N (`--paint gradient` or `bitmap`; `--ratio-change`

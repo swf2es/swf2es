@@ -208,9 +208,10 @@
 //
 // --drawn-once N plays instead N distinct shapes of the kind --still-shapes draws, --per-frame K
 // (20) of them shown on each frame and taken away on the next, each shown once in the loop: a large
-// application's art, most of it drawn for a while and never again. With --allocs and more frames
-// than a shape's paths stand unread (display/tag-shapes.ts), what the page holds after a full
-// collection is what the shapes drawn keep.
+// application's art, most of it drawn for a while and never again. With --allocs and a run longer
+// than a shape's paths stand unread (5 s, display/tag-shapes.ts), what the page holds after a full
+// collection is what the shapes drawn keep; with more frames than the loop, a shape shown again is
+// tessellated and read from its tag again.
 //
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens
@@ -1966,16 +1967,16 @@ function drawnOnceSwf(count: number, perFrame: number): Uint8Array {
   const scale = cell / (2.4 * r);
   const loop = Math.ceil(count / perFrame);
   for (let f = 0; f < loop; f++) {
-    for (let k = 0; k < perFrame; k++) {
-      const c = f * perFrame + k;
-      if (f > 0 || loop === 1) {
+    // The last frame may show fewer; the loop's first frame, played again, takes them all away.
+    for (let k = 0; k < perFrame && f * perFrame + k < count; k++) {
+      if (f > 0) {
         tags.push(w.remove(k + 1));
       }
 
       tags.push(
         w.place({
           depth: k + 1,
-          character: (c % count) + 1,
+          character: f * perFrame + k + 1,
           matrix: {
             a: scale,
             d: scale,
