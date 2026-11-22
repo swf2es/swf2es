@@ -8,8 +8,10 @@
 //   node zig/build.ts           pnpm build: nothing to do where the modules
 //                               in dist/ are digests.json's and so are the
 //                               inputs; else a build, with Zig's caches
-//                               kept, each module held to its digest if
-//                               the inputs are digests.json's
+//                               kept, and a warning for a module that is
+//                               not digests.json's for the same inputs, as
+//                               another host's Zig might build it (CI's
+//                               --verify fails on it)
 //   node zig/build.ts --update  the inline tests (zig build test), then a
 //                               build with fresh caches, its digests written
 //   node zig/build.ts --verify  the same, failing where the inputs or a
@@ -115,16 +117,23 @@ const started = performance.now();
 const digests = recorded();
 const now = inputs();
 if (process.argv.includes("--update") || process.argv.includes("--verify")) {
-  runZig(here, ["build", "test"]);
-  await build();
+  // Fresh caches, but one for both, so that Zig's build runner is compiled once.
+  const fresh = mkdtempSync(join(swf2esCache(), "zig-codegen-fresh-"));
+  try {
+    runZig(here, ["build", "test"], fresh);
+    await build(fresh);
+  } finally {
+    rmSync(fresh, { recursive: true, force: true });
+  }
+
   report(started);
-  const fresh: Digests = { zig: ZIG_VERSION, inputs: now, modules: built() };
+  const made: Digests = { zig: ZIG_VERSION, inputs: now, modules: built() };
   if (process.argv.includes("--update")) {
-    writeFileSync(digestsFile, `${JSON.stringify(fresh, null, 2)}\n`);
-  } else if (JSON.stringify(fresh) !== JSON.stringify(digests)) {
+    writeFileSync(digestsFile, `${JSON.stringify(made, null, 2)}\n`);
+  } else if (JSON.stringify(made) !== JSON.stringify(digests)) {
     throw new Error(
       `the Zig modules or their inputs are not those of packages/codegen/zig/digests.json; ` +
-        `run node packages/codegen/zig/build.ts --update\n${JSON.stringify(fresh, null, 2)}`,
+        `run node packages/codegen/zig/build.ts --update\n${JSON.stringify(made, null, 2)}`,
     );
   }
 } else if (digests?.inputs !== now || JSON.stringify(built()) !== JSON.stringify(digests.modules)) {
@@ -133,9 +142,9 @@ if (process.argv.includes("--update") || process.argv.includes("--verify")) {
   if (digests?.inputs === now) {
     for (const [path, digest] of Object.entries(built())) {
       if (digest !== digests.modules[path]) {
-        throw new Error(
-          `${path} has SHA-256 ${digest}, but digests.json has ${digests.modules[path]} for its inputs: ` +
-            `Zig ${ZIG_VERSION} built it otherwise here`,
+        console.warn(
+          `zig: ${path} has SHA-256 ${digest}, but digests.json has ${digests.modules[path]} for its inputs: ` +
+            `Zig ${ZIG_VERSION} built it otherwise on this host`,
         );
       }
     }

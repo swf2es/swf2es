@@ -147,7 +147,8 @@ Zig
 
 dist/codegen-zig.wasm, the compiler in Zig, is compiled by Zig 0.17.0,
 https://ziglang.org, and holds the parts of its standard library the
-compiler uses, under the MIT License:
+compiler uses and compiler-rt's routines it calls (memcpy, memset), under
+the MIT License:
 
 The MIT License (Expat)
 
