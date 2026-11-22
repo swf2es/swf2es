@@ -1399,6 +1399,98 @@ function calls(c: Compiler, r: Results, sequences: number, steps: number): void 
   }
 }
 
+/** What verifying the last ABC added gives: each body's error, the IR checked, and some bodies' IR. */
+function verifyLast(c: Compiler, r: Results, name: string, irs: number): void {
+  let bodies = 0;
+  linked(c, r, `${name}: verify`, () => {
+    const text: string = c.domainVerifyAll();
+    bodies = Number(/of (\d+) bodies$/.exec(text)?.[1] ?? 0);
+    return r.blob(`${name}: verify`, Buffer.from(text));
+  });
+  linked(c, r, `${name}: check IR`, () => c.domainCheckIr());
+  // Every body's for a small ABC; for a large one, spread over it.
+  const step = Math.max(1, Math.ceil(bodies / irs));
+  for (let b = 0; b < bodies; b += step) {
+    linked(c, r, `${name}: IR ${b}`, () => r.blob(`${name}: IR ${b}`, Buffer.from(c.domainIr(b))));
+  }
+}
+
+/**
+ * Each SWF's ABCs added into a child of the root, as linkSwfs adds them,
+ * each verified after it is added; the domain made again every 40 SWFs.
+ */
+function verifySwfs(
+  c: Compiler,
+  r: Results,
+  base: Base,
+  swfs: [string, [string, Uint8Array][]][],
+  irs: number,
+): void {
+  const linking = new Linking(c, r);
+  for (const [k, [swf, list]] of swfs.entries()) {
+    if (k % 40 === 0) {
+      linking.reset(`batch ${k}`, base);
+      c.__collect();
+    }
+
+    let child = -1;
+    r.case(`${swf}: child`, () => {
+      child = c.domainChild(0);
+      return child;
+    });
+    for (const [name, bytes] of list) {
+      if (linking.link(name, bytes, child)) {
+        verifyLast(c, r, name, irs);
+      }
+    }
+
+    r.case(`${swf}: drop`, () => {
+      c.domainDrop(child);
+      return c.domainState(child);
+    });
+  }
+}
+
+/**
+ * The link seeds and the tests' ABCs with bytes set in their method
+ * bodies' code, mostly to opcodes and small operands, so that the
+ * verifier meets what it rejects and what it types differently.
+ */
+function mutatedCode(count: number): [string, Uint8Array][] {
+  const seeds = linkSeeds();
+  const { below } = random(17);
+  const found: [string, Uint8Array][] = [];
+  for (let k = 0; k < count; k++) {
+    const [name, seed] = seeds[below(seeds.length)];
+    const bytes = seed.slice();
+    for (let edits = 1 + below(3); edits > 0; edits--) {
+      // The bodies come last in an ABC: its last quarter.
+      const from = bytes.length - (bytes.length >> 2);
+      const at = from + below(bytes.length - from);
+      bytes[at] =
+        below(3) === 0
+          ? below(256)
+          : [
+              0x24, 0x2c, 0x30, 0x1d, 0x10, 0x11, 0x47, 0x48, 0x60, 0x66, 0x5d, 0x4f, 0x80, 0xd0,
+              0xd5, 1, 2, 3,
+            ][below(18)];
+    }
+
+    found.push([`${name} code ${k}`, bytes]);
+  }
+
+  return found;
+}
+
+/** An ABC's untyped decode, as a SWF's and as a library's. */
+function codeDumps(c: Compiler, r: Results, name: string, bytes: Uint8Array): void {
+  for (const builtin of [false, true]) {
+    r.case(`${name}: code, builtin ${builtin}`, () =>
+      r.blob(`${name}: code, builtin ${builtin}`, Buffer.from(c.codeDump(bytes, builtin))),
+    );
+  }
+}
+
 /** What the link suites call. */
 const LINK_EXPORTS = [
   "domainReset",
@@ -1721,6 +1813,89 @@ const SUITES: Suite[] = [
         await deep(r, fresh, `TypeNames nested ${n}`, nestedAbc(n), [builtinLibrary], 0);
       }
     },
+  },
+  {
+    name: "code-dumps",
+    build: "testing",
+    needs: ["codeDump"],
+    run: (c, r) => {
+      for (const [i, [name, bytes]] of [...everyAbc(), ...linkSeeds()].entries()) {
+        codeDumps(c, r, name, bytes);
+        if (i % 32 === 31) {
+          c.__collect();
+        }
+      }
+    },
+  },
+  {
+    name: "code-mutated",
+    build: "testing",
+    needs: ["codeDump"],
+    run: (c, r) => {
+      for (const [i, [name, bytes]] of [...mutatedAbcs(2000), ...mutatedCode(8000)].entries()) {
+        codeDumps(c, r, name, bytes);
+        if (i % 32 === 31) {
+          c.__collect();
+        }
+      }
+    },
+  },
+  {
+    name: "verify-libraries",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr"],
+    run: (c, r) => {
+      const linking = new Linking(c, r);
+      for (const [name, base] of Object.entries({ player: PLAYER, air: AIR, shell: SHELL })) {
+        linking.reset(name, { version: base.version, libraries: [] });
+        for (const [k, library] of base.libraries.entries()) {
+          if (linking.link(`${name} library ${k}`, library, 0, true)) {
+            verifyLast(c, r, `${name} library ${k}`, 40);
+          }
+        }
+
+        c.__collect();
+      }
+    },
+  },
+  {
+    name: "verify-tests",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr"],
+    run: (c, r) =>
+      verifySwfs(
+        c,
+        r,
+        PLAYER,
+        linkSeeds().map(([name, bytes]) => [name, [[name, bytes]]]),
+        64,
+      ),
+  },
+  {
+    name: "verify-swfs",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr"],
+    run: (c, r) => verifySwfs(c, r, PLAYER, bySwf(swfAbcs()), 24),
+  },
+  {
+    name: "verify-oracle",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr"],
+    unavailable: () => (existsSync(oracleDir()) ? null : "no oracle cache"),
+    run: (c, r) => verifySwfs(c, r, SHELL, oracleAbcs(), 8),
+  },
+  {
+    name: "verify-mutated",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr"],
+    run: (c, r) =>
+      verifySwfs(
+        c,
+        r,
+        PLAYER,
+        mutatedCode(6000).map(([name, bytes]) => [name, [[name, bytes]]]),
+        16,
+      ),
   },
   {
     name: "libraries",

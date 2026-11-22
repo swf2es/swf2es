@@ -16,5 +16,11 @@
   "link-sweep",
   "link-lifetimes",
   "link-calls",
-  "link-deep"
+  "link-deep",
+  "code-dumps",
+  "code-mutated",
+  "verify-libraries",
+  "verify-tests",
+  "verify-swfs",
+  "verify-mutated"
 ]
