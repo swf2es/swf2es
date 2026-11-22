@@ -162,12 +162,12 @@ test("a load that panics Zig's compiler is rejected, and the domain goes on in a
   assert.equal(codegen.add(script([0x24, 7, 0x24, 5, 0xa0, 0x48]), false, main), 0);
   const first = codegen.compileModuleLogged(["a"], 0);
   const context = codegen.context(0);
-  const revision = codegen.revision();
   for (const bytes of [panic, overflow]) {
+    const revision = codegen.revision();
     assert.equal(codegen.add(bytes, false, main), 1107);
     // The domain as it was: the module, its context and the log alike.
     assert.deepEqual(codegen.context(0), context);
-    assert.equal(codegen.revision(), revision);
+    assert.notEqual(codegen.revision(), revision);
     assert.equal(codegen.compileModule(["a"], 0), first.module);
   }
 
@@ -188,6 +188,99 @@ test("recovery keeps ancestor resolutions after the compiling child is dropped",
   assert.ok(before?.log);
   assert.equal(compiler.add(new TextEncoder().encode("\0panic")), 1107);
   assert.deepEqual(compiler.context(0), before);
+});
+
+test("recovery invalidates a cache read even when the native log returns to its previous length", async () => {
+  const compiler = await createCodegen(await zigTestingModule(false));
+  compiler.reset();
+  assert.equal(compiler.add(builtinLibrary, true), 0);
+  const main = compiler.childDomain(0);
+  assert.equal(compiler.add(script([0x24, 7, 0x48]), false, main), 0);
+  const child = compiler.childDomain(main);
+  assert.equal(compiler.add(script([0x24, 9, 0x48]), false, child), 0);
+  compiler.compileModule([], 2);
+  compiler.dropDomain(child);
+
+  const revision = compiler.revision();
+  const key = compiler.keyContext(1);
+  assert.equal(compiler.add(new TextEncoder().encode("\0panic")), 1107);
+  for (const name of ["Object", "Class", "Function"]) {
+    compiler.found({ domain: main, nsKind: 0, uri: "", name, abc: 0, asType: true });
+  }
+
+  assert.notDeepEqual(compiler.keyContext(1), key);
+  assert.notEqual(compiler.revision(), revision);
+});
+
+test("a rejected compile request leaves the current domain recoverable", async () => {
+  const compiler = await createCodegen(await zigTestingModule(false));
+  compiler.reset();
+  assert.equal(compiler.add(script([0x24, 7, 0x48])), 0);
+  const key = compiler.keyContext(0);
+  assert.throws(() => compiler.compileModule([], 99));
+  assert.equal(compiler.add(new TextEncoder().encode("\0panic")), 1107);
+  assert.deepEqual(compiler.keyContext(0), key);
+});
+
+test("an interrupted verifier cannot replay as a completed verification", async (t) => {
+  const module = await zigTestingModule(false);
+  t.mock.method(WebAssembly, "instantiate", async (module: WebAssembly.Module, imports: object) => {
+    const instance = new WebAssembly.Instance(module, imports);
+    const raw = instance.exports as {
+      input(size: number): number;
+      domainPartBudget(bytes: number): void;
+      domainModuleDone(): number;
+    };
+    raw.domainPartBudget(1);
+    let refuseNextInput = false;
+    return {
+      exports: {
+        ...instance.exports,
+        domainModuleDone() {
+          const done = raw.domainModuleDone();
+          refuseNextInput = !done;
+          return done;
+        },
+        input(size: number) {
+          if (refuseNextInput) {
+            refuseNextInput = false;
+            return 0;
+          }
+          return raw.input(size);
+        },
+      },
+    };
+  });
+
+  const compiler = await createCodegen(module);
+  compiler.reset();
+  assert.equal(compiler.add(builtinLibrary, true), 0);
+  assert.throws(() => compiler.compileModule(), /ran out of memory/);
+  assert.throws(() => compiler.add(new TextEncoder().encode("\0panic")), CodegenPanic);
+});
+
+test("recovery reads a finding's inherited fields once and preserves the finding", async () => {
+  const compiler = await createCodegen(await zigTestingModule(false));
+  compiler.reset();
+  assert.equal(compiler.add(linkAbcs().builtin, true), 0);
+  let reads = 0;
+  const finding = Object.create({
+    domain: 0,
+    nsKind: 0,
+    uri: "",
+    abc: 0,
+    asType: true,
+    get name() {
+      reads++;
+      return "A";
+    },
+  });
+  compiler.found(finding);
+  const key = compiler.keyContext(0);
+  assert.ok(key?.rest);
+  assert.equal(compiler.add(new TextEncoder().encode("\0panic")), 1107);
+  assert.deepEqual(compiler.keyContext(0), key);
+  assert.equal(reads, 1);
 });
 
 test("a missing journal entry cannot silently roll back the compiler after a later panic", async (t) => {
@@ -268,12 +361,12 @@ test("recovery after compaction keeps the generation and restores an evicted chi
   const key = compiler.keyContext(0);
   const panic = new TextEncoder().encode("\0panic");
   assert.equal(compiler.add(panic), 1107);
-  assert.equal(compiler.revision(), revision);
+  assert.notEqual(compiler.revision(), revision);
   assert.deepEqual(compiler.keyContext(0), key);
   assert.throws(() => compiler.reviveDomain(child, new Map()));
   compiler.reviveDomain(child, new Map([[1, user]]));
   const revived = compiler.revision();
   assert.equal(compiler.add(panic), 1107);
-  assert.equal(compiler.revision(), revived);
+  assert.notEqual(compiler.revision(), revived);
   assert.equal(compiler.compileModule([], 1), output);
 });

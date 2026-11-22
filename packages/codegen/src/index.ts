@@ -531,6 +531,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   const stamps = WebAssembly.Module.customSections(module, "swf2es.build");
   const identity = stamps.length ? String.fromCharCode(...new Uint8Array(stamps[0])) : null;
   let epoch = 0;
+  let revisionEpoch = 0;
   let apiVersion = API_VERSION;
   // Read where they are in codegen's memory, digested before the next call in.
   const chains = new KeyChains({
@@ -773,10 +774,11 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     try {
       result = call();
     } catch (error) {
-      // An earlier part of a failed compile may already have changed a live domain.
+      // A stepped verifier can have logged its start without finishing. Replaying
+      // that entry would resolve more of the domain than the interrupted compile did.
       if (!(error instanceof CodegenPanic)) {
         try {
-          replayable = journalLog(mark);
+          replayable = wasm.domainLogMark() === mark;
         } catch {
           replayable = false;
         }
@@ -889,6 +891,9 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       return false;
     }
 
+    // Pruning dropped domains can reuse a native log position. Invalidate
+    // outstanding cache reads even when replay produces the same native revision.
+    revisionEpoch++;
     // The held SWFs' copies, and the key chains' digests, were the dead instance's.
     holds.length = 0;
     chains.clear();
@@ -922,6 +927,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       collected(wasm.domainReset(version));
       added = 0;
       epoch++;
+      revisionEpoch++;
       chains.clear();
       apiVersion = version;
       journal.length = 0;
@@ -1049,10 +1055,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         );
       }
     },
-    found(d) {
-      collected(wasm.domainFound(d.domain, d.nsKind, d.uri, d.name, d.abc, d.asType));
+    found({ domain, nsKind, uri, name, abc, asType }) {
+      collected(wasm.domainFound(domain, nsKind, uri, name, abc, asType));
       if (zig) {
-        journal.push({ kind: "found", definition: { ...d } });
+        journal.push({ kind: "found", definition: { domain, nsKind, uri, name, abc, asType } });
       }
     },
     compile(hashes = [], index = -1) {
@@ -1095,7 +1101,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       return collected(chains.context(indexOf(index), after));
     },
     revision() {
-      return `${epoch} ${wasm.domainRevision()}`;
+      return `${revisionEpoch} ${wasm.domainRevision()}`;
     },
     compileModuleLogged(hashes = [], index = -1) {
       last("compileModuleLogged");
