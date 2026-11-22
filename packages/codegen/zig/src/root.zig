@@ -234,4 +234,14 @@ test {
     _ = @import("avm1/emit/stack.zig");
     _ = @import("avm1/emit/module.zig");
     _ = avm1;
+    _ = @import("avm2/abc/reader.zig");
+    _ = @import("avm2/abc/constants.zig");
+    _ = @import("avm2/abc/opcodes.zig");
+    _ = @import("avm2/abc/pool.zig");
+    _ = @import("avm2/abc/abc.zig");
+    _ = @import("avm2/abc/methods.zig");
+    _ = @import("avm2/abc/traits.zig");
+    _ = @import("avm2/abc/classes.zig");
+    _ = @import("avm2/abc/bodies.zig");
+    _ = @import("avm2/abc/parse.zig");
 }
