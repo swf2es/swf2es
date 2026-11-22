@@ -90,7 +90,8 @@ pub fn firstMember(pool: *const ConstantPool, set: u32) u32 {
 /// The old values of the rows a call wrote that it did not add, to put
 /// back if it runs out of memory.
 pub const Undo = struct {
-    entries: std.ArrayList(Entry) = .empty,
+    /// Rows that never move, so that a long journal leaves no outgrown copies in the call's arena.
+    entries: Rows(Entry) = .{},
 
     const Entry = struct { at: usize, size: u8, old: u64 };
 
@@ -99,14 +100,14 @@ pub const Undo = struct {
         comptime std.debug.assert(@sizeOf(T) <= 8);
         var old: u64 = 0;
         @memcpy(std.mem.asBytes(&old)[0..@sizeOf(T)], std.mem.asBytes(ptr));
-        try self.entries.append(scratch, .{ .at = @intFromPtr(ptr), .size = @sizeOf(T), .old = old });
+        try self.entries.push(scratch, .{ .at = @intFromPtr(ptr), .size = @sizeOf(T), .old = old });
     }
 
     fn rollBack(self: *Undo) void {
-        var i = self.entries.items.len;
+        var i = self.entries.len;
         while (i > 0) {
             i -= 1;
-            const entry = self.entries.items[i];
+            const entry = self.entries.get(i);
             const at: [*]u8 = @ptrFromInt(entry.at);
             @memcpy(at[0..entry.size], std.mem.asBytes(&entry.old)[0..entry.size]);
         }
