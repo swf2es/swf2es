@@ -201,7 +201,11 @@ importers:
         specifier: workspace:*
         version: link:../../apps/desktop
 
-  tests/fuzz: {}
+  tests/fuzz:
+    dependencies:
+      '@swf2es/codegen':
+        specifier: workspace:*
+        version: link:../../packages/codegen
 
   tests/libraries: {}
 

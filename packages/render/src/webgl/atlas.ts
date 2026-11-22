@@ -117,15 +117,15 @@ export interface Place {
   /** Whether it samples the stage's pixel (samplesStage), which the stage fill program draws. */
   stage: boolean;
   /**
-   * Small, unchanged geometries may be copied into a run's streaming buffer: their vertices from
-   * the page, on the GPU, and their indices from `local`. The frame it was placed on.
+   * Small, unchanged geometries may be copied into a run's streaming buffer from their arrays,
+   * which their registry keeps (settle): the frame it was placed on.
    */
-  batch: { frame: number } | null;
+  batch: { data: GeometryData; frame: number } | null;
   /**
-   * Its indices counted from its first vertex: what moving it in the atlas (repack) or copying it
-   * into a run's stream needs, as WebGL copies an index buffer only as it is. Its geometry's own
-   * till it has stood RELEASE_FRAMES, then a copy of its own, in 16 bits where its vertices fit,
-   * as its arrays are let go of (Geometries.release).
+   * Its indices counted from its first vertex: what moving it in the atlas (repack) needs, as
+   * WebGL copies an index buffer only as it is. Its geometry's own till it has stood
+   * RELEASE_FRAMES, then, where its arrays are let go of (Geometries.release), a copy of its own,
+   * in 16 bits where its vertices fit.
    */
   local: Uint16Array | Uint32Array;
 }
@@ -133,9 +133,11 @@ export interface Place {
 /**
  * The geometry atlas: every geometry copied once into a page's vertex and
  * index buffers, and advanced text's glyph quads into an atlas of their
- * own, where the draws find them by their places. Only a geometry's indices
- * stay on the CPU once copied (Place.local), counted from its first vertex,
- * and its registry lets go of its arrays (Geometries.release). A geometry
+ * own, where the draws find them by their places. Once copied, a geometry
+ * too large to merge keeps only its indices on the CPU (Place.local),
+ * counted from its first vertex, and its registry lets go of its arrays
+ * (Geometries.release); one small enough to merge keeps its arrays, which a
+ * run's stream stages again whenever moving content makes its runs anew. A geometry
  * let go of leaves holes in its page, which later geometries are placed in
  * once the top is full; a page is packed again only when what is added
  * finds no room, its vertices moved on the GPU and its indices written
@@ -270,6 +272,7 @@ export class GeometryAtlas {
     this.places[id] = null;
     // Its geometry's own, where it has not settled: a settling entry would keep them alive.
     place.local = NO_INDICES;
+    place.batch = null;
     if (place.glyphs) {
       this.glyphs.live -= place.vertices;
       this.glyphs.holes += place.vertices;
@@ -424,8 +427,13 @@ export class GeometryAtlas {
 
   /**
    * The geometries placed RELEASE_FRAMES of their registry's ago or more, by its frames, not the
-   * atlas', which a BitmapData's draws advance too, and placed still: their indices copied into
-   * arrays of their own and their arrays let go of (Geometries.release), only while the context
+   * atlas', which a BitmapData's draws advance too, placed still and too large to merge: their
+   * arrays let go of (Geometries.release) and their indices copied into arrays of their own. One
+   * small enough to merge keeps its arrays, which a run's stream stages again whenever moving
+   * content makes its runs anew: copying such geometries from the page on the GPU instead, a copy
+   * for each, made a frame of moving timelines thousands of copies and ANGLE's GL wait twice as
+   * long (0.1.35), and getting them back by tessellating them again stalls a frame wherever a
+   * still run changes or the stream is made anew. Only while the context
    * is not known to be lost: copies made into a lost one are no copies, and the arrays stay for
    * the restore. In Chrome's window before it flags a loss (webgl/losses.ts), arrays may go
    * after copies that never reached the GPU; the restore's Geometries.lost rebuilds them.
@@ -445,15 +453,22 @@ export class GeometryAtlas {
 
     for (let i = 0; i < k; i++) {
       const place = places[i];
-      if (this.places[ids[i]] === place && geometries.get(ids[i])) {
-        place.local = localIndices(place.local, place.vertices);
+      // Small enough to merge (Place.batch): its arrays kept for a run's stream to stage.
+      if (this.places[ids[i]] === place && !place.batch && geometries.get(ids[i])) {
         geometries.release(ids[i]);
+        if (geometries.released(ids[i])) {
+          place.local = localIndices(place.local, place.vertices);
+        }
       }
     }
 
-    places.splice(0, k);
-    ids.splice(0, k);
-    frames.splice(0, k);
+    // Moved down in place: a frame's settling allocates nothing.
+    places.copyWithin(0, k);
+    ids.copyWithin(0, k);
+    frames.copyWithin(0, k);
+    places.length -= k;
+    ids.length -= k;
+    frames.length -= k;
   }
 
   /**
@@ -784,7 +799,7 @@ export class GeometryAtlas {
 
   private batch(data: GeometryData): Place["batch"] {
     return data.positions.length <= 512 && data.indices.length <= 1024 && !data.depths
-      ? { frame: this.frame }
+      ? { data, frame: this.frame }
       : null;
   }
 

@@ -36,6 +36,7 @@ import {
   pointsOf,
   type ShapeLayer,
 } from "./shapes.js";
+import { TagShape } from "./tag-shapes.js";
 
 const TWIPS = 20;
 const IDENTITY: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
@@ -609,6 +610,13 @@ function drawnAt(
     const r = ownBounds(d, true);
     layers =
       r && contains(r, x, y) ? sliceLayers(layers, own.slice, own.m, d.drawing?.version) : [];
+  }
+
+  // A library shape's paths, which it may have let go of (tag-shapes.ts), read only for a point
+  // near them: a script's or AVM1's shape test of a container asks every shape in it.
+  const tag = d instanceof ShapeObject ? d.shape : null;
+  if (!own && tag instanceof TagShape && layers === tag.layers && tag.outside(x, y)) {
+    layers = [];
   }
 
   for (const layer of layers) {

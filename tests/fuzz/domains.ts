@@ -13,9 +13,18 @@
 // ancestor defines another A of the same name is resolved again after
 // it. A failure prints the step and where the two modules part.
 //
+// And each ABC's module key context, as either instance's chains keep it
+// from the start (packages/codegen/src/keys.ts), must be the one taken
+// from nothing, and name the log domainContext gives; and a third
+// instance, given what the reference is and ABCs besides in a domain of
+// its own below the root, which no other sees, must key alike every ABC
+// whose context is the reference's: a key may not depend on ABCs added
+// where its domain does not see.
+//
 //   node tests/fuzz/domains.ts [steps, 3000] [seed, 1]
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { KeyChains, type KeyLog } from "@swf2es/codegen";
 import { containerEngine, libraries, runOracle } from "../../oracle/oracle.ts";
 import { classes, GETTER, METHOD, mn, OVERRIDE, SLOT } from "../unit/codegen/link-cases.ts";
 import { loadTesting } from "../unit/codegen/testing-module.ts";
@@ -154,14 +163,25 @@ const below = (n: number) => Math.floor(random() * n);
 const pick = <T>(list: T[]) => list[below(list.length)];
 
 const build = process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test";
-const subject = await loadTesting(build);
+// The subject is now and then rebuilt in a new instance, which takes its place (moved).
+// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+let current: any = await loadTesting(build);
+// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+const subject: any = new Proxy({}, { get: (_, name) => current[name] });
 const reference = await loadTesting(build);
-for (const t of [subject, reference]) {
+const elsewhere = await loadTesting(build);
+for (const t of [subject, reference, elsewhere]) {
   t.domainReset(50);
   for (const r of roots) {
     t.domainAdd(r, true, 0);
   }
 }
+
+// The third instance's own domain, 1, and so the number there of each domain and ABC of the others.
+const aside = elsewhere.domainChild(0);
+const there = (d: number) => (d === 0 ? 0 : d + 1);
+const thereAbc = roots.map((_, i) => i);
+let thereAbcs = roots.length;
 
 // What both were given: each ABC's hash, bytes and domain, each domain's parent.
 const hashes = roots.map((_, i) => `r${i}`);
@@ -170,6 +190,23 @@ const abcDomain = roots.map(() => 0);
 const parent = [-1];
 const failures: string[] = [];
 const counts = { compiles: 0, drops: 0, evictions: 0, revivals: 0, rebuilds: 0, findings: 0 };
+const decoder = new TextDecoder();
+
+/** What KeyChains asks of an instance; without `inherit`, each domain's chain starts from nothing. */
+// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+function keyLog(t: any, inherit = true): KeyLog {
+  return {
+    header: (index) => decoder.decode(t.domainKeyHeaderBytes(index)),
+    parent: (appDomain) => (inherit ? t.domainParent(appDomain) : -1),
+    fork: (appDomain) => t.domainKeyFork(appDomain),
+    log: (appDomain, after, from, to, block, filled) =>
+      t.domainKeyLogBytes(appDomain, after, from, to, block, filled),
+  };
+}
+
+const chains = [new KeyChains(keyLog(subject)), new KeyChains(keyLog(reference))];
+const elsewhereChains = new KeyChains(keyLog(elsewhere));
+let alike = 0;
 
 /** Ask both the same; they must answer alike. */
 // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
@@ -182,16 +219,92 @@ function both<T>(ask: (t: any) => T): T {
   return answer;
 }
 
+/** Add `abc` to domain `d` in all three: whether it was. */
+function added(abc: Uint8Array, d: number): boolean {
+  if (both((t) => t.domainAdd(abc, false, d)) !== 0) {
+    return false;
+  }
+
+  if (elsewhere.domainAdd(abc, false, there(d)) !== 0) {
+    throw new Error("the third instance did not add an ABC the others did");
+  }
+
+  thereAbc.push(thereAbcs++);
+  return true;
+}
+
 const state = (d: number) => subject.domainState(d) as number;
 const live = () => parent.map((_, d) => d).filter((d) => state(d) === 0);
 const where = (text: string, at: number) => text.slice(Math.max(0, at - 150), at + 150);
 
+/** ABC `i`'s key contexts in each instance, kept and from nothing, alike, and naming its log. */
+function keys(step: number, i: number): void {
+  for (const [k, t] of [subject, reference].entries()) {
+    const which = k === 0 ? "subject" : "reference";
+    for (const after of [0, roots.length]) {
+      const kept = JSON.stringify(chains[k].context(i, after));
+      const alone = JSON.stringify(new KeyChains(keyLog(t, false)).context(i, after));
+      if (kept !== alone) {
+        failures.push(
+          `step ${step}: ABC ${i}'s key context after ${after} is not the one taken from nothing (${which})\n${kept}\n----\n${alone}`,
+        );
+        return;
+      }
+
+      const context: string = t.domainContext(i, after);
+      const second = context.indexOf("\n", context.indexOf("\n") + 1);
+      const appDomain = Number(decoder.decode(t.domainKeyHeaderBytes(i)).split("\n")[2]);
+      const log = decoder.decode(t.domainKeyLogBytes(appDomain, after, 0, -1, 64, 0));
+      if (log.replace(/\n[#$]\d+/g, "") !== (second < 0 ? "" : context.slice(second))) {
+        failures.push(
+          `step ${step}: ABC ${i}'s key log after ${after} is not its context's (${which})`,
+        );
+        return;
+      }
+    }
+  }
+
+  // Alike where the reference's context is the third instance's, the ABCs' indices aside.
+  // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+  const placed = (t: any, c: KeyChains, j: number, after: number) => {
+    const context: string = t.domainContext(j, after);
+    const key = c.context(j, after);
+    return [
+      context.slice(context.indexOf("\n")),
+      JSON.stringify(key && { ...key, abcs: key.abcs.length }),
+    ];
+  };
+  for (const after of [0, roots.length]) {
+    const [context, key] = placed(reference, chains[1], i, after);
+    const [thereContext, thereKey] = placed(elsewhere, elsewhereChains, thereAbc[i], after);
+    if (context !== thereContext) {
+      continue;
+    }
+
+    alike++;
+    if (key !== thereKey) {
+      failures.push(
+        `step ${step}: ABC ${i}'s key after ${after} depends on ABCs it does not see\n${key}\n----\n${thereKey}`,
+      );
+      return;
+    }
+  }
+}
+
 /** Compare module, entries and methods compiled alone of ABC `i` in both. */
 function compare(step: number, i: number): void {
   counts.compiles++;
+  // Now and then an ABC in the third instance's own domain just before the key, which settles
+  // nothing the ABC's domain sees.
+  if (below(2) === 0 && elsewhere.domainAdd(pick(pool), false, aside) === 0) {
+    thereAbcs++;
+  }
+
+  keys(step, i);
   const joined = hashes.join("\n");
   const a: string = subject.domainModule(joined, i, true);
   const b: string = reference.domainModule(joined, i, true);
+  elsewhere.domainModule("", thereAbc[i], true);
   if (a !== b) {
     const at = [...a].findIndex((c, k) => c !== b[k]);
     failures.push(
@@ -204,6 +317,7 @@ function compare(step: number, i: number): void {
   // reads them would show.
   for (let c = 0; ; c++) {
     const types: string = subject.domainSlotTypes(i, c);
+    elsewhere.domainSlotTypes(thereAbc[i], c);
     if (types !== reference.domainSlotTypes(i, c)) {
       failures.push(`step ${step}: ABC ${i}'s class ${c} has slots of other types`);
       return;
@@ -225,6 +339,10 @@ function compare(step: number, i: number): void {
     .map((e) => e.split("\u0001")[0])
     .filter((e) => e)
     .join(",");
+  if (bodies) {
+    elsewhere.domainEmitEach(bodies, false, thereAbc[i]);
+  }
+
   if (
     bodies &&
     subject.domainEmitEach(bodies, below(2) === 0, i) !== reference.domainEmitEach(bodies, false, i)
@@ -233,9 +351,79 @@ function compare(step: number, i: number): void {
   }
 }
 
-/** Revive evicted domain `d` in the subject with its evicted ancestors, given their ABCs if asked. */
-function revive(step: number, d: number): void {
-  let revived = subject.domainRevive(d);
+/** A part budget picked at random, from a body's worth to one part for all, which a rebuild takes as it starts. */
+const budget = () => pick([1, 64, 4096, 1 << 20, 0]);
+
+/** The rebuild the subject started a part at a time, to its end: 1 if done, -1 if it failed. */
+function stepRebuild(): number {
+  let stepped = subject.domainRebuildStep();
+  while (stepped === 0) {
+    stepped = subject.domainRebuildStep();
+  }
+
+  subject.domainPartBudget(0);
+  return stepped;
+}
+
+/** Start a rebuild in the subject with `start` under a part budget picked at random. */
+function begun<T>(start: () => T): T {
+  subject.domainPartBudget(budget());
+  return start();
+}
+
+/**
+ * The subject's domain, as it saves it, rebuilt in a new instance from its
+ * live ABCs' bytes, which then takes its place, as the wrapper's compact
+ * does: 1 if done, -1 if it failed.
+ */
+async function moved(): Promise<number> {
+  const next = await loadTesting(build);
+  const out = (address: number) =>
+    new Uint8Array(current.memory.buffer, address, current.outputLength()).slice();
+  next.domainPartBudget(budget());
+  if (!next.domainLoad(out(current.domainSaveBytes()))) {
+    return -1;
+  }
+
+  for (let i = 0; i < hashes.length; i++) {
+    const at = current.domainSavedAbcBytes(i);
+    if (at !== 0 && next.domainLoadAbc(i, out(at)) !== 0) {
+      return -1;
+    }
+  }
+
+  if (!next.domainLoadRebuild()) {
+    return -1;
+  }
+
+  const was = current;
+  current = next;
+  const stepped = stepRebuild();
+  if (stepped < 0) {
+    current = was;
+  }
+
+  was.domainPartBudget(0);
+  return stepped;
+}
+
+/**
+ * Revive evicted domain `d` in the subject with its evicted ancestors, given
+ * their ABCs if asked, by a rebuild in one call, a part at a time, or in a
+ * new instance.
+ */
+async function revive(step: number, d: number): Promise<void> {
+  const way = below(3);
+  const once = async () => {
+    const revived = begun(() => subject.domainRevive(d, way > 0));
+    if (revived !== 2) {
+      subject.domainPartBudget(0);
+      return revived;
+    }
+
+    return way === 1 ? stepRebuild() : await moved();
+  };
+  let revived = await once();
   if (revived < 0) {
     for (let i = 0; i < hashes.length; i++) {
       if (state(abcDomain[i]) === 1 && subject.domainRestore(i, bytes[i]) !== 0) {
@@ -243,7 +431,7 @@ function revive(step: number, d: number): void {
       }
     }
 
-    revived = subject.domainRevive(d);
+    revived = await once();
   }
 
   if (revived < 0) {
@@ -267,7 +455,7 @@ function shadow(step: number): void {
 
   const d = pick(below0);
   const add = (abc: Uint8Array, to: number) => {
-    if (both((t) => t.domainAdd(abc, false, to)) === 0) {
+    if (added(abc, to)) {
       hashes.push(`h${hashes.length}`);
       bytes.push(abc);
       abcDomain.push(to);
@@ -285,12 +473,21 @@ for (; step < steps && failures.length === 0; step++) {
   const op = below(100);
   if (op < 12) {
     const p = pick(live());
-    both((t) => t.domainChild(p));
+    const d = both((t) => t.domainChild(p));
+    if (elsewhere.domainChild(there(p)) !== there(d)) {
+      throw new Error("the third instance numbered a domain otherwise");
+    }
+
     parent.push(p);
   } else if (op < 40) {
     const d = pick(live());
     const abc = pick(pool);
-    if (both((t) => t.domainAdd(abc, false, d)) === 0) {
+    // Now and then an ABC first in the third instance's own domain, which no other sees.
+    if (below(3) === 0 && elsewhere.domainAdd(pick(pool), false, aside) === 0) {
+      thereAbcs++;
+    }
+
+    if (added(abc, d)) {
       hashes.push(`h${hashes.length}`);
       bytes.push(abc);
       abcDomain.push(d);
@@ -317,12 +514,30 @@ for (; step < steps && failures.length === 0; step++) {
   } else if (op < 88) {
     const evicted = parent.map((_, d) => d).filter((d) => state(d) === 1);
     if (evicted.length) {
-      revive(step, pick(evicted));
+      await revive(step, pick(evicted));
     }
   } else if (op < 90) {
     shadow(step);
   } else if (op < 93) {
-    if (subject.domainRebuild()) {
+    // In one call, a part at a time, which a rebuild left part way leaves
+    // as it was, or in a new instance.
+    const way = below(4);
+    if (way === 2) {
+      subject.domainPartBudget(1);
+      subject.domainRebuild(true);
+      subject.domainRebuildStep();
+      subject.domainPartBudget(0);
+      // Evicting the root does nothing, but leave what is under way.
+      subject.domainEvict(0);
+    }
+
+    const done =
+      way === 3
+        ? (await moved()) > 0
+        : way === 1
+          ? begun(() => subject.domainRebuild(true)) && stepRebuild() > 0
+          : subject.domainRebuild();
+    if (done) {
       counts.rebuilds++;
     } else {
       failures.push(`step ${step}: a rebuild failed`);
@@ -347,6 +562,8 @@ for (; step < steps && failures.length === 0; step++) {
         t.domainFound(d, 0, "", name, i, asType);
       }
 
+      elsewhere.domainFound(there(d), 0, "", name, thereAbc[i], asType);
+
       counts.findings++;
     }
   }
@@ -355,11 +572,12 @@ for (; step < steps && failures.length === 0; step++) {
   if (step % 16 === 0) {
     subject.__collect();
     reference.__collect();
+    elsewhere.__collect();
   }
 }
 
 const seconds = ((Date.now() - started) / 1000).toFixed(1);
-const summary = `${step} steps (seed ${seed}), ${hashes.length} ABCs in ${parent.length} domains, ${counts.compiles} compiled, ${counts.drops} drops, ${counts.evictions} evictions, ${counts.revivals} revivals, ${counts.rebuilds} rebuilds, ${counts.findings} findings`;
+const summary = `${step} steps (seed ${seed}), ${hashes.length} ABCs in ${parent.length} domains, ${counts.compiles} compiled, ${counts.drops} drops, ${counts.evictions} evictions, ${counts.revivals} revivals, ${counts.rebuilds} rebuilds, ${counts.findings} findings, ${alike} keys alike in another history`;
 if (failures.length) {
   console.log(failures.join("\n"));
   console.log(`domains: failed after ${summary} (${seconds} s)`);

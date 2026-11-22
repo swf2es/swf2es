@@ -6,6 +6,7 @@ import { CONTENT, DisplayObject, pickWork, TRANSFORM } from "./displayobject.js"
 import type { Filter } from "./filters.js";
 import { morphAt } from "./morph.js";
 import type { Places } from "./places.js";
+import { pathsFramePassed } from "./tag-shapes.js";
 import type { MorphCharacter, ShapeCharacter } from "./timeline.js";
 
 /**
@@ -18,6 +19,7 @@ export const blendWork = { frames: 0 };
 /** A frame drawn, or played with no draw to follow, which ends what blending its places began. */
 export function framePassed(): void {
   blendWork.frames++;
+  pathsFramePassed();
 }
 
 export class ShapeObject extends DisplayObject {

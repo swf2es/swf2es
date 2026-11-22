@@ -56,7 +56,8 @@ import { FontSet } from "../text/fonts.js";
 import type { DisplayObject, MovieClip } from "./display.js";
 import type { Rect } from "./geometry.js";
 import { ACTIONS, PLACE, type Places, REMOVE, TimelineStore } from "./places.js";
-import { boundsOf, type ShapeBounds, type ShapeLayer, shapeLayers } from "./shapes.js";
+import { boundsOf, type ShapeBounds, type ShapeLayer } from "./shapes.js";
+import { TagShape } from "./tag-shapes.js";
 
 /** A frame's name, or a scene's, and its frame, 1 the first. */
 export interface FrameName {
@@ -601,26 +602,19 @@ function shapeOf(
 
   // Another library can keep a shared shape alive after this SWF is unloaded.
   const source = bitmaps ? bytes : new Uint8Array(tag);
-  const offset = bitmaps ? t.offset : 0;
-  const { code, length } = t;
-  let layers: ShapeLayer[] | null = null;
-  const character: ShapeCharacter = {
-    type: "shape",
-    id: shape.id,
-    shape: boundsOf(shape),
-    // Drawn into layers when first asked for, from the tag: most of the shapes a large
-    // application's SWFs define are never shown, and their layers were most of its memory.
-    get layers() {
-      layers ??= shapeLayers(
-        readShape(source, code, offset, length, version),
-        (id) => bitmaps?.get(id) ?? null,
-      );
-      return layers;
-    },
-  };
+  const character = new TagShape(
+    shape.id,
+    boundsOf(shape),
+    source,
+    t.code,
+    bitmaps ? t.offset : 0,
+    t.length,
+    version,
+    bitmaps,
+  );
   if (!bitmaps) {
     const list = sharedShapes.get(hash) ?? [];
-    list.push({ tag: source, shape: new WeakRef(character) });
+    list.push({ tag: source, shape: character.weak });
     sharedShapes.set(hash, list);
     sharedGone.register(character, { hash, tag: source });
   }

@@ -284,6 +284,24 @@ export function forgetStep(o: AsObject): void {
   }
 }
 
+/**
+ * The names an arguments object hides when made, callee alone: one set for
+ * them all, as making a Set for each cost a call of such a method more
+ * than the rest of its arguments did, till ownHidden gives one its own.
+ */
+export const ARGUMENTS_HIDDEN: ReadonlySet<string> = new Set(["callee"]);
+
+/** `o`'s hidden names, to change: its own, copied first if they are the arguments objects' shared ones. */
+export function ownHidden(o: AsObject): Set<string> | undefined {
+  if (o.$dontEnum === ARGUMENTS_HIDDEN) {
+    o.$dontEnum = new Set(ARGUMENTS_HIDDEN);
+    // A for-in's step keeps the set it read.
+    forgetStep(o);
+  }
+
+  return o.$dontEnum;
+}
+
 /** The for-in is over: nothing of its object is kept, which would hold its class and all that hangs on it. */
 function letGo(): void {
   lastStep.o = null;

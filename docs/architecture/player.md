@@ -689,7 +689,12 @@ with no rebuild for the first 1600 loads and eleven in all, some 75 ms
 each in node; without them it grew to 256 MB some 3000 loads on, and
 to 512 MB by 8000. Each module is given only the hashes of the ABCs it
 names as linked (`domainLinked`): joining every ABC's for each compile
-had grown it to 256 MB by 7500 loads on its own.
+had grown it to 256 MB by 7500 loads on its own. Those rebuilds were of
+small live domains; one whose live ABCs weigh a hundred megabytes takes
+seconds, most of it verifying them again, and `compact` does it in a new
+instance of the compiler that takes the old one's place, so that memory
+comes back down to what the live ABCs need (see [Parsing, linking and
+verifying](compiler.md#parsing-linking-and-verifying)).
 
 A domain loaded into again stays, and so does every ABC in it, for as
 long as the domain lives. An online game that loads each player's gear

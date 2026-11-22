@@ -88,6 +88,9 @@ export const DOMAIN_Live: u8 = 0;
 export const DOMAIN_Evicted: u8 = 1;
 export const DOMAIN_Dropped: u8 = 2;
 
+/** What an ABC weighs for each of its bytes before it links: them, and what parsing them took. */
+export const ABC_Weight: u64 = 3;
+
 /** The kinds of the log's entries (see Domain.logKind). */
 export const LOG_None: u8 = 0;
 /** A finding, by its index in the found tables. */
@@ -220,6 +223,8 @@ export class Domain {
   foundName: string[] = [];
   foundAbc: u32[] = [];
   foundAsType: u8[] = [];
+  /** Each finding's entry in the log, in increasing order, as the findings are in the log's. */
+  foundEntry: u32[] = [];
   /**
    * What the domain's tables hold that depends on when it happened, in the
    * order it happened, and how many ABCs there were then, for a rebuild to
@@ -227,7 +232,8 @@ export class Domain {
    * cached of what resolves lazily, a traits' types, a method's signature
    * and an ABC's verified scopes, which see the ABCs there are when they
    * are first asked for. A LOG_ kind, the ABC it is of, and two numbers
-   * by kind (see logged).
+   * by kind (see logged). logAt never decreases along the log, a rebuild's
+   * included, which module keys search it by (domainKeyLogBytes).
    */
   logKind: u8[] = [];
   logAt: u32[] = [];
@@ -367,7 +373,9 @@ export class Domain {
     addClassNames(this, index);
     this.addBindings(index);
     // The bytes three times: a copy, and the tables parsing made of them.
-    this.abcWeight.push(<u32>min<u64>(3 * <u64>abc.length + this.rows() - rows, 0xffffffff));
+    this.abcWeight.push(
+      <u32>min<u64>(ABC_Weight * <u64>abc.length + this.rows() - rows, 0xffffffff),
+    );
     return true;
   }
 
@@ -1307,6 +1315,7 @@ export class Domain {
     this.cachedClass.push(cls);
     this.cached.insert(hashPair(<u32>ns, <u32>nameId), id);
     this.clearBindingMemo();
+    this.foundEntry.push(<u32>this.logKind.length);
     this.logged(LOG_Found, abc, <u32>this.foundDomain.length, 0);
     this.foundDomain.push(domain);
     this.foundKind.push(type);

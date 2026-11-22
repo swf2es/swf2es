@@ -33,7 +33,7 @@
 // check compiles it, it comes out as it is in the module.
 
 import { Output } from "../../output";
-import { BodyDecoder, bodyDecoder, Verifier } from "../abc/code";
+import { BodyDecoder, bodyDecoder, VERIFY_COST, Verifier } from "../abc/code";
 import * as C from "../abc/constants";
 import { Domain, NS_Private } from "../link/domain";
 import { BKIND_Method, TRAITS_Class, TRAITS_Instance } from "../link/traits";
@@ -69,11 +69,10 @@ const PHASE_Tables: u8 = 2;
 const PHASE_Done: u8 = 3;
 
 /**
- * The garbage, roughly, in bytes, that verifying a byte of a body's code
- * makes, and that writing a byte of a method's entry does, its text
- * included, as measured on large ABCs: what step's budget counts.
+ * The garbage, roughly, in bytes, that writing a byte of a method's entry
+ * makes, its text included, as measured on large ABCs: what step's budget
+ * counts, with VERIFY_COST.
  */
-const VERIFY_COST: u64 = 5;
 const EMIT_COST: u64 = 3;
 
 @final

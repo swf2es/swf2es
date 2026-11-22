@@ -8,6 +8,10 @@
  */
 import { AIR_API_VERSION, API_VERSION, checkApiVersion, isAirApiVersion } from "@swf2es/format";
 import { instantiate } from "./codegen.js";
+import { KeyChains, type KeyContext } from "./keys.js";
+
+export { KeyChains, type KeyContext, type KeyLog } from "./keys.js";
+export { hex, sha256Here } from "./sha256.js";
 
 /** Bumped whenever generated code or the runtime ABI it calls changes. */
 export const COMPILER_VERSION = "0.0.0";
@@ -47,9 +51,11 @@ export function libraryLog(codegen: Codegen, index: number, count: number): stri
  * SWFs of several versions share the libraries' modules), every ABC its
  * domain sees, by hash and whether it is a library, those added after it
  * included, its own place among them, and the compiler's log about them
- * (see Codegen.context), the libraries' part by its digest once taken. The
- * player's module cache and the swf2es command both key by it, so that the
- * command's modules are the cache's. Null where there is no context.
+ * (see Codegen.context), the libraries' part by its digest once taken and
+ * the rest by the chained digests of its blocks of entries but the last
+ * few (see Codegen.keyContext). The player's module cache and the swf2es
+ * command both key by it, so that the command's modules are the cache's.
+ * Null where there is no context.
  */
 export function moduleKey(
   codegen: Codegen,
@@ -57,7 +63,7 @@ export function moduleKey(
   abcs: AddedAbcs,
   libraries: LibraryDigest | null,
 ): string | null {
-  const context = codegen.context(index, libraries?.count ?? 0);
+  const context = codegen.keyContext(index, libraries?.count ?? 0);
   if (!context) {
     return null;
   }
@@ -70,7 +76,8 @@ export function moduleKey(
     abcs: context.abcs.map((i) => `${abcs.builtins[i] ? "builtin " : ""}${abcs.hashes[i]}`),
     own: context.own,
     libraries,
-    log: context.log,
+    blocks: context.blocks,
+    log: context.rest,
   });
 }
 
@@ -234,18 +241,24 @@ export interface Codegen {
   /**
    * Rebuild the domain without the ABCs of dropped and evicted domains, if
    * memory would otherwise grow and they hold enough to keep it from
-   * growing: whether it did. A rebuild links every live ABC again, tens of
-   * milliseconds for a large application, so a host calls this when it has
-   * time, as when idle; nothing else does.
+   * growing, or memory is far above what the live ones need: whether it
+   * did. Done in a new instance of the compiler, made ahead, which takes
+   * the old one's place, so that its memory goes with it, where that takes
+   * less memory or a rebuild in place would not fit; else in place, only
+   * where the new tables fit beside the old. A rebuild links every live
+   * ABC again and verifies them again, seconds for a large application, so
+   * a host calls this when it has time, as when idle; nothing else does.
    */
   compact(): boolean;
   /**
    * What the ABCs hold of codegen's memory, roughly, in bytes: the live
    * ones', and the dropped and evicted domains' that compact would free;
-   * and the size of codegen's memory, which never shrinks.
+   * the size of codegen's memory, which grows and never shrinks but when
+   * compact moves the domain to a new instance; and how many such moves
+   * failed, each leaving the domain as it was, rebuilt in place if at all.
    */
-  usage(): { live: number; dead: number; memory: number };
-  /** The size of codegen's memory in bytes, which never shrinks: cheap, for a host that shows it often. */
+  usage(): { live: number; dead: number; memory: number; failedMoves: number };
+  /** The size of codegen's memory in bytes, as usage gives it: cheap, for a host that shows it often. */
   memoryBytes(): number;
   /**
    * Evict application domain `appDomain` and its descendants while the host
@@ -290,6 +303,17 @@ export interface Codegen {
    * for an ABC never added.
    */
   context(index?: number, after?: number, upTo?: number): ModuleContext | null;
+  /**
+   * ABC `index`'s context as a module key names it, the log's entries
+   * made with `after` ABCs added or fewer left out: the log by the chained
+   * digests of its blocks of entries, those made before the last ABC was
+   * added, and the text of the entries after them. Each application
+   * domain keeps its last digest, so a key reads and digests only the
+   * entries made since the last, or since its parent's. The same domain
+   * gives the same however its keys were taken. Null for an ABC never
+   * added, or of a domain not live.
+   */
+  keyContext(index?: number, after?: number): KeyContext | null;
   /**
    * A string that changes whenever a context might: a host that took one
    * and finds this the same since need not take it again.
@@ -345,7 +369,7 @@ export interface Codegen {
  * this package free of I/O. The file ships as `@swf2es/codegen/codegen.wasm`.
  */
 export async function createCodegen(module: WebAssembly.Module): Promise<Codegen> {
-  const wasm = await instantiate(module, { env: {} });
+  let wasm = await instantiate(module, { env: {} });
   const version = wasm.compilerVersion();
   if (version !== COMPILER_VERSION) {
     throw new Error(
@@ -362,11 +386,14 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     );
   }
 
-  // Or before it wrote a module a part at a time.
-  if (!WebAssembly.Module.exports(module).some((e) => e.name === "domainModuleMoreBytes")) {
-    throw new Error(
-      "codegen.wasm has no domainModuleMoreBytes export, which the wrapper expects: it is older than the wrapper",
-    );
+  // Or before it wrote a module a part at a time, or rebuilt its domain a
+  // part at a time and in another instance.
+  for (const name of ["domainModuleMoreBytes", "domainRebuildStep", "domainSaveBytes"]) {
+    if (!WebAssembly.Module.exports(module).some((e) => e.name === name)) {
+      throw new Error(
+        `codegen.wasm has no ${name} export, which the wrapper expects: it is older than the wrapper`,
+      );
+    }
   }
 
   // codegen.wasm uses AssemblyScript's minimal runtime, which collects
@@ -486,6 +513,119 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   const identity = stamps.length ? String.fromCharCode(...new Uint8Array(stamps[0])) : null;
   let epoch = 0;
   let apiVersion = API_VERSION;
+  // Read where they are in codegen's memory, digested before the next call in.
+  const chains = new KeyChains({
+    header(index) {
+      const address = wasm.domainKeyHeaderBytes(index);
+      return address === 0 ? "" : handed(address, wasm.outputLength());
+    },
+    parent: (appDomain) => wasm.domainParent(appDomain),
+    fork: (appDomain) => wasm.domainKeyFork(appDomain),
+    log(appDomain, after, from, to, block, filled) {
+      const address = wasm.domainKeyLogBytes(appDomain, after, from, to, block, filled);
+      return address === 0
+        ? null
+        : new Uint8Array(wasm.memory.buffer, address, wasm.outputLength());
+    },
+  });
+  // The rebuild domainCompact, domainRevive or domainLoadRebuild started in
+  // `into`, a part a call, each part's garbage collected before the next
+  // (see domainRebuildStep), and the old tables once it is done, before the
+  // next call's allocations would grow memory past them: whether it was done.
+  const rebuild = (into = wasm) => {
+    let step = into.domainRebuildStep();
+    while (step === 0) {
+      into.__collect();
+      step = into.domainRebuildStep();
+    }
+
+    into.__collect();
+    size = wasm.memory.buffer.byteLength;
+    calls = 0;
+    return step > 0;
+  };
+  // A second instance of the compiler, made ahead as instantiating is
+  // asynchronous, that the next rebuild is done in (see moved): wasm memory
+  // never shrinks, so one done in place keeps, for good, as much as the
+  // dead tables and the old and the new took together. Made only once a
+  // move will be due before long (WANT_Spare), not for every compiler, and
+  // taken by the move; and how many moves failed, which usage tells.
+  let spare: typeof wasm | null = null;
+  let making = false;
+  let failedMoves = 0;
+  const prepare = () => {
+    if (spare === null && !making) {
+      making = true;
+      instantiate(module, { env: {} }).then(
+        (made) => {
+          spare = made;
+          making = false;
+        },
+        () => {
+          making = false;
+        },
+      );
+    }
+  };
+  // The domain rebuilt in `into`, a new instance, from what this one saves
+  // of it and its live ABCs' bytes, read where they are: whether it was. The
+  // ABCs' copies in it are its garbage once parsed, collected every few
+  // megabytes.
+  const rebuiltIn = (into: typeof wasm) => {
+    const saved = wasm.domainSaveBytes();
+    if (!into.domainLoad(new Uint8Array(wasm.memory.buffer, saved, wasm.outputLength()))) {
+      return false;
+    }
+
+    into.__collect();
+    let copied = 0;
+    for (let i = 0; i < added; i++) {
+      const at = wasm.domainSavedAbcBytes(i);
+      const length = wasm.outputLength();
+      if (at !== 0 && into.domainLoadAbc(i, new Uint8Array(wasm.memory.buffer, at, length)) !== 0) {
+        return false;
+      }
+
+      copied += length;
+      if (copied >= COPIED_BETWEEN_COLLECTIONS) {
+        into.__collect();
+        copied = 0;
+      }
+    }
+
+    return into.domainLoadRebuild() && rebuild(into);
+  };
+  // The domain rebuilt in the spare instance, which then takes this one's
+  // place, whose memory goes with it: whether it was. One that failed, or
+  // trapped as its memory could not grow, is let go of, the domain left
+  // here as it was, and another made.
+  const moved = () => {
+    const into = spare;
+    if (into === null) {
+      return false;
+    }
+
+    spare = null;
+    let done = false;
+    try {
+      done = rebuiltIn(into);
+    } catch {
+      done = false;
+    }
+
+    if (!done) {
+      failedMoves++;
+      size = wasm.memory.buffer.byteLength;
+      return false;
+    }
+
+    // The held SWFs' copies were the old instance's (see hold).
+    holds.length = 0;
+    wasm = into;
+    size = wasm.memory.buffer.byteLength;
+    calls = 0;
+    return true;
+  };
   const collected = <T>(result: T, reclaim = false): T => {
     const grown = wasm.memory.buffer.byteLength;
     if (reclaim || grown > size || ++calls >= COLLECT_EVERY) {
@@ -510,6 +650,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       checkApiVersion(version);
       added = 0;
       epoch++;
+      chains.clear();
       apiVersion = version;
       collected(wasm.domainReset(version));
     },
@@ -539,6 +680,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     dropDomain(appDomain, of = epoch) {
       if (of === epoch) {
         collected(wasm.domainDrop(appDomain));
+        chains.forget((d) => wasm.domainState(d) === 2);
       }
     },
     evictDomain(appDomain) {
@@ -546,36 +688,45 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     },
     usage() {
       const [live, dead, memory] = collected(wasm.domainUsage()).split(" ").map(Number);
-      return { live, dead, memory };
+      return { live, dead, memory, failedMoves };
     },
     memoryBytes() {
       return wasm.memory.buffer.byteLength;
     },
     compact() {
-      // A rebuild makes new tables while the old are live: what earlier
-      // calls left is collected first, and the old tables once it is done,
-      // before the next call's allocations would grow memory past them.
-      if (!collected(wasm.domainWantsCompact())) {
+      // Done in the spare instance, once there is one and that would take
+      // less memory, or in place would not fit; else in place, where the
+      // new tables are made while the old are live, only where they fit
+      // and, beside a spare made or being made, a move would not do better:
+      // what earlier calls left is collected first, and the old tables once
+      // it is done, before the next call's allocations would grow memory
+      // past them.
+      if (spare === null && !making && collected(wasm.domainWantsCompact(WANT_Spare))) {
+        prepare();
+      }
+
+      if (spare !== null && collected(wasm.domainWantsCompact(WANT_Move))) {
+        wasm.__collect();
+        if (moved()) {
+          return true;
+        }
+      }
+
+      const beside = spare !== null || making;
+      if (!collected(wasm.domainWantsCompact(beside ? WANT_InPlaceBesideSpare : WANT_InPlace))) {
         return false;
       }
 
       wasm.__collect();
       calls = 0;
-      if (!wasm.domainCompact()) {
-        return false;
-      }
-
-      wasm.__collect();
-      size = wasm.memory.buffer.byteLength;
-      calls = 0;
-      return true;
+      return wasm.domainCompact(true) && rebuild();
     },
     isLive(appDomain) {
       return collected(wasm.domainState(appDomain)) === 0;
     },
     reviveDomain(appDomain, abcs) {
       // Its ABCs' bytes are copied into the compiler only if a rebuild let go of them.
-      let revived = collected(wasm.domainRevive(appDomain));
+      let revived = collected(wasm.domainRevive(appDomain, true));
       if (revived < 0) {
         for (const [index, bytes] of abcs) {
           const error = collected(wasm.domainRestore(index, bytes));
@@ -584,19 +735,14 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           }
         }
 
-        revived = collected(wasm.domainRevive(appDomain));
+        revived = collected(wasm.domainRevive(appDomain, true));
       }
 
-      if (revived < 0) {
+      // Revived by a rebuild in place, mid-load: a compaction moves it later.
+      if (revived < 0 || (revived > 0 && !rebuild())) {
         throw new Error(
           `application domain ${appDomain}: not evicted, its parent not live, or an ABC of it not given`,
         );
-      }
-
-      if (revived > 0) {
-        wasm.__collect();
-        size = wasm.memory.buffer.byteLength;
-        calls = 0;
       }
     },
     found(d) {
@@ -633,6 +779,13 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         own: Number(text.slice(first + 1, second < 0 ? text.length : second)),
         log: second < 0 ? "" : text.slice(second + 1),
       };
+    },
+    keyContext(index = -1, after = 0) {
+      if (added === 0) {
+        return null;
+      }
+
+      return collected(chains.context(indexOf(index), after));
     },
     revision() {
       return `${epoch} ${wasm.domainRevision()}`;
@@ -716,6 +869,13 @@ function parseEntries(text: string): Map<number, string> {
 }
 
 const COLLECT_EVERY = 64;
+/** What domainWantsCompact is asked (see wantsRebuild in assembly/avm2/link/lifetime.ts). */
+const WANT_InPlace = 0;
+const WANT_InPlaceBesideSpare = 1;
+const WANT_Move = 2;
+const WANT_Spare = 3;
+/** How many bytes of ABCs a rebuild in the spare instance copies in between its collections. */
+const COPIED_BETWEEN_COLLECTIONS = 4 << 20;
 /** How many SWFs whose blocks or units are compiled codegen holds a copy of at most. */
 const HELD_SWFS = 4;
 

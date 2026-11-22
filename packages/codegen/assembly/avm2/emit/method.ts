@@ -574,12 +574,13 @@ export class MethodEmitter {
       out.uint(local++);
       out.text(" = rt.array(rest)");
     } else if (flags & C.METHOD_NeedArguments) {
-      // With the function itself, for arguments.callee.
+      // With the function itself and its receiver, for arguments.callee:
+      // a method's is the method bound to `this`, as a read of it gives.
       out.text(", l");
       out.uint(local++);
       out.text(" = rt.arguments(arguments, ");
       out.text(this.functionName);
-      out.text(")");
+      out.text(", l0)");
     }
 
     for (let r = local; r < ir.frameSize; r++) {
