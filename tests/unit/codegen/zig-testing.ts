@@ -34,7 +34,8 @@ export async function zigTestingModule(poison: boolean): Promise<WebAssembly.Mod
 /** An instance of a Zig test build, with a memory of its own. */
 // biome-ignore lint/suspicious/noExplicitAny: as untyped as asc's bindings for the AssemblyScript build
 export async function bindTesting(module: WebAssembly.Module): Promise<any> {
-  const bound = await bind(module, { ...SIGNATURES, ...TESTING_SIGNATURES }, [
+  // biome-ignore lint/suspicious/noExplicitAny: as untyped as asc's bindings for the AssemblyScript build
+  const bound: any = await bind(module, { ...SIGNATURES, ...TESTING_SIGNATURES }, [
     "memoryChunksUsed",
     "memoryReached",
     "stackDeepest",
