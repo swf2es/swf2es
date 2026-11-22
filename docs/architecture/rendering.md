@@ -18,8 +18,10 @@ frames (`IDLE_FRAMES`). Their arrays on the CPU go sooner: three frames
 after the GPU backend has copied them into a context not known to be
 lost (`Geometries.release`, called only by `webgl/atlas.ts` after the
 copy), the registry lets go of them and the backend keeps only their
-indices, unless it is small enough to merge, which keeps its arrays for
-a run's stream to stage (`renderer.md`, "Resources"); a loss found later, as Chrome flags one only a task after,
+indices, unless it is small enough to merge (and, if its owner lets it
+go within fewer idle frames, as text's glyph quads, was drawn more than
+once), which keeps its arrays for a run's stream to stage
+(`renderer.md`, "Resources"); a loss found later, as Chrome flags one only a task after,
 rebuilds them. A view with no GPU backend, as in node, never lets go of
 them. A reader that wants arrays let go of, the restore after a lost
 context or a CPU rasterizer alike, asks for them through one entry point,

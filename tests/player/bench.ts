@@ -116,6 +116,9 @@
 // fading too, each named where first placed, as a SWF's tweened animations
 // are once laid out frame by frame: what its timelines hold in memory (with
 // --allocs, after a full collection) and what playing them costs.
+// --apart gives each sprite's parts a swell of their own phase, so that no two sprites draw their
+// outlines at one scale in a frame, as instances of an animation started apart do: each stroke
+// made at a scale is then one sprite's, drawn for a frame or a few and again a loop later.
 //
 // --pipelined waits for the GPU only every 30 frames, not after each, so
 // that its work goes on behind the next frames' as a page's does: the
@@ -238,7 +241,7 @@
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --still-shapes N [--change-every K] | --drawn-once N [--per-frame K] | --masks N [--unmasked] | --blends N [--blend-fills K] [--blend-clips]
 //     [--blend-after F]
-//     | --scripted N [--still] | --town N | --still-crowd N | --timelines N [--loop K]
+//     | --scripted N [--still] | --town N | --still-crowd N | --timelines N [--loop K] [--apart]
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
 //     | --triangles N [--culled] | --redraw N | --burst N [--every K] | --vectors N | --text N [--normal | --device]
 //     | --deck N [--paint solid|gradient|bitmap] [--ratio-change] [--deck-turn T]
@@ -1487,9 +1490,10 @@ function trianglesSwf(count: number, culled: boolean): Uint8Array {
 
 /**
  * The timelines (--timelines): `count` sprites, each with frames of its own,
- * `loop` of them, on which 12 parts move, every third fading as well.
+ * `loop` of them, on which 12 parts move, every third fading as well; with `apart`, each sprite's
+ * parts swell on a phase of its own.
  */
-function timelinesSwf(count: number, loop: number): Uint8Array {
+function timelinesSwf(count: number, loop: number, apart: boolean): Uint8Array {
   const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
   for (let i = 0; i < 4; i++) {
     tags.push(part(11 + i, 6 + 2 * i));
@@ -1501,7 +1505,7 @@ function timelinesSwf(count: number, loop: number): Uint8Array {
       const t = (2 * Math.PI * f) / loop;
       for (let i = 0; i < 12; i++) {
         const a = 0.5 * Math.sin(t * 2 + i + c);
-        const s = 0.6 + 0.3 * Math.sin(t * 3 + i);
+        const s = 0.6 + 0.3 * Math.sin(t * 3 + i + (apart ? c * 0.77 : 0));
         const matrix = {
           a: s * Math.cos(a),
           b: s * Math.sin(a),
@@ -2505,7 +2509,7 @@ const swf =
                         : town > 0
                           ? townSwf(town)
                           : timelines > 0
-                            ? timelinesSwf(timelines, option("loop", 240))
+                            ? timelinesSwf(timelines, option("loop", 240), args.includes("--apart"))
                             : stillCrowd > 0
                               ? stillCrowdSwf(stillCrowd)
                               : stillShapes > 0
@@ -2624,7 +2628,7 @@ const summary = {
                         : town > 0
                           ? `town of ${town}`
                           : timelines > 0
-                            ? `${timelines} timelines of ${option("loop", 240)} frames`
+                            ? `${timelines} timelines of ${option("loop", 240)} frames${args.includes("--apart") ? ", apart" : ""}`
                             : stillCrowd > 0
                               ? `still crowd of ${stillCrowd}, one in 32 playing`
                               : stillShapes > 0

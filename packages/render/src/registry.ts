@@ -73,6 +73,11 @@ export class Registry {
     }
   }
 
+  /** How many unused frames `id` is let go of after. */
+  idleOf(id: number): number {
+    return this.idleFrames[id] ?? 0;
+  }
+
   /** The frame `id` was last used in. */
   usedIn(id: number): number {
     return this.usedAt[id] ?? -1;

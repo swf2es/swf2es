@@ -8,7 +8,11 @@ import {
   RELEASE_FRAMES,
   TARGET_TEXEL,
 } from "../../../../packages/render/dist/geometry.js";
-import { GeometryAtlas, type Place } from "../../../../packages/render/dist/webgl/atlas.js";
+import {
+  GeometryAtlas,
+  gathered,
+  type Place,
+} from "../../../../packages/render/dist/webgl/atlas.js";
 import { FillBatches } from "../../../../packages/render/dist/webgl/batches.js";
 import {
   blendFillFragment,
@@ -139,7 +143,8 @@ function shape(seed: number, count: number): GeometryData {
 
 /** Frames placed till what was added has stood long enough for its arrays to be let go of. */
 function settle(atlas: GeometryAtlas, geometries: Geometries): void {
-  // Placed on the first, let go of RELEASE_FRAMES of the registry's on, where too large to merge.
+  // Placed on the first, let go of RELEASE_FRAMES of the registry's on, where too large to merge
+  // or short-lived and drawn once.
   for (let i = 0; i <= RELEASE_FRAMES; i++) {
     atlas.place(geometries);
     drawn(geometries);
@@ -156,6 +161,9 @@ function drawn(geometries: Geometries): void {
 
   geometries.endFrame();
 }
+
+/** Idle frames fewer than IDLE_FRAMES, as text's glyph quads are given: a short-lived geometry. */
+const SHORT_IDLE = 8;
 
 /** Every shape added, by id, as its owner keeps it: the registry lets go of its arrays. */
 const made = new WeakMap<Geometries, Map<number, GeometryData>>();
@@ -658,6 +666,11 @@ function stream() {
 function run(s: ReturnType<typeof stream>, ids: number[]) {
   const ids2 = [...ids, ids[3]];
   const places = ids2.map((id) => s.atlas.places[id] as Place);
+  // Counted as Draws counts the draws it gathers.
+  for (let k = 0; k < places.length; k++) {
+    gathered(places[k], s.atlas.frame, k);
+  }
+
   s.batches.reset();
   const segment = s.batches.add(
     places,
@@ -732,37 +745,174 @@ test("a run's stream stages its geometries from their arrays, which merged geome
   assert.equal(s.counts.copies, 0);
 });
 
-test("a geometry too large to merge is let go of at RELEASE_FRAMES, one small enough kept", () => {
+test("a short-lived geometry drawn once is let go of at RELEASE_FRAMES, others kept", () => {
   const { gl } = fakeGl();
   const atlas = new GeometryAtlas(gl, new GlState(gl));
   atlas.setUp();
   const geometries = new Geometries();
   // 256 vertices and 1,024 indices at most merge (Place.batch).
-  const small = add(geometries, shape(1, 256));
+  const twice = add(geometries, shape(3, 256));
+  // Small enough, but short-lived and drawn once, as a text changed every frame is.
+  const once = add(geometries, shape(1, 256));
+  geometries.idleWithin(once, SHORT_IDLE);
   const large = add(geometries, shape(2, 257));
+  // Drawn once, but of the usual idle frames, as a timeline's stroke made at a scale is.
+  const usual = add(geometries, shape(4, 64));
   for (let frame = 0; frame < RELEASE_FRAMES; frame++) {
     atlas.place(geometries);
+    // The draws the runs gather (Draws): two of one in its first frame, as two objects drawing
+    // it would make, and one of the other.
+    if (frame === 0) {
+      gathered(atlas.places[twice] as Place, atlas.frame, 0);
+      gathered(atlas.places[twice] as Place, atlas.frame, 1);
+      gathered(atlas.places[once] as Place, atlas.frame, 2);
+      gathered(atlas.places[usual] as Place, atlas.frame, 3);
+    }
+
     drawn(geometries);
-    assert.ok(!geometries.released(small) && !geometries.released(large), `frame ${frame}`);
+    for (const id of [twice, once, large]) {
+      assert.ok(!geometries.released(id), `frame ${frame}`);
+    }
   }
 
+  const onceBatch = (atlas.places[once] as Place).batch;
   atlas.place(geometries);
   assert.ok(geometries.released(large));
   assert.ok(atlas.places[large]?.local instanceof Uint16Array);
-  assert.ok(!geometries.released(small));
-  assert.equal(atlas.places[small]?.batch?.data, made.get(geometries)?.get(small));
+  assert.ok(geometries.released(once));
+  // Nor does the batch let go of hold its arrays, wherever V8 keeps it till a full collection.
+  assert.equal(onceBatch?.data, null);
+  assert.ok(atlas.places[once]?.local instanceof Uint16Array);
+  assert.equal(atlas.places[once]?.batch, null, "no longer merges");
+  assert.ok(!geometries.released(twice));
+  assert.equal(atlas.places[twice]?.batch?.data, made.get(geometries)?.get(twice));
+  assert.ok(!geometries.released(usual));
   // However long it stands.
   settle(atlas, geometries);
   settle(atlas, geometries);
-  assert.ok(!geometries.released(small));
+  assert.ok(!geometries.released(twice));
   check(
     atlas,
     geometries,
     new Map([
-      [small, 1],
+      [twice, 3],
+      [once, 1],
       [large, 2],
+      [usual, 4],
     ]),
   );
+});
+
+test("a run of short-lived geometries let go of after a single draw draws from the atlas", () => {
+  const s = stream();
+  const ids: number[] = [];
+  for (let i = 0; i < 40; i++) {
+    ids.push(add(s.geometries, shape(i + 1, 4 + i)));
+    s.geometries.idleWithin(ids[i], SHORT_IDLE);
+  }
+
+  settle(s.atlas, s.geometries);
+  for (const id of ids) {
+    assert.ok(s.geometries.released(id));
+  }
+
+  assert.equal(run(s, ids).segment, null);
+});
+
+test("a draw gathered again is counted once, and the count stops at 2", () => {
+  const { gl } = fakeGl();
+  const atlas = new GeometryAtlas(gl, new GlState(gl));
+  atlas.setUp();
+  const geometries = new Geometries();
+  const id = add(geometries, shape(1, 8));
+  atlas.place(geometries);
+  const place = atlas.places[id] as Place;
+  // A mask's entry, gathered for its push and its pop, and a frame's whose run table overflowed,
+  // gathered as it prepares and again as it draws.
+  gathered(place, atlas.frame, 5);
+  gathered(place, atlas.frame, 5);
+  assert.equal(place.batch?.draws, 1);
+  // Another entry in the frame, or the same entry in another frame, is another draw.
+  gathered(place, atlas.frame, 6);
+  assert.equal(place.batch?.draws, 2);
+  gathered(place, atlas.frame + 1, 6);
+  gathered(place, atlas.frame + 2, 7);
+  assert.equal(place.batch?.draws, 2);
+});
+
+test("a short-lived geometry drawn in its first frame and its third keeps its arrays", () => {
+  const { gl } = fakeGl();
+  const atlas = new GeometryAtlas(gl, new GlState(gl));
+  atlas.setUp();
+  const geometries = new Geometries();
+  const id = add(geometries, shape(1, 8));
+  geometries.idleWithin(id, SHORT_IDLE);
+  for (let frame = 0; frame <= RELEASE_FRAMES; frame++) {
+    atlas.place(geometries);
+    if (frame === 0 || frame === 2) {
+      gathered(atlas.places[id] as Place, atlas.frame, 0);
+    }
+
+    drawn(geometries);
+  }
+
+  assert.ok(!geometries.released(id));
+  assert.equal(atlas.places[id]?.batch?.draws, 2);
+});
+
+test("a kept geometry changed in place keeps its count, its old batch letting go of its arrays", () => {
+  const { gl } = fakeGl();
+  const atlas = new GeometryAtlas(gl, new GlState(gl));
+  atlas.setUp();
+  const geometries = new Geometries();
+  const data = shape(1, 8);
+  const id = add(geometries, data, true);
+  atlas.place(geometries);
+  gathered(atlas.places[id] as Place, atlas.frame, 0);
+  const before = (atlas.places[id] as Place).batch;
+  data.positions[0] = 7;
+  geometries.update(id);
+  atlas.place(geometries);
+  const after = (atlas.places[id] as Place).batch;
+  assert.notEqual(after, before);
+  assert.equal(before?.data, null);
+  assert.equal(after?.data, data);
+  assert.equal(after?.draws, 1);
+});
+
+test("a short-lived geometry let go of after a single draw, rebuilt and drawn twice, merges again", () => {
+  const s = stream();
+  const data = Array.from({ length: 40 }, (_, i) => shape(i + 1, 4 + i));
+  const addShort = (d: GeometryData): number => {
+    const id = add(s.geometries, d);
+    s.geometries.idleWithin(id, SHORT_IDLE);
+    return id;
+  };
+  let ids = data.map(addShort);
+  // Drawn once, by no run: let go of, and no longer merging.
+  settle(s.atlas, s.geometries);
+  for (const id of ids) {
+    assert.ok(s.geometries.released(id));
+  }
+
+  assert.equal(run(s, ids).segment, null);
+  // Its owner asks for it again (rebuild) and adds it anew, as it does an expired one.
+  for (const id of ids) {
+    assert.ok(s.geometries.rebuild(id));
+  }
+
+  ids = data.map(addShort);
+  for (let frame = 0; frame <= RELEASE_FRAMES; frame++) {
+    s.atlas.place(s.geometries);
+    drawn(s.geometries);
+    if (frame > 0) {
+      assert.ok(run(s, ids).segment, `frame ${frame}`);
+    }
+  }
+
+  for (const id of ids) {
+    assert.ok(!s.geometries.released(id));
+  }
 });
 
 test("geometries copied while the context is lost keep their arrays, for the restore to copy", () => {
