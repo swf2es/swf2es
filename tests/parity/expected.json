@@ -35,5 +35,9 @@
   "modules-mutated",
   "libraries",
   "modules-plans",
-  "exports-random"
+  "exports-random",
+  "keys-tests",
+  "keys-swfs",
+  "keys-mutated",
+  "lifetimes-random"
 ]
