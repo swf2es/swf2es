@@ -1016,12 +1016,14 @@ Stage 6 (the exports and lifetimes), as built:
   write over that row: a rollback writes it back (`Domain.truncated`).
 - *Peak memory* on `codegen-session.ts`, 300 loads, seed 1, three
   interleaved runs per compiler. The largest single Wasm instance reached
-  23.8 MiB with Zig and 29.8 MiB with AssemblyScript. Median elapsed times
-  were 6.14 s and 5.91 s, with five and six rebuilds respectively. At
-  25-load intervals Zig's recovery payload peaked at 2.4 MiB outside
-  Wasm, counting owned ABC bytes, serialized checkpoint state and four
-  32-bit words per recorded compile entry. JavaScript object overhead and
-  memory shared in time by the old and spare instances are separate.
+  23.8 MiB with Zig and 29.8 MiB with AssemblyScript, with five and six
+  rebuilds respectively. Median elapsed times were 6.14 s and 5.91 s.
+  Other workloads shared the machine, so the timing comparison is
+  inconclusive. At 25-load intervals Zig's recovery payload peaked at
+  2.4 MiB outside Wasm, counting owned ABC bytes, serialized checkpoint
+  state and four 32-bit words per recorded compile entry. JavaScript object
+  overhead and memory shared in time by the old and spare instances are
+  separate.
 
 **Release mode, decided.** The user's decision after stage 5: the
 release ships in ReleaseSafe. About 180 KB gzipped is fine, so section
