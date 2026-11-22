@@ -194,15 +194,24 @@ pub fn changed(dom: *Domain, arena: *memory.Arena, comptime change: anytype, arg
     return result;
 }
 
+/// Parse a domain-owned copy. An in-place rebuild will need this space again beside the old domain.
+pub fn parseOwned(arena: *memory.Arena, scratch: Allocator, bytes: []const u8, builtin: bool) Allocator.Error!struct { *Abc, []u8 } {
+    const mark = arena.mark();
+    const gpa = arena.allocator();
+    const buffer = try memory.allocZeroed(gpa, u8, @as(u32, @intCast(bytes.len)) + PADDING);
+    @memcpy(buffer[0..bytes.len], bytes);
+    const abc = try readAbc(gpa, scratch, buffer, @intCast(bytes.len), builtin);
+    abc.parsed_bytes = arena.bytesSince(mark);
+    return .{ abc, buffer };
+}
+
 /// Add the ABC `bytes` to application domain `appDomain`, copied with
 /// PADDING into `arena`, the domain's: 0, or the VerifyError it was
 /// rejected with. One that does not parse leaves nothing: its bytes and
 /// tables are the last the arena took.
 pub fn addAbc(dom: *Domain, arena: *memory.Arena, bytes: []const u8, builtin: bool, appDomain: u32) Allocator.Error!i32 {
     const mark = arena.mark();
-    const buffer = try memory.allocZeroed(dom.gpa, u8, @as(u32, @intCast(bytes.len)) + PADDING);
-    @memcpy(buffer[0..bytes.len], bytes);
-    const abc = try readAbc(dom.gpa, dom.scratch, buffer, @intCast(bytes.len), builtin);
+    const abc, const buffer = try parseOwned(arena, dom.scratch, bytes, builtin);
     const err = abc.@"error";
     if (err != 0) {
         // The error read first: the ABC is in what is given back.

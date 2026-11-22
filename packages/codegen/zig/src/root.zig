@@ -311,6 +311,19 @@ pub export fn domainLogSince(mark: i32, index: i32) usize {
     return handOut(avm2.domainLogSince(gpa(), mark, index) catch |err| return fail(err));
 }
 
+pub export fn journalBytes(mark: u32) usize {
+    const bytes = avm2.journalBytes(gpa(), mark) catch |err| return fail(err);
+    return if (bytes) |b| handOut(b) else handOutNone();
+}
+
+pub export fn replayEntry(kind: u32, index: u32, a: u32, b: u32) bool {
+    return orFailed(bool, avm2.replayEntry(kind, index, a, b));
+}
+
+pub export fn abandonRebuild() void {
+    avm2.leaveRebuild();
+}
+
 pub export fn domainReplay(log: [*]const u8, log_len: u32, index: i32) bool {
     return orFailed(bool, avm2.domainReplay(gpa(), staged(u8, log, log_len), index));
 }
@@ -340,7 +353,11 @@ pub export fn domainSavedAbcBytes(index: i32) usize {
 }
 
 pub export fn domainLoad(words: [*]const u8, len: u32) bool {
-    return orFailed(bool, avm2.domainLoad(staged(u8, words, len)));
+    return orFailed(bool, avm2.domainLoad(staged(u8, words, len), false));
+}
+
+pub export fn loadCheckpointState(words: [*]const u8, len: u32) bool {
+    return orFailed(bool, avm2.domainLoad(staged(u8, words, len), true));
 }
 
 pub export fn domainLoadAbc(index: i32, bytes: [*]const u8, len: u32) i32 {

@@ -26,5 +26,6 @@ declare namespace WebAssembly {
   interface Instance {
     readonly exports: Record<string, unknown>;
   }
+  var Instance: { new (module: Module, imports?: object): Instance };
   function instantiate(module: Module, imports?: object): Promise<Instance>;
 }

@@ -16,6 +16,8 @@ pub const Abc = struct {
     @"error": i32 = 0,
     /// Byte length of the ABC block.
     length: u32 = 0,
+    /// Bytes its padded input and parsed tables take in the domain arena.
+    parsed_bytes: u32 = 0,
     minorVersion: u32 = 0,
     majorVersion: u32 = 0,
     /// Whether this is a builtin ABC, one the player ships (builtin.abc,

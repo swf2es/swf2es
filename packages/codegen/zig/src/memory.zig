@@ -226,6 +226,10 @@ pub const Pages = struct {
             const gap = if (top) @min(reserve, self.limit -| (self.chunks - free + count)) else 0;
             const start = self.chunks - free + gap;
             if (gap + count > free and !self.grow(gap + count - free)) {
+                // At the memory limit, scratch can still use a free run below the top.
+                if (top) {
+                    if (self.firstFit(count)) |start_| break :found start_;
+                }
                 return null;
             }
 
@@ -401,6 +405,21 @@ pub const Arena = struct {
             .top = self.top,
             .last = self.last,
         };
+    }
+
+    /// Arena bytes consumed since a valid mark, including space abandoned at the end of older runs.
+    pub fn bytesSince(self: *const Arena, saved: Mark) u32 {
+        var run = self.newest;
+        var end = self.top;
+        var bytes: usize = 0;
+        while (run != saved.run) {
+            const current = run.?;
+            bytes += end - @intFromPtr(current);
+            run = current.older;
+            end = if (run) |older| @intFromPtr(older) + older.len else 0;
+        }
+
+        return @intCast(bytes + (end - saved.top));
     }
 
     /// Everything allocated since `saved` given back, as a link that fails rolls back.

@@ -58,6 +58,7 @@ import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import { Avm1Assembler } from "../avm1-assembler.ts";
 import { flashAssembler, script } from "../avm1-script.ts";
+import { CODEGEN_WASM } from "../compiler.ts";
 import * as w from "../swf-writer.ts";
 import { bare, probeFont } from "./cases.ts";
 import { withSteppedPage } from "./chrome.ts";
@@ -94,7 +95,13 @@ const BOUND = 64 * 1024;
  * load crosses it over 300 loads. The live ABCs' weight, held to BOUND a
  * load, sees one in the tables.
  */
-const CODEGEN_CEILING = 16 * 1024 * 1024;
+// Zig grows by individual pages and reached 16.4–16.9 MiB on the 300-load
+// workloads. Inspect the served binary so the same check covers a physical swap.
+const compiler = await WebAssembly.compile(
+  readFileSync(new URL(`../../packages/codegen/dist/${CODEGEN_WASM}`, import.meta.url)),
+);
+const zig = WebAssembly.Module.exports(compiler).some((entry) => entry.name === "input");
+const CODEGEN_CEILING = (zig ? 18 : 16) * 1024 * 1024;
 /**
  * The ceiling where compactions raise the high-water mark: the shared gear
  * uncached, whose dead domains building up before a compaction take it

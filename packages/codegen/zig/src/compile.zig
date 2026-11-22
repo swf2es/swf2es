@@ -207,7 +207,7 @@ pub fn domainRevive(appDomain: i32, stepped: bool) Allocator.Error!i32 {
     }
 
     if (stepped) {
-        startRebuild(newRebuild(dom, null) catch |err| {
+        startRebuild(newRebuild(dom, null, null) catch |err| {
             lifetime.unrevive(dom, bottom, top);
             return err;
         }, partBudget());
@@ -1027,6 +1027,34 @@ pub fn domainLogSince(gpa: Allocator, mark: i32, index: i32) Allocator.Error![]c
     return out.written();
 }
 
+/// Recovery keeps absolute ABC indices. A compile in a transient child can resolve an ancestor.
+pub fn journalBytes(gpa: Allocator, mark: u32) Allocator.Error!?[]const u8 {
+    const dom = try domain();
+    var words: std.ArrayList(u32) = .empty;
+    for (@min(mark, dom.logKind.len)..dom.logKind.len) |e_| {
+        const e: u32 = @intCast(e_);
+        const kind = dom.logKind.get(e);
+        if (kind == domain_.LOG_None) continue;
+        if (kind == domain_.LOG_Found) return null;
+        try words.appendSlice(gpa, &.{ kind, dom.logAbc.get(e), dom.logA.get(e), dom.logB.get(e) });
+    }
+    return std.mem.sliceAsBytes(words.items);
+}
+
+pub fn replayEntry(kind: u32, index: u32, a: u32, b: u32) Allocator.Error!bool {
+    const dom = try domain();
+    if (kind > domain_.LOG_Verify or index >= dom.abcs.len or !dom.isLive(index)) return false;
+
+    return changed(replayOne, .{ @as(u8, @intCast(kind)), index, a, b });
+}
+
+fn replayOne(dom: *Domain, kind: u8, index: u32, a: u32, b: u32) Allocator.Error!bool {
+    const rows = dom.rows();
+    const ok = try replayed(dom, kind, index, a, b);
+    lifetime.weigh(dom, index, rows);
+    return ok;
+}
+
 /// Do again for ABC `index` what a compile of it added to the log, as
 /// domainLogSince wrote it, without compiling (compile.ts tells why):
 /// false if an entry is malformed or comes out an error; the entries
@@ -1114,6 +1142,7 @@ fn replayed(dom: *Domain, kind: u8, abc: u32, a: u32, b: u32) Allocator.Error!bo
 /// and the domain it builds from where that is not the current one but a
 /// loaded one, given back with it.
 const Rebuilding = struct {
+    previous_limit: ?u32 = null,
     box: *Box,
     source: ?*Box,
     rebuild: lifetime.Rebuild,
@@ -1131,18 +1160,19 @@ var revived_top: u32 = 0;
 const Loading = struct {
     box: *Box,
     loaded: lifetime.Loaded,
+    target: *Box,
 };
 var loading: ?*Loading = null;
 var loading_budget: u64 = 0;
 
 /// A rebuild of `from`, `source`'s domain if one is given, into a new domain.
-fn newRebuild(from: *Domain, source: ?*Box) Allocator.Error!*Rebuilding {
+fn newRebuild(from: *Domain, source: ?*Box, target: ?*Box) Allocator.Error!*Rebuilding {
     const pages = memory.pages().allocator();
     const r = try pages.create(Rebuilding);
     errdefer pages.destroy(r);
-    const box = try make(from.apiVersion);
-    errdefer unmake(box);
-    r.* = .{ .box = box, .source = source, .rebuild = try .init(from, &box.dom) };
+    const box = target orelse try make(from.apiVersion);
+    errdefer if (target == null) unmake(box);
+    r.* = .{ .box = box, .source = source, .rebuild = try .init(from, &box.dom, &box.arena, target != null) };
     return r;
 }
 
@@ -1153,7 +1183,13 @@ fn freeRebuild(r: *Rebuilding) void {
         unmake(source);
     }
 
-    memory.pages().allocator().destroy(r);
+    destroyRebuild(r);
+}
+
+fn destroyRebuild(r: *Rebuilding) void {
+    const pages = memory.pages();
+    if (r.previous_limit) |limit| pages.limit = limit;
+    pages.allocator().destroy(r);
 }
 
 fn dropRebuild() void {
@@ -1165,6 +1201,7 @@ fn dropRebuild() void {
 
 fn dropLoading() void {
     if (loading) |l| {
+        unmake(l.target);
         unmake(l.box);
         memory.pages().allocator().destroy(l);
         loading = null;
@@ -1180,7 +1217,7 @@ fn startRebuild(r: *Rebuilding, budget: u64) void {
 
 /// Leave the rebuild under way, which changed nothing of the domain but
 /// what it revives.
-fn leaveRebuild() void {
+pub fn leaveRebuild() void {
     if (rebuilding != null) {
         dropRebuild();
         unreviveRebuilt();
@@ -1234,7 +1271,7 @@ fn rebuilt(r: *Rebuilding) bool {
         unmake(source);
     }
 
-    memory.pages().allocator().destroy(r);
+    destroyRebuild(r);
     return true;
 }
 
@@ -1243,11 +1280,26 @@ fn rebuilt(r: *Rebuilding) bool {
 /// whether it was (or, `stepped`, started).
 pub fn domainCompact(stepped: bool) Allocator.Error!bool {
     const dom = try domain();
-    if (!lifetime.wantsRebuild(dom, partBudget(), part_budget, lifetime.WANT_InPlace)) {
+    const want = if (stepped) lifetime.WANT_InPlace else lifetime.WANT_Synchronous;
+    if (!lifetime.wantsRebuild(dom, partBudget(), part_budget, want)) {
         return false;
     }
 
-    return domainRebuild(stepped);
+    if (!stepped) return domainRebuild(false);
+
+    // Replacing a pending compaction restores its outer limit before we save ours.
+    leaveRebuild();
+    // A compaction offered in place must fit inside memory already committed.
+    const pages = memory.pages();
+    const limit = pages.limit;
+    pages.limit = pages.chunks;
+    if (domainRebuild(true) catch false) {
+        rebuilding.?.previous_limit = limit;
+    } else {
+        pages.limit = limit;
+        return false;
+    }
+    return true;
 }
 
 /// The domain built again from its live ABCs, worth it or not; false,
@@ -1255,7 +1307,7 @@ pub fn domainCompact(stepped: bool) Allocator.Error!bool {
 /// domainRebuildStep to do a part at a time.
 pub fn domainRebuild(stepped: bool) Allocator.Error!bool {
     abandon();
-    const r = try newRebuild(try domain(), null);
+    const r = try newRebuild(try domain(), null, null);
     if (stepped) {
         startRebuild(r, partBudget());
         return true;
@@ -1275,9 +1327,11 @@ pub fn domainRebuild(stepped: bool) Allocator.Error!bool {
 pub fn domainRebuildStep() Allocator.Error!i32 {
     const r = rebuilding orelse return -1;
     const done = stepRebuild(r, rebuilding_budget) catch |err| {
+        const bounded = r.previous_limit != null;
         rebuilding = null;
         freeRebuild(r);
         unreviveRebuilt();
+        if (bounded) return -1;
         return err;
     };
     if (!done) {
@@ -1320,7 +1374,7 @@ pub fn domainSavedAbcBytes(index: i32) Allocator.Error!?[]const u8 {
 /// In a new instance, start a domain as another's domainSaveBytes saved
 /// it: whether the words were that, for domainLoadAbc to give its live ABCs
 /// and domainLoadRebuild to rebuild it.
-pub fn domainLoad(words: []const u8) Allocator.Error!bool {
+pub fn domainLoad(words: []const u8, recovery: bool) Allocator.Error!bool {
     abandon();
     dropLoading();
     const dom = try domain();
@@ -1329,25 +1383,25 @@ pub fn domainLoad(words: []const u8) Allocator.Error!bool {
     errdefer pages.destroy(l);
     const box = try make(dom.apiVersion);
     errdefer unmake(box);
-    l.* = .{ .box = box, .loaded = .{ .dom = &box.dom } };
-    if (!try lifetime.loadDomain(&l.loaded, words)) {
+    var loaded: lifetime.Loaded = .{ .dom = &box.dom };
+    if (!try lifetime.loadDomain(&loaded, words)) {
         unmake(box);
         pages.destroy(l);
         return false;
     }
 
-    // The rebuild's parts held to the garbage that size allowed for, as the
-    // old instance's wantsRebuild counted it; memory grown at once, by a
-    // block given back at once.
+    // Zig grows in 64 KiB pages. Reserving the estimated AssemblyScript heap here
+    // can make a move exceed the memory of the domain it is supposed to shrink.
     loading_budget = part_budget;
-    const size = lifetime.loadedSize(&l.loaded, loading_budget);
-    if (size >= lifetime.MOVE_Limit) {
-        unmake(box);
-        pages.destroy(l);
-        return false;
+    if (!recovery) {
+        const size = lifetime.loadedSize(&loaded, loading_budget);
+        if (size >= lifetime.MOVE_Limit) {
+            unmake(box);
+            pages.destroy(l);
+            return false;
+        }
     }
-
-    pages.free(try pages.alloc(u8, @intCast(size)));
+    l.* = .{ .box = box, .target = try make(box.dom.apiVersion), .loaded = loaded };
     loading = l;
     return true;
 }
@@ -1359,7 +1413,7 @@ pub fn domainLoadAbc(index: i32, bytes: []const u8) Allocator.Error!i32 {
         return -1;
     }
 
-    return lifetime.loadAbc(&l.loaded, @intCast(index), bytes);
+    return lifetime.loadAbc(&l.loaded, &l.target.arena, @intCast(index), bytes);
 }
 
 /// Start rebuilding the domain domainLoad started, given all its live ABCs,
@@ -1374,7 +1428,7 @@ pub fn domainLoadRebuild() Allocator.Error!bool {
     abandon();
     forgetVerified();
     forgetModules();
-    const r = try newRebuild(&l.box.dom, l.box);
+    const r = try newRebuild(&l.box.dom, l.box, l.target);
     memory.pages().allocator().destroy(l);
     loading = null;
     startRebuild(r, loading_budget);

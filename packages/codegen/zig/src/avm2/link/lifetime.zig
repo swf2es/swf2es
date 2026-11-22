@@ -1,16 +1,13 @@
 // The lifetimes of application domains (assembly/avm2/link/lifetime.ts):
 // dropped for good, or evicted and revived, and the ABCs' weight in the
 // tables, by which a rebuild, linking the live ABCs again into a new Domain
-// and doing again what its log records, is found worth it. The rebuild, and
-// the saving and loading of a domain, come with stage 6; until then no ABC
-// is let go of (NO_ABC), and a domain's generation never changes.
+// and replaying its log, is found worth it. Saving and loading let a
+// replacement instance rebuild the same domain.
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
 const Abc = @import("../abc/abc.zig").Abc;
-const readAbc = @import("../abc/parse.zig").readAbc;
-const PADDING = @import("../abc/reader.zig").PADDING;
 const domain_ = @import("domain.zig");
 const Domain = domain_.Domain;
 const DOMAIN_Dropped = domain_.DOMAIN_Dropped;
@@ -100,9 +97,7 @@ pub fn restore(dom: *Domain, arena: *memory.Arena, index: u32, bytes: []const u8
 
     const mark = arena.mark();
     const length: u32 = @intCast(bytes.len);
-    const buffer = try memory.allocZeroed(dom.gpa, u8, length + PADDING);
-    @memcpy(buffer[0..bytes.len], bytes);
-    const abc = try readAbc(dom.gpa, dom.scratch, buffer, length, false);
+    const abc, const buffer = try domain_.parseOwned(arena, dom.scratch, bytes, false);
     const err = abc.@"error";
     if (err != 0) {
         // The error read first: the ABC is in what is given back.
@@ -196,12 +191,14 @@ pub fn memorySize() u64 {
         return @as(u64, @wasmMemorySize(0)) << 16;
     }
 
-    return @as(u64, memory.pages().reached()) * memory.chunk_size;
+    return memory.pages().reached();
 }
 
 /// What wantsRebuild is asked: a rebuild in place with no spare instance, or beside one made or being made.
 pub const WANT_InPlace: u8 = 0;
 pub const WANT_InPlaceBesideSpare: u8 = 1;
+/// A synchronous caller without a spare can pay for the first rebuild to reach a reusable high-water mark.
+pub const WANT_Synchronous: u8 = 4;
 /// A move to a spare instance (see saveDomain), or whether one will be due before long, for a host to make it ahead.
 pub const WANT_Move: u8 = 2;
 pub const WANT_Spare: u8 = 3;
@@ -215,6 +212,8 @@ pub fn wantsRebuild(dom: *Domain, part: u64, movedPart: u64, want: u8) bool {
     const size = memorySize();
     var largest: u64 = 0;
     var largestLive: u64 = 0;
+    var liveTables = dom.keptWeight;
+    var deadTables: u64 = 0;
     const count = dom.abcWeight.len;
     for (0..count) |i_| {
         const i: u32 = @intCast(i_);
@@ -222,8 +221,18 @@ pub fn wantsRebuild(dom: *Domain, part: u64, movedPart: u64, want: u8) bool {
             largest = @max(largest, dom.abcWeight.get(i));
         }
 
-        if (dom.abcs.get(i) != &no_abc and dom.isLive(i)) {
-            largestLive = @max(largestLive, dom.abcWeight.get(i));
+        const abc = dom.abcs.get(i);
+        if (abc == &no_abc) continue;
+
+        // Replace the shared estimate for parsing with what this arena actually consumed.
+        const weight = dom.abcWeight.get(i);
+        const linked = weight -| (domain_.ABC_Weight * @as(u64, abc.length));
+        const tables = abc.parsed_bytes + linked;
+        if (dom.isLive(i)) {
+            liveTables += tables;
+            largestLive = @max(largestLive, weight);
+        } else {
+            deadTables += tables;
         }
     }
 
@@ -235,8 +244,11 @@ pub fn wantsRebuild(dom: *Domain, part: u64, movedPart: u64, want: u8) bool {
     // The new instance rebuilds with the parts its size was made for.
     const rebuilt = rebuiltSize(live, largestLive, movedPart);
     const smaller = rebuilt <= size - (size >> 3);
-    const beside = live + dead + live;
-    const fits = beside + (beside >> 4) + part < size;
+    const pages = memory.pages();
+    const available = @as(u64, pages.chunks - pages.used) * memory.chunk_size;
+    // The live tables are allocated in runs. Leave headroom for fragmented free
+    // chunks, the verifier, and a scratch part alongside the rebuilt domain.
+    const fits = liveTables + (liveTables >> 1) + part < available;
     if (want == WANT_Move or want == WANT_Spare) {
         // A spare is made once a move is half way due, to be there when it is.
         const half: u6 = if (want == WANT_Spare) 1 else 0;
@@ -248,13 +260,12 @@ pub fn wantsRebuild(dom: *Domain, part: u64, movedPart: u64, want: u8) bool {
     }
 
     return !(want == WANT_InPlaceBesideSpare and smaller) and
-        dead >= @max(@max(DEAD_Floor >> 1, size >> 3), live >> 1) and
-        fits and
-        beside + (beside >> 4) + part + reserve >= size and
+        deadTables >= @max(@max(@min(DEAD_Floor >> 1, liveTables), size >> 3), liveTables >> 1) and
+        (fits or want == WANT_Synchronous) and
         !full(live, reserve, size);
 }
 
-/// The memory a rebuild elsewhere grows the new instance to at once, for
+/// The estimated size used to decide whether to move a domain, for
 /// live ABCs of weight `live`, the largest `largest`, rebuilt a part of
 /// `part` bytes of garbage at a time (lifetime.ts tells why).
 pub fn rebuiltSize(live: u64, largest: u64, part: u64) u64 {
@@ -346,6 +357,8 @@ fn truncateDomains(dom: *Domain) void {
 pub const Rebuild = struct {
     dom: *Domain,
     fresh: *Domain,
+    arena: *memory.Arena,
+    parsed_in_fresh: bool,
     entry: u32 = 0,
     next: u32 = 0,
     verifier: ?code.Verifier = null,
@@ -353,7 +366,7 @@ pub const Rebuild = struct {
     failed: bool = false,
 
     /// A rebuild of `dom` into `fresh`, a new Domain in an arena of its own.
-    pub fn init(dom: *Domain, fresh: *Domain) Allocator.Error!Rebuild {
+    pub fn init(dom: *Domain, fresh: *Domain, arena: *memory.Arena, parsed_in_fresh: bool) Allocator.Error!Rebuild {
         const gpa = fresh.gpa;
         fresh.apiVersion = dom.apiVersion;
         fresh.generation = dom.generation + 1;
@@ -369,7 +382,7 @@ pub const Rebuild = struct {
             try fresh.domainEvicted.push(gpa, dom.domainEvicted.get(d));
         }
 
-        return .{ .dom = dom, .fresh = fresh };
+        return .{ .dom = dom, .fresh = fresh, .arena = arena, .parsed_in_fresh = parsed_in_fresh };
     }
 
     /// Go on until this call has made about `budget` bytes of garbage, as
@@ -391,7 +404,7 @@ pub const Rebuild = struct {
                     return false;
                 }
 
-                if (!try reattach(dom, fresh, self.next)) {
+                if (!try reattach(self, self.next)) {
                     return self.fail();
                 }
 
@@ -463,18 +476,22 @@ pub const Rebuild = struct {
 /// Link ABC `index` of `dom` again as `fresh`'s next, parsed again from its
 /// bytes into `fresh`'s arena, or keep its place if it is not live: false
 /// if it does not link.
-fn reattach(dom: *Domain, fresh: *Domain, index: u32) Allocator.Error!bool {
+fn reattach(r: *Rebuild, index: u32) Allocator.Error!bool {
+    const dom = r.dom;
+    const fresh = r.fresh;
     const abc = dom.abcs.get(index);
     if (abc == &no_abc or !dom.isLive(index)) {
         try vacate(fresh, dom.abcDomain.get(index));
         return true;
     }
 
-    // The old domain's tables go with its arena: its bytes and tables are
-    // made again in the new one's, as parsing them again makes them alike.
+    // A move parsed the ABC directly into the destination; an in-place rebuild still owns it in the source.
     const old = dom.abcBuffer.get(index);
-    const buffer = try fresh.gpa.dupe(u8, old);
-    const again = try readAbc(fresh.gpa, fresh.scratch, buffer, abc.length, abc.builtin);
+    var again = abc;
+    var buffer = old;
+    if (!r.parsed_in_fresh) {
+        again, buffer = try domain_.parseOwned(r.arena, fresh.scratch, old[0..abc.length], abc.builtin);
+    }
     if (again.@"error" != 0 or !try fresh.attach(again, buffer, dom.abcDomain.get(index))) {
         return false;
     }
@@ -763,7 +780,7 @@ fn consistent(dom: *const Domain) bool {
 /// Give ABC `index` of a Domain loadDomain made its bytes, as added: 0, -1
 /// if it is not one saveDomain named live or is not the length it named,
 /// or the VerifyError the bytes were rejected with.
-pub fn loadAbc(loaded: *Loaded, index: u32, bytes: []const u8) Allocator.Error!i32 {
+pub fn loadAbc(loaded: *Loaded, arena: *memory.Arena, index: u32, bytes: []const u8) Allocator.Error!i32 {
     const dom = loaded.dom;
     if (index >= dom.abcs.len or
         loaded.flags.items[index] & SAVED_Live == 0 or
@@ -773,12 +790,13 @@ pub fn loadAbc(loaded: *Loaded, index: u32, bytes: []const u8) Allocator.Error!i
         return -1;
     }
 
-    const length: u32 = @intCast(bytes.len);
-    const buffer = try memory.allocZeroed(dom.gpa, u8, length + PADDING);
-    @memcpy(buffer[0..bytes.len], bytes);
-    const abc = try readAbc(dom.gpa, dom.scratch, buffer, length, loaded.flags.items[index] & SAVED_Builtin != 0);
-    if (abc.@"error" != 0) {
-        return abc.@"error";
+    const mark = arena.mark();
+    errdefer arena.restore(mark);
+    const abc, const buffer = try domain_.parseOwned(arena, dom.scratch, bytes, loaded.flags.items[index] & SAVED_Builtin != 0);
+    const err = abc.@"error";
+    if (err != 0) {
+        arena.restore(mark);
+        return err;
     }
 
     dom.abcs.set(index, abc);
@@ -787,7 +805,7 @@ pub fn loadAbc(loaded: *Loaded, index: u32, bytes: []const u8) Allocator.Error!i
     return 0;
 }
 
-/// rebuiltSize for a Domain loadDomain made: the memory the instance rebuilding it is grown to.
+/// The move estimate for a saved domain, checked before accepting a regular move.
 pub fn loadedSize(loaded: *const Loaded, part: u64) u64 {
     const dom = loaded.dom;
     var live: u64 = 0;

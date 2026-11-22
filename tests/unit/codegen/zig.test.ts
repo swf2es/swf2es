@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { instantiate as instantiateAs } from "../../../packages/codegen/dist/codegen.js";
 import { createCodegen } from "../../../packages/codegen/dist/index.js";
 import { CodegenPanic, fromUtf8, instantiate, toUtf8 } from "../../../packages/codegen/dist/zig.js";
+import { builtinLibrary } from "../../../packages/player/dist/playerglobal/libraries.js";
 import { linkAbcs } from "../../parity/link-abc.ts";
 import { richAbc } from "../../parity/rich-abc.ts";
 import { verifyErrorAbcs } from "../../parity/verify-errors.ts";
@@ -156,8 +157,6 @@ test("a load that panics Zig's compiler is rejected, and the domain goes on in a
   const panic = new TextEncoder().encode("\0panic");
   const overflow = new TextEncoder().encode("\0overflow");
   const codegen = await createCodegen(await zigTestingModule(false));
-  // The spare instance a recovery replays into is made as the compiler is.
-  await new Promise((resolve) => setTimeout(resolve, 50));
   codegen.reset();
   const main = codegen.childDomain(0);
   assert.equal(codegen.add(script([0x24, 7, 0x24, 5, 0xa0, 0x48]), false, main), 0);
@@ -166,7 +165,6 @@ test("a load that panics Zig's compiler is rejected, and the domain goes on in a
   const revision = codegen.revision();
   for (const bytes of [panic, overflow]) {
     assert.equal(codegen.add(bytes, false, main), 1107);
-    await new Promise((resolve) => setTimeout(resolve, 50));
     // The domain as it was: the module, its context and the log alike.
     assert.deepEqual(codegen.context(0), context);
     assert.equal(codegen.revision(), revision);
@@ -175,4 +173,107 @@ test("a load that panics Zig's compiler is rejected, and the domain goes on in a
 
   assert.equal(codegen.add(script([0x24, 9, 0x48]), false, main), 0);
   assert.equal(codegen.compileModule(["a", "b"], 1).length > 0, true);
+});
+
+test("recovery keeps ancestor resolutions after the compiling child is dropped", async () => {
+  const compiler = await createCodegen(await zigTestingModule(false));
+  const { builtin, user } = linkAbcs();
+  compiler.reset();
+  assert.equal(compiler.add(builtin, true), 0);
+  const child = compiler.childDomain(0);
+  assert.equal(compiler.add(user, false, child), 0);
+  compiler.compileModule([], 1);
+  compiler.dropDomain(child);
+  const before = compiler.context(0);
+  assert.ok(before?.log);
+  assert.equal(compiler.add(new TextEncoder().encode("\0panic")), 1107);
+  assert.deepEqual(compiler.context(0), before);
+});
+
+test("a missing journal entry cannot silently roll back the compiler after a later panic", async (t) => {
+  const module = await zigTestingModule(false);
+  let failJournal = true;
+  t.mock.method(WebAssembly, "instantiate", async (module: WebAssembly.Module, imports: object) => {
+    const instance = new WebAssembly.Instance(module, imports);
+    const raw = instance.exports as { journalBytes(mark: number): number; codegenError(): number };
+    let failed = false;
+    return {
+      exports: {
+        ...instance.exports,
+        journalBytes(mark: number) {
+          failed = failJournal;
+          failJournal = false;
+          return raw.journalBytes(mark);
+        },
+        codegenError() {
+          if (failed) {
+            failed = false;
+            return 1;
+          }
+
+          return raw.codegenError();
+        },
+      },
+    };
+  });
+
+  const compiler = await createCodegen(module);
+  compiler.reset();
+  assert.equal(compiler.add(script([0x24, 7, 0x48])), 0);
+  assert.throws(() => compiler.compileModule(), /ran out of memory/);
+  assert.throws(() => compiler.add(new TextEncoder().encode("\0panic")), CodegenPanic);
+});
+
+test("recovery owns the accepted bytes and never consumes an unused revival iterable", async () => {
+  const compiler = await createCodegen(await zigTestingModule(false));
+  compiler.reset();
+  const child = compiler.childDomain(0);
+  const bytes = script([0x24, 7, 0x48]);
+  assert.equal(compiler.add(bytes, false, child), 0);
+  const before = compiler.compileModule([], 0);
+  bytes.set(script([0x24, 9, 0x48]));
+  compiler.evictDomain(child);
+  const bytesToRestore = new Map<number, Uint8Array>();
+  bytesToRestore[Symbol.iterator] = () => {
+    throw new Error("revival already had its ABC");
+  };
+  compiler.reviveDomain(child, bytesToRestore);
+  assert.equal(compiler.add(new TextEncoder().encode("\0panic")), 1107);
+  assert.equal(compiler.compileModule([], 0), before);
+});
+
+test("recovery after compaction keeps the generation and restores an evicted child's ABCs", async () => {
+  const compiler = await createCodegen(await zigTestingModule(false));
+  const builtin = builtinLibrary;
+  compiler.reset();
+  assert.equal(compiler.add(builtin, true), 0);
+  const child = compiler.childDomain(0);
+  const user = script([0x24, 7, 0x48]);
+  assert.equal(compiler.add(user, false, child), 0);
+  const output = compiler.compileModule([], 1);
+  compiler.evictDomain(child);
+
+  for (let i = 0; i < 100; i++) {
+    const transient = compiler.childDomain(0);
+    assert.equal(compiler.add(builtin, true, transient), 0);
+    compiler.dropDomain(transient);
+  }
+  let compacted = compiler.compact();
+  if (!compacted) {
+    await new Promise((resolve) => setImmediate(resolve));
+    compacted = compiler.compact();
+  }
+  assert.ok(compacted);
+  const revision = compiler.revision();
+  const key = compiler.keyContext(0);
+  const panic = new TextEncoder().encode("\0panic");
+  assert.equal(compiler.add(panic), 1107);
+  assert.equal(compiler.revision(), revision);
+  assert.deepEqual(compiler.keyContext(0), key);
+  assert.throws(() => compiler.reviveDomain(child, new Map()));
+  compiler.reviveDomain(child, new Map([[1, user]]));
+  const revived = compiler.revision();
+  assert.equal(compiler.add(panic), 1107);
+  assert.equal(compiler.revision(), revived);
+  assert.equal(compiler.compileModule([], 1), output);
 });

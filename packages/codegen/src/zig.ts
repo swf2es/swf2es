@@ -94,6 +94,25 @@ export const SIGNATURES: { readonly [name in Exclude<keyof CodegenExports, Runti
     outputLength: ["", "i32"],
   };
 
+/** Additional exports for the host's recovery journal. */
+export interface RecoveryExports extends CodegenExports {
+  journalBytes(mark: number): number;
+  replayEntry(kind: number, index: number, a: number, b: number): boolean;
+  abandonRebuild(): void;
+  loadCheckpointState(words: Uint8Array): boolean;
+}
+
+const ZIG_SIGNATURES: Record<string, Signature> = {
+  ...SIGNATURES,
+  journalBytes: ["i32", "address"],
+  replayEntry: ["i32 i32 i32 i32", "bool"],
+  abandonRebuild: ["", "void"],
+  loadCheckpointState: ["u8s", "bool"],
+};
+
+/** An allocation refused by the compiler leaves it usable. */
+export class CodegenOutOfMemory extends Error {}
+
 /** A panic in the Zig module: a safety check failed, and the instance is dead. */
 export class CodegenPanic extends Error {
   override name = "CodegenPanic";
@@ -149,6 +168,7 @@ const READS_LAST_CALL = new Set([
   "actionsUnitLimits",
   "actionsHeldCount",
   "actionsRelease",
+  "abandonRebuild",
 ]);
 
 /**
@@ -162,21 +182,49 @@ export async function bind<T>(
   signatures: { readonly [name: string]: Signature },
   readsLastCall: readonly string[] = [],
 ): Promise<T & { panicked(): string | null }> {
-  let panic: string | null = null;
-  let raw: Raw | null = null;
-  const instance = await WebAssembly.instantiate(module, {
-    env: {
-      abort(message: number, length: number) {
-        panic = raw ? fromUtf8(new Uint8Array(raw.memory.buffer, message >>> 0, length)) : "panic";
-        throw new CodegenPanic(`codegen-zig.wasm: ${panic}`);
+  const state = panicState();
+  const instance = await WebAssembly.instantiate(module, state.imports);
+  return bindInstance<T>(instance, state, signatures, readsLastCall);
+}
+
+/** A panic with no compaction spare ready can instantiate the already compiled module synchronously. */
+export function recoveryInstance(module: WebAssembly.Module): CodegenExports {
+  const state = panicState();
+  const instance = new WebAssembly.Instance(module, state.imports);
+  return bindInstance<RecoveryExports>(instance, state, ZIG_SIGNATURES, []);
+}
+
+function panicState() {
+  const state = {
+    panic: null as string | null,
+    raw: null as Raw | null,
+    imports: {
+      env: {
+        abort(message: number, length: number) {
+          state.panic = state.raw
+            ? fromUtf8(new Uint8Array(state.raw.memory.buffer, message >>> 0, length))
+            : "panic";
+          throw new CodegenPanic(`codegen-zig.wasm: ${state.panic}`);
+        },
       },
     },
-  });
-  raw = instance.exports as unknown as Raw;
-  const exports = raw;
+  };
+  return state;
+}
+
+function bindInstance<T>(
+  instance: WebAssembly.Instance,
+  state: ReturnType<typeof panicState>,
+  signatures: { readonly [name: string]: Signature },
+  readsLastCall: readonly string[],
+) {
+  const exports = instance.exports as unknown as Raw;
+  state.raw = exports;
   const alive = () => {
-    if (panic !== null) {
-      throw new CodegenPanic(`codegen-zig.wasm panicked earlier (${panic}): make another instance`);
+    if (state.panic !== null) {
+      throw new CodegenPanic(
+        `codegen-zig.wasm panicked earlier (${state.panic}): make another instance`,
+      );
     }
   };
   // Addresses are u32, which wasm hands JavaScript as i32: negative past 2 GiB.
@@ -190,8 +238,8 @@ export async function bind<T>(
       return run();
     } catch (error) {
       if (!(error instanceof CodegenPanic)) {
-        panic = `trap: ${error instanceof Error ? error.message : String(error)}`;
-        throw new CodegenPanic(`codegen-zig.wasm: ${panic}`);
+        state.panic = `trap: ${error instanceof Error ? error.message : String(error)}`;
+        throw new CodegenPanic(`codegen-zig.wasm: ${state.panic}`);
       }
 
       throw error;
@@ -204,7 +252,7 @@ export async function bind<T>(
     },
     // Each call's arena is given back as the next starts: nothing to collect.
     __collect() {},
-    panicked: () => panic,
+    panicked: () => state.panic,
   };
   for (const [name, [spec, result]] of Object.entries(signatures)) {
     const call = exports[name] as ((...args: number[]) => number) | undefined;
@@ -254,7 +302,7 @@ export async function bind<T>(
       if (starts) {
         const base = guarded(() => exports.input(size)) >>> 0;
         if (base === 0) {
-          throw new Error(`codegen-zig.wasm: ${name} ran out of memory`);
+          throw new CodegenOutOfMemory(`codegen-zig.wasm: ${name} ran out of memory`);
         }
 
         // Read after input, which may have grown memory.
@@ -277,7 +325,7 @@ export async function bind<T>(
 
       const value = guarded(() => call(...flat));
       if (starts && exports.codegenError() !== 0) {
-        throw new Error(`codegen-zig.wasm: ${name} ran out of memory`);
+        throw new CodegenOutOfMemory(`codegen-zig.wasm: ${name} ran out of memory`);
       }
 
       switch (result) {
@@ -314,7 +362,7 @@ export async function instantiate(
   module: WebAssembly.Module,
   _imports: object = {},
 ): Promise<CodegenExports & { panicked(): string | null }> {
-  return bind<CodegenExports>(module, SIGNATURES);
+  return bind<RecoveryExports>(module, ZIG_SIGNATURES);
 }
 
 /**

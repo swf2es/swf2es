@@ -708,11 +708,10 @@ them). A fresh instance replays it, adds then `domainReplay` for the
 compiles, and is the same domain by determinism; the load that panicked
 is left out. If the replay itself panics or traps, there is no second
 attempt: the compiler is dead for the page, and every call throws, as
-asc's compiler after a trap. Dropping a domain drops its entries, and an evicted one's
-ABCs are given back by the host on revival, as now. What holding the
-live ABCs' arrays costs a host that would let them go is measured in
-stage 6. The wrapper already swaps instances for #1185's moves, so
-recovery is one more way to `moved()`. Running out of memory is not a panic: it is
+asc's compiler after a trap. Dropping a domain leaves placeholders for its ABC
+indices. Ancestor resolutions survive a child being dropped. A successful
+rebuild replaces the earlier journal with a checkpoint. Its retained
+bytes and the measured journal size are described in stage 6 below. Running out of memory is not a panic: it is
 `error.OutOfMemory` up to the export and a sticky code
 (`codegenError()`), thrown by the wrapper as asc's trap was.
 
@@ -994,22 +993,28 @@ Stage 6 (the exports and lifetimes), as built:
   whole 16 KB chunks, so a small ABC costs at least that, which the dead
   weight does not see. It is M2's starting point, with a sub-chunk
   allocator for small ABCs whose dead runs are reused.
-- *Recovery from a panic* is the wrapper's, by its journal of calls
-  (section 7): replayed into a spare instance kept at hand for Zig's
-  compiler. A dropped domain's ABCs give way in the journal to an empty
-  ABC, which keeps their indices, and its compiles' logs go, so the
-  journal does not keep every ABC a long session loads. Two gaps:
-  - A panic before the spare instance exists cannot be recovered from.
-    It is made asynchronously as the compiler is, so the gap is the
-    first calls after `createCodegen`.
-  - The rebuilds since the reset are not replayed. A recovered domain's
-    `generation` is 0, so keys taken after a recovery differ from those
-    before it, which costs cache misses only.
+- *Recovery from a panic* uses the wrapper's journal (section 7). If a
+  compaction spare is ready, it replaces the failed instance. Otherwise
+  the wrapper instantiates the already compiled module synchronously when
+  the panic occurs. A successful rebuild checkpoints its generation,
+  domain state and live ABC bytes. A move parses those bytes once, into
+  the destination arena. Recovery loads the checkpoint and replays only
+  the later changes. It owns the bytes it needs from callers and records
+  each compile's changes against the ABC it affected, including ancestors.
+  Dropping a child discards its later journaled bytes and keeps its ABC
+  indices. ABCs that were live at the last checkpoint stay in that
+  checkpoint until the next successful rebuild or reset.
 - *Writes outside put.* A stepped verifier truncates its log entry in a
   later call than the one that added it, and a push in the same call may
   write over that row: a rollback writes it back (`Domain.truncated`).
-- *Peak memory* on `codegen-session.ts`, 300 loads: Zig 27.4 MB against
-  AssemblyScript's 29.8 MB, with 6 rebuilds each, in 5.9 s against 5.7.
+- *Peak memory* on `codegen-session.ts`, 300 loads, seed 1, three
+  interleaved runs per compiler. The largest single Wasm instance reached
+  24.1 MiB with Zig and 29.8 MiB with AssemblyScript. Median elapsed times
+  were 5.91 s and 5.68 s, with five and six rebuilds respectively. At
+  25-load intervals Zig's recovery payload peaked at 2.4 MiB outside
+  Wasm, counting owned ABC bytes, serialized checkpoint state and four
+  32-bit words per recorded compile entry. JavaScript object overhead and
+  memory shared in time by the old and spare instances are separate.
 
 **Release mode, decided.** The user's decision after stage 5: the
 release ships in ReleaseSafe. About 180 KB gzipped is fine, so section
@@ -1025,7 +1030,7 @@ ReleaseSafe; 1.26, 1.09 and 1.16 in ReleaseSmall; 1.07, 0.97 and 1.05 in
 ReleaseFast; ReleaseSmall with safety in `abc/` 1.26, 1.15 and 1.09.
 ReleaseSafe is over section 7's 1.15. Memory after compiling: 14.3, 12.7
 and 4.9 MiB, against AssemblyScript's 16.0 each. `codegen-session.ts`
-plays the player, which takes keys and rebuilds: it waits for stage 6.
+exercises the player’s keys and rebuilds. Its stage 6 results are above.
 
 The parser's tables go to the allocator it is given (stage 3: the
 domain's arena) and what only the parse needs (a set's members while
