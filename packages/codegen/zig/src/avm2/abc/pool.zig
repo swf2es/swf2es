@@ -10,33 +10,53 @@ const Reader = @import("reader.zig").Reader;
 /// Flat tables indexed like the ABC's pools; entry 0 of each is the
 /// implicit default. Strings stay byte ranges into the ABC, so only the
 /// names codegen uses get decoded. A table the parse did not reach keeps
-/// its default, one entry (two for nsSetStart), as AssemblyScript's does.
+/// its default, one zero entry (two for nsSetStart), as AssemblyScript's
+/// does: each pool's own (`init`), never shared, so a write to one cannot
+/// reach another.
 pub const ConstantPool = struct {
     /// 0, or the VerifyError number avmplus would throw.
     @"error": i32 = 0,
 
-    ints: []i32 = @constCast(&[_]i32{0}),
-    uints: []u32 = @constCast(&[_]u32{0}),
-    doubles: []f64 = @constCast(&[_]f64{0}),
-    floats: []f32 = @constCast(&[_]f32{0}),
+    ints: []i32 = &.{},
+    uints: []u32 = &.{},
+    doubles: []f64 = &.{},
+    floats: []f32 = &.{},
 
     /// Offset from the start of the ABC, and byte length, of each string.
-    stringStart: []u32 = @constCast(&[_]u32{0}),
-    stringLength: []u32 = @constCast(&[_]u32{0}),
+    stringStart: []u32 = &.{},
+    stringLength: []u32 = &.{},
 
-    nsKind: []u8 = @constCast(&[_]u8{0}),
+    nsKind: []u8 = &.{},
     /// String index of the namespace URI; 0 if it has none.
-    nsName: []u32 = @constCast(&[_]u32{0}),
+    nsName: []u32 = &.{},
 
     /// Set i is nsSetMembers[nsSetStart[i] .. nsSetStart[i + 1]].
-    nsSetStart: []u32 = @constCast(&[_]u32{ 0, 0 }),
+    nsSetStart: []u32 = &.{},
     nsSetMembers: []u32 = &.{},
 
-    mnKind: []u8 = @constCast(&[_]u8{0}),
+    mnKind: []u8 = &.{},
     /// Namespace (QName), namespace set (Multiname) or base type (TypeName).
-    mnA: []u32 = @constCast(&[_]u32{0}),
+    mnA: []u32 = &.{},
     /// Name string (QName, RTQName, Multiname) or type parameter (TypeName).
-    mnB: []u32 = @constCast(&[_]u32{0}),
+    mnB: []u32 = &.{},
+
+    /// A pool of defaults only, in `gpa`.
+    pub fn init(gpa: Allocator) Allocator.Error!ConstantPool {
+        return .{
+            .ints = try memory.allocZeroed(gpa, i32, 1),
+            .uints = try memory.allocZeroed(gpa, u32, 1),
+            .doubles = try memory.allocZeroed(gpa, f64, 1),
+            .floats = try memory.allocZeroed(gpa, f32, 1),
+            .stringStart = try memory.allocZeroed(gpa, u32, 1),
+            .stringLength = try memory.allocZeroed(gpa, u32, 1),
+            .nsKind = try memory.allocZeroed(gpa, u8, 1),
+            .nsName = try memory.allocZeroed(gpa, u32, 1),
+            .nsSetStart = try memory.allocZeroed(gpa, u32, 2),
+            .mnKind = try memory.allocZeroed(gpa, u8, 1),
+            .mnA = try memory.allocZeroed(gpa, u32, 1),
+            .mnB = try memory.allocZeroed(gpa, u32, 1),
+        };
+    }
 
     pub inline fn stringCount(self: *const ConstantPool) u32 {
         return @intCast(self.stringStart.len);
@@ -55,9 +75,11 @@ pub const ConstantPool = struct {
     }
 };
 
-/// Read the constant pool at `r`, its tables in `gpa`; the ABC starts at offset 0 of `r`'s data.
-pub fn readConstantPool(gpa: Allocator, r: *Reader, hasFloats: bool) Allocator.Error!ConstantPool {
-    var pool: ConstantPool = .{};
+/// Read the constant pool at `r`, its tables in `gpa` and what only the
+/// read needs in `scratch` (the call's arena, so that a domain's arena
+/// keeps the tables alone); the ABC starts at offset 0 of `r`'s data.
+pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloats: bool) Allocator.Error!ConstantPool {
+    var pool: ConstantPool = try .init(gpa);
 
     const intCount = readCount(r);
     pool.ints = try memory.allocZeroed(gpa, i32, @max(intCount, 1));
@@ -149,7 +171,7 @@ pub fn readConstantPool(gpa: Allocator, r: *Reader, hasFloats: bool) Allocator.E
                 return fail(pool, C.kCpoolIndexRangeError);
             }
 
-            _ = try members.append(gpa, ns);
+            _ = try members.append(scratch, ns);
         }
     }
     pool.nsSetStart[nsSetCount] = members.len;
@@ -228,7 +250,7 @@ pub fn readConstantPool(gpa: Allocator, r: *Reader, hasFloats: bool) Allocator.E
         return fail(pool, C.kCorruptABCError);
     }
 
-    if (!try typeNamesAreAcyclic(gpa, &pool)) {
+    if (!try typeNamesAreAcyclic(scratch, &pool)) {
         return fail(pool, C.kCorruptABCError);
     }
 

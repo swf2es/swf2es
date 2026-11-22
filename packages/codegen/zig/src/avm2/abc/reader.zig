@@ -17,6 +17,9 @@ pub const Reader = struct {
     end: usize,
     failed: bool = false,
 
+    /// A reader of `data` from `pos` to `end`; `data` must hold PADDING
+    /// bytes past `end`, which its callers guarantee by copying the ABC so
+    /// (a bug otherwise, which panics here).
     pub fn init(data: []const u8, pos: usize, end: usize) Reader {
         std.debug.assert(end + PADDING <= data.len);
         return .{ .data = data, .pos = pos, .end = end };

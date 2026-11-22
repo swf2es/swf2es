@@ -10,12 +10,14 @@ const readConstantPool = @import("pool.zig").readConstantPool;
 const Reader = @import("reader.zig").Reader;
 
 /// Parse the ABC block of `length` bytes at the start of `data`, which must
-/// be followed by PADDING readable bytes, its tables in `gpa`; `builtin` for
-/// an ABC the player ships (see Abc.builtin). Check `error` on the result:
-/// 0, or the VerifyError avmplus would throw.
-pub fn readAbc(gpa: Allocator, data: []const u8, length: u32, builtin: bool) Allocator.Error!*Abc {
+/// be followed by PADDING readable bytes (the caller copies it so, as
+/// domainAdd will; Reader.init asserts it), its tables in `gpa` and what
+/// only the parse needs in `scratch`; `builtin` for an ABC the player ships
+/// (see Abc.builtin). Check `error` on the result: 0, or the VerifyError
+/// avmplus would throw.
+pub fn readAbc(gpa: Allocator, scratch: Allocator, data: []const u8, length: u32, builtin: bool) Allocator.Error!*Abc {
     const abc = try gpa.create(Abc);
-    abc.* = .{ .length = length, .builtin = builtin };
+    abc.* = try .init(gpa, length, builtin);
     var r: Reader = .init(data, 0, length);
     abc.minorVersion = r.u16_();
     abc.majorVersion = r.u16_();
@@ -29,7 +31,7 @@ pub fn readAbc(gpa: Allocator, data: []const u8, length: u32, builtin: bool) All
         return abc;
     }
 
-    abc.pool = try readConstantPool(gpa, &r, abc.hasFloatSupport());
+    abc.pool = try readConstantPool(gpa, scratch, &r, abc.hasFloatSupport());
     if (abc.pool.@"error" != 0) {
         _ = abc.fail(abc.pool.@"error");
         return abc;
