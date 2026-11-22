@@ -1290,7 +1290,10 @@ async function deepEmit(
       console.log(`    ${name}: ${r.compiler}'s stack reached ${c.stackDeepest()} bytes`);
     }
 
-    return r.blob(`${name}: emit`, Buffer.from(`${/L\d+: \{/.test(text) ? "structured" : "dispatched"}\n${text}`));
+    return r.blob(
+      `${name}: emit`,
+      Buffer.from(`${/L\d+: \{/.test(text) ? "structured" : "dispatched"}\n${text}`),
+    );
   });
 }
 
@@ -1506,7 +1509,9 @@ function emitLast(c: Compiler, r: Results, name: string, count: number): void {
   });
   const step = Math.max(1, Math.ceil(bodies / count));
   for (let b = 0; b < bodies; b += step) {
-    linked(c, r, `${name}: emit ${b}`, () => r.blob(`${name}: emit ${b}`, Buffer.from(c.domainEmit(b))));
+    linked(c, r, `${name}: emit ${b}`, () =>
+      r.blob(`${name}: emit ${b}`, Buffer.from(c.domainEmit(b))),
+    );
   }
 }
 
@@ -1533,7 +1538,12 @@ function moduleLast(c: Compiler, r: Results, name: string, budget: number): void
   let bodies = "";
   linked(c, r, `${name}: entries`, () => {
     const entries: string = c.domainModuleEntries();
-    bodies = [...entries.matchAll(/(\d+)\u0001/g)].map((m) => m[1]).join(",");
+    // Each entry is its body's index, U+0001, its code, U+0002.
+    bodies = entries
+      .split("\u0002")
+      .filter((entry) => entry.length > 0)
+      .map((entry) => entry.slice(0, entry.indexOf("\u0001")))
+      .join(",");
     return r.blob(`${name}: entries`, Buffer.from(entries));
   });
   linked(c, r, `${name}: each`, () =>
