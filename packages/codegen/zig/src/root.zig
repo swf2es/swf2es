@@ -62,6 +62,7 @@ pub export fn input(size: u32) usize {
     failure = 0;
     handed_length = 0;
     memory.call.reset();
+    avm2.callStarts();
     const room = gpa().alignedAlloc(u8, .@"8", @max(size, 8)) catch |err| return fail(err);
     return @intFromPtr(room.ptr);
 }

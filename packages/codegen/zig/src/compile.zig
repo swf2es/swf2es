@@ -49,6 +49,13 @@ pub fn domain() Allocator.Error!*Domain {
     return current.?;
 }
 
+/// A call starts: what the last one made in its arena, the body decoder, is gone.
+pub fn callStarts() void {
+    if (current) |dom| {
+        dom.decoder = null;
+    }
+}
+
 /// The domain given back, as when the module starts, for the tests.
 pub fn release() void {
     if (current != null) {
