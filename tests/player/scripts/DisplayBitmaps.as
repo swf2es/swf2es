@@ -8,11 +8,14 @@
 // Below them, bitmaps shown larger than a pixel a stage pixel that go other
 // ways: one cleared and drawn into from a turning sprite on every frame; one
 // whose first draw is of a sprite that shows that bitmap itself; one
-// disposed on frame 25; one whose Bitmap is scaled up on frame 12; a copy of
-// the main bitmap's pixels made on frame 20; and a shape filled with the main
-// bitmap. On frame 30 the main bitmap, the drawn-into one, the one that drew
-// itself and the copy are traced as grids of pixels, which reads them back,
-// and a marker is filled into the main one.
+// disposed on frame 25; one whose Bitmap is scaled up on frame 12; one a
+// pixel is set in on frame 15; a copy of the main bitmap's pixels made on
+// frame 20; and a shape filled with the main bitmap. Below them a wide
+// bitmap of a glowing line, and the same line as vectors. On frame 30 the
+// main bitmap, the drawn-into one, the one that drew itself and the copy are
+// traced as grids of pixels, which reads them back, and a marker is filled
+// into the main one; on frame 40 the art the main bitmap was drawn from is
+// changed, which it does not show.
 package
 {
 	import flash.display.Bitmap;
@@ -21,6 +24,7 @@ package
 	import flash.display.Shape;
 	import flash.display.Sprite;
 	import flash.events.Event;
+	import flash.filters.GlowFilter;
 	import flash.geom.Matrix;
 	import flash.geom.Point;
 	import flash.geom.Rectangle;
@@ -39,6 +43,8 @@ package
 		private var _turning:Sprite;
 		private var _strip:Sprite;
 		private var _grow:Bitmap;
+		private var _poke:BitmapData;
+		private var _ground:Sprite;
 		private var _frame:int = 0;
 
 		public function Main()
@@ -53,6 +59,7 @@ package
 			addChild(right);
 
 			var ground:Sprite = art(0);
+			_ground = ground;
 			var details:Sprite = art(1);
 			left.addChild(ground);
 			left.addChild(details);
@@ -92,6 +99,23 @@ package
 			var grown:BitmapData = new BitmapData(40, 30, true, 0);
 			grown.draw(blobs(40, 30));
 			_grow = strip(grown, 240, 1);
+			_poke = new BitmapData(30, 20, true, 0);
+			_poke.draw(blobs(30, 20));
+			strip(_poke, 350, 1.5);
+
+			// A glowing line across the stage, drawn into a bitmap wider than a tile of its draw at
+			// display resolution, and as vectors under it.
+			var wide:BitmapData = new BitmapData(390, 10, true, 0);
+			wide.draw(glowing());
+			var wideShown:Bitmap = new Bitmap(wide);
+			wideShown.x = 5;
+			wideShown.y = 300;
+			addChild(wideShown);
+			var line:Sprite = glowing();
+			line.x = 5;
+			line.y = 310;
+			addChild(line);
+
 			var filled:Shape = new Shape();
 			filled.graphics.beginBitmapFill(_data, new Matrix(0.25, 0, 0, 0.25));
 			filled.graphics.drawRect(0, 0, 40, 40);
@@ -129,6 +153,9 @@ package
 				case 12:
 					_grow.scaleX = _grow.scaleY = 1.4;
 					break;
+				case 15:
+					_poke.setPixel32(1, 1, 0xFF000000);
+					break;
 				case 20:
 					_copy = new BitmapData(_data.width, _data.height, true, 0);
 					_copy.copyPixels(_data, _data.rect, new Point(0, 0));
@@ -142,6 +169,9 @@ package
 					trace("self " + grid(_self, 7));
 					trace("copy " + grid(_copy, 20));
 					_data.fillRect(new Rectangle(4, 4, 6, 6), 0xFFFF00FF);
+					break;
+				case 40:
+					_ground.alpha = 0.5;
 					break;
 			}
 		}
@@ -159,6 +189,19 @@ package
 			}
 
 			return line.join(" ");
+		}
+
+		/** A line 390 wide, 10 high, its shape glowing. */
+		private static function glowing():Sprite
+		{
+			var sprite:Sprite = new Sprite();
+			var s:Shape = new Shape();
+			s.graphics.lineStyle(2, 0x1565C0);
+			s.graphics.moveTo(4, 5);
+			s.graphics.lineTo(386, 5);
+			s.filters = [new GlowFilter(0xFFB300, 1, 6, 6, 3, 2)];
+			sprite.addChild(s);
+			return sprite;
 		}
 
 		/** Coloured blobs and a hairline over `w` by `h`. */

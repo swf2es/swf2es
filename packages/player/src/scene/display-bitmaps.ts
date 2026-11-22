@@ -39,8 +39,10 @@ const LEAST_ZOOM = 1.1;
 const STORE_TEXELS = 1 << 24;
 /** The most texels a draw's samples take at once: a tile's side is this's root over the samples. */
 const TILE_TEXELS = 1 << 24;
-/** The most an object with filters takes drawn whole, its samples fewer where it is large. */
-const WHOLE_TEXELS = 1 << 25;
+/** The most texels a draw whose filters reach too far for a tile's margin takes drawn whole, its samples fewer. */
+const WHOLE_TEXELS = 1 << 24;
+/** The narrowest a tile within its margin may be before a filtered draw goes whole instead. */
+const LEAST_TILE = 128;
 /**
  * How far the scale a store is shown at may stray from its texture's before it is drawn again at
  * it: little, as a texel that lands on a pixel of the screen is read as it is, else resampled.
@@ -50,8 +52,13 @@ const RESCALE = 0.002;
 const MOST_STEPS = 256;
 /** Rendered frames a new scale must hold before a store is drawn again at it: a resize's drag passes. */
 const STEADY_FRAMES = 8;
-/** Rendered frames a store may go unshown before its texture is let go of, to be made again when shown. */
+/**
+ * Rendered frames a store's record waits for a Bitmap on the stage to show it, after its last draw
+ * or after it left the stage, before it lets go of what it drew.
+ */
 const UNSHOWN_FRAMES = 300;
+/** Rendered frames before a texture the budget refused is asked for again. */
+const RETRY_FRAMES = 60;
 
 /** What a view lends the textures it shows stores at the display's resolution in. */
 export interface DisplayHost {
@@ -59,8 +66,9 @@ export interface DisplayHost {
   /**
    * `o` drawn as BitmapData.draw draws it through `m`, in the store's
    * pixels, at `zoom` texels a pixel, into `width` by `height` texels of
-   * texture `id` at (x, y), composited source over, with `samples` a side;
-   * whether it was.
+   * texture `id` at (x, y), composited source over, with `samples` a side,
+   * drawn `margin` texels wider each way, of which only what lies within
+   * is composited; whether it was.
    */
   draw(
     o: DisplayObject,
@@ -73,9 +81,12 @@ export interface DisplayHost {
     zoom: number,
     id: number,
     opaque: boolean,
+    margin: number,
   ): boolean;
   /** `rect` of texture `id` cleared to `pixel`, premultiplied ARGB; whether it was. */
   fill(id: number, rect: PixelRect, pixel: number): boolean;
+  /** The top of the display list the view last drew, the stage, or null before it drew. */
+  stage(): DisplayObject | null;
 }
 
 /** A draw a store went through: as drawInto took it, in the store's pixels. */
@@ -91,8 +102,8 @@ interface DrawStep {
   epoch: number;
   /** The stores its fills sample, and their versions then, which no Bitmap is told of. */
   sampled: [BitmapStore, number][];
-  /** Whether it is drawn whole, not in tiles: filters near a tile's edge would read past it. */
-  whole: boolean;
+  /** How far its filters read past what they draw, in the store's pixels: a tile's margin. */
+  reach: number;
 }
 
 interface FillStep {
@@ -118,14 +129,21 @@ interface Record {
   steps: (DrawStep | FillStep)[] | null;
   /** The store's version the record stands for: anything else changed it since. */
   version: number;
-  /** Its entry among those shown, while it is. */
+  /** Its entry among those shown, while it is; else whether it waits among the unshown. */
   entry: Entry | null;
-  /** Texels a pixel a Bitmap on the stage last showed it at, and the frame it did. */
+  pending: boolean;
+  /** The frame it last followed a draw or fill, or left the stage: the unshown wait from it. */
+  drawnAt: number;
+  /** The context it began in (DisplayBitmaps' `generation`): a lost one took the store's draws. */
+  generation: number;
+  /** Texels a pixel Bitmaps on the stage showed it at, the largest of a frame, and that frame. */
   shownZoom: number;
   shownAt: number;
   /** A scale it is to be drawn again at, and for how many frames that has held. */
   wanted: number;
   steady: number;
+  /** The frame a texture the budget refused may be asked for again. */
+  retryAt: number;
 }
 
 /** A store a Bitmap on the stage showed: its texture, by a reference that does not keep the store. */
@@ -146,9 +164,13 @@ function followFills(store: BitmapStore, rect: PixelRect, pixel: number, before:
 export class DisplayBitmaps {
   private readonly records = new WeakMap<BitmapStore, Record>();
   private readonly entries: Entry[] = [];
+  /** Stores with a record no Bitmap on the stage shows, which lets go of what it drew in time. */
+  private readonly pending: WeakRef<BitmapStore>[] = [];
   /** The bytes the textures take. */
   private bytes = 0;
   private frames = 0;
+  /** Counts lost contexts: a record begun before one no longer stands for its store. */
+  private generation = 0;
 
   constructor(
     private readonly textures: Textures,
@@ -172,6 +194,11 @@ export class DisplayBitmaps {
     }
 
     return n;
+  }
+
+  /** The context was lost: what stores held on the GPU went, and the records of their draws. */
+  contextLost(): void {
+    this.generation++;
   }
 
   /** Its textures let go of, and stores' fills no longer followed, as the view goes. */
@@ -207,7 +234,7 @@ export class DisplayBitmaps {
     solid: number | null,
   ): void {
     let record = this.records.get(store);
-    if (!record || record.version !== before) {
+    if (!record || record.version !== before || record.generation !== this.generation) {
       // Something it did not see changed the store: what it knows starts again where the store
       // was of one colour before the draw, and ends otherwise.
       if (solid === null) {
@@ -222,12 +249,13 @@ export class DisplayBitmaps {
       if (record) {
         this.restart(record, solid);
       } else {
-        record = newRecord(solid, before);
+        record = this.newRecord(solid, before);
         this.records.set(store, record);
       }
     }
 
     record.version = store.version;
+    this.wait(store, record);
     const steps = record.steps;
     if (!steps) {
       return;
@@ -254,7 +282,7 @@ export class DisplayBitmaps {
       samples,
       epoch: pickWork.changes,
       sampled,
-      whole: filtered(o),
+      reach: reachOf(o) * Math.max(1, Math.sqrt(Math.abs(m.a * m.d - m.b * m.c))),
     };
     steps.push(step);
     const shown = record.entry?.shown;
@@ -280,18 +308,21 @@ export class DisplayBitmaps {
       rect.y === 0 &&
       rect.width === store.width &&
       rect.height === store.height;
-    const record = this.records.get(store);
+    let record = this.records.get(store);
     if (!record) {
       // A store filled whole is of one colour: followed from there.
       if (whole) {
-        this.records.set(store, newRecord(pixel, store.version));
+        record = this.newRecord(pixel, store.version);
+        this.records.set(store, record);
+        this.wait(store, record);
       }
 
       return;
     }
 
-    const known = record.version === before;
+    const known = record.version === before && record.generation === this.generation;
     record.version = store.version;
+    this.wait(store, record);
     if (whole) {
       this.restart(record, pixel);
       const shown = record.entry?.shown;
@@ -326,6 +357,34 @@ export class DisplayBitmaps {
   private restart(record: Record, solid: number): void {
     record.solid = solid;
     record.steps = [];
+    record.generation = this.generation;
+  }
+
+  /** A record begun now, from `solid` at the store's `version`. */
+  private newRecord(solid: number, version: number): Record {
+    return {
+      solid,
+      steps: [],
+      version,
+      entry: null,
+      pending: false,
+      drawnAt: this.frames,
+      generation: this.generation,
+      shownZoom: 0,
+      shownAt: -1,
+      wanted: 0,
+      steady: 0,
+      retryAt: 0,
+    };
+  }
+
+  /** `record`'s store followed now: among those waiting to be shown where no Bitmap on the stage shows it. */
+  private wait(store: BitmapStore, record: Record): void {
+    record.drawnAt = this.frames;
+    if (!record.entry && !record.pending) {
+      record.pending = true;
+      this.pending.push(new WeakRef(store));
+    }
   }
 
   /** `record` no longer able to tell the store: its texture let go of, and none made till it starts again. */
@@ -375,10 +434,12 @@ export class DisplayBitmaps {
       return;
     }
 
-    record.shownZoom = zoom;
+    // The largest any Bitmap showed it at this frame: the others are then smoothed down to theirs.
+    record.shownZoom = record.shownAt === this.frames ? Math.max(record.shownZoom, zoom) : zoom;
     record.shownAt = this.frames;
     if (!record.entry) {
       record.entry = { store: new WeakRef(store), shown: null };
+      record.pending = false;
       this.entries.push(record.entry);
     }
   }
@@ -397,8 +458,12 @@ export class DisplayBitmaps {
       const record = store ? this.records.get(store) : undefined;
       if (!store || !record || record.entry !== entry || this.gone(store, record, entry)) {
         this.free(entry);
-        if (record?.entry === entry) {
+        if (store && record?.entry === entry) {
+          // Off the stage: it waits to be shown again, a while, with what it drew.
           record.entry = null;
+          if (record.steps) {
+            this.wait(store, record);
+          }
         }
 
         continue;
@@ -408,6 +473,31 @@ export class DisplayBitmaps {
     }
 
     this.entries.length = kept;
+
+    // The records no Bitmap on the stage has shown since a while let go of what they drew.
+    let waiting = 0;
+    for (const ref of this.pending) {
+      const store = ref.deref();
+      const record = store ? this.records.get(store) : undefined;
+      if (!record?.pending) {
+        continue;
+      }
+
+      if (record.entry || !record.steps) {
+        record.pending = false;
+        continue;
+      }
+
+      if (this.frames - record.drawnAt > UNSHOWN_FRAMES) {
+        record.steps = null;
+        record.pending = false;
+        continue;
+      }
+
+      this.pending[waiting++] = ref;
+    }
+
+    this.pending.length = waiting;
   }
 
   /** `store`'s texture made, made again or let go of as it is shown now; whether its entry is to go. */
@@ -416,8 +506,17 @@ export class DisplayBitmaps {
       store.disposed ||
       !record.steps ||
       record.version !== store.version ||
-      this.frames - record.shownAt > UNSHOWN_FRAMES
+      record.generation !== this.generation
     ) {
+      if (record.generation !== this.generation) {
+        record.steps = null;
+      }
+
+      return true;
+    }
+
+    // Shown by no Bitmap on the stage, walked or not: its texture goes, and its record waits.
+    if (record.shownAt !== this.frames - 1 && !this.onStage(store)) {
       return true;
     }
 
@@ -436,7 +535,10 @@ export class DisplayBitmaps {
     }
 
     if (!entry.shown) {
-      this.make(store, record, entry, wanted);
+      if (this.frames >= record.retryAt) {
+        this.make(store, record, entry, wanted);
+      }
+
       return false;
     }
 
@@ -453,6 +555,33 @@ export class DisplayBitmaps {
     if (++record.steady >= STEADY_FRAMES) {
       record.steady = 0;
       this.make(store, record, entry, wanted);
+    }
+
+    return false;
+  }
+
+  /**
+   * Whether a Bitmap showing `store` is on the stage: one the walk did not
+   * reach, as what it stands in stood unchanged, shows it all the same.
+   */
+  private onStage(store: BitmapStore): boolean {
+    const stage = this.host.stage();
+    if (!stage) {
+      return false;
+    }
+
+    for (const ref of store.views) {
+      const view = ref.deref();
+      if (view instanceof BitmapObject && view.store === store) {
+        let top: DisplayObject = view;
+        while (top.parent) {
+          top = top.parent;
+        }
+
+        if (top === stage) {
+          return true;
+        }
+      }
     }
 
     return false;
@@ -480,15 +609,16 @@ export class DisplayBitmaps {
       return;
     }
 
-    if (!stillDraws(steps)) {
-      this.end(record);
-      return;
-    }
-
     const across = texelsOf(store.width, zoom);
     const down = texelsOf(store.height, zoom);
     const bytes = 4 * across * down;
     if (this.bytes - (entry.shown?.bytes ?? 0) + bytes > this.budget) {
+      record.retryAt = this.frames + RETRY_FRAMES;
+      return;
+    }
+
+    if (!stillDraws(steps)) {
+      this.end(record);
       return;
     }
 
@@ -531,9 +661,13 @@ export class DisplayBitmaps {
       step.y + step.height >= store.height ? down : Math.round((step.y + step.height) * zoom);
     const limit = this.host.textureLimit();
     let samples = Math.max(1, step.samples);
-    let side = Math.max(64, Math.floor(Math.min(limit, Math.sqrt(TILE_TEXELS)) / samples));
-    if (step.whole) {
-      // Filters read past a tile's edge: drawn whole, at fewer samples where it is large.
+    const most = Math.min(limit, Math.sqrt(TILE_TEXELS));
+    // Filters read past what they draw: each tile drawn that much wider, only its own composited.
+    let margin = step.reach > 0 ? Math.ceil(step.reach * zoom) + 2 : 0;
+    let side = Math.floor(most / samples) - 2 * margin;
+    if (side < LEAST_TILE) {
+      // Too far for a margin: drawn whole, at fewer samples where it is large.
+      margin = 0;
       while (
         samples > 1 &&
         (Math.max(x1 - x0, y1 - y0) * samples > limit ||
@@ -558,7 +692,19 @@ export class DisplayBitmaps {
         const w = Math.min(side, x1 - tx);
         const h = Math.min(side, y1 - ty);
         if (
-          !this.host.draw(step.object, placed, tx, ty, w, h, samples, zoom, id, !store.transparent)
+          !this.host.draw(
+            step.object,
+            placed,
+            tx,
+            ty,
+            w,
+            h,
+            samples,
+            zoom,
+            id,
+            !store.transparent,
+            margin,
+          )
         ) {
           return false;
         }
@@ -586,19 +732,6 @@ export class DisplayBitmaps {
       repaint(store);
     }
   }
-}
-
-function newRecord(solid: number, version: number): Record {
-  return {
-    solid,
-    steps: [],
-    version,
-    entry: null,
-    shownZoom: 0,
-    shownAt: 0,
-    wanted: 0,
-    steady: 0,
-  };
 }
 
 /** The Bitmaps showing `store` walked again, as what they show changed though the store did not. */
@@ -734,19 +867,25 @@ function paintDrawsAgain(
   return true;
 }
 
-/** Whether anything in `o` has filters, which read past a tile's edge. */
-function filtered(o: DisplayObject): boolean {
-  if (o.filters.length > 0) {
-    return true;
+/**
+ * How far the filters of `o` and what it holds read past what they draw,
+ * in its own units, those within others' added: half a blur's width a pass
+ * and a shadow's distance, half a convolution's matrix.
+ */
+function reachOf(o: DisplayObject): number {
+  let own = 0;
+  for (const f of o.filters) {
+    const blur = (Math.max(f.blurX ?? 0, f.blurY ?? 0) / 2) * Math.max(1, f.quality ?? 1);
+    const matrix = Math.max(f.matrixX ?? 0, f.matrixY ?? 0) / 2;
+    own += blur + Math.abs(f.distance ?? 0) + matrix;
   }
 
+  let within = 0;
   if (o instanceof Container) {
     for (const child of o.children) {
-      if (filtered(child)) {
-        return true;
-      }
+      within = Math.max(within, reachOf(child));
     }
   }
 
-  return false;
+  return own + within;
 }

@@ -167,8 +167,11 @@ then on. It costs texture memory, the square of the scale times the bitmap's
 (about 33 MB for a stage-sized bitmap shown at 3840 by 2160), at most 256 MB
 for all of them by default (`bitmapResolutionBudget` on the renderer), the GPU
 time of drawing that many more pixels when the SWF draws into a bitmap shown
-so, and the art drawn, which the renderer keeps while the bitmap lives to
-draw it again. It is off by default,
+so, and the art drawn, which the renderer keeps while the bitmap is shown to
+draw it again. A bitmap is drawn at the screen's resolution once a Bitmap
+shows it, from what was drawn into it before: art changed between draws
+before then, such as one Shape redrawn and drawn several times, leaves the
+bitmap as Flash shows it. It is off by default,
 `"stage"`; [Bitmaps](architecture/bitmaps.md) has the details.
 
 It has `load(url | bytes)` and `destroy()`, which

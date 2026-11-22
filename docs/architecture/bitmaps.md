@@ -235,15 +235,20 @@ or one that would not draw the same again from the record (below). Reads
 change no version and leave the record as it is.
 
 Each frame a Bitmap on the stage shows a store with a record, the walk notes
-the screen pixels one of the store's pixels takes there (`DisplayBitmaps.shown`).
-At the next frame's start, where that is more than 1.1, the record is drawn
+the screen pixels one of the store's pixels takes there (`DisplayBitmaps.shown`),
+the largest where several show it, the others then smoothed down. At the next
+frame's start, where that is more than 1.1, the record is drawn
 into a texture of the renderer's own, made at that scale exactly (2.7 stays
 2.7), at most 4, within a texture and 16M texels: each draw as the stage would
 draw the art at that scale, lines, filters and text at that many units a
 pixel, hairlines a texel wide, at the draw's own 4 × 4 samples, in tiles of at
 most 4096 / samples texels a side so the samples' layer never outgrows what a
-draw at a texel a pixel takes; an object with filters, which read past a
-tile's edge, is drawn whole instead, at fewer samples where it is large.
+draw at a texel a pixel takes. Filters read past what they draw: a draw of
+objects with filters draws each tile wider by their reach (half a blur's width
+a pass, a shadow's distance, those within others added) and composites only
+the tile's own texels (`drawIntoTexture`'s margin); where the reach leaves a
+tile narrower than 128 texels, the draw goes whole, at fewer samples where it
+is large.
 Fills fill the texels under them, their edges rounded. From then on each
 draw and fill the record follows goes into the texture too, and the Bitmap
 shows the texture through a quad of its texels, each 1/zoom of a pixel:
@@ -251,8 +256,18 @@ where that lands them one for one on the screen's pixels, on whole pixels
 and read unsmoothed, which gives what the stage drawing the same art gives;
 elsewhere smoothed. While the record no longer stands for the store, the
 Bitmap shows the store as with the option off, its texture let go of. So it
-does where the store is shown at about a pixel a stage pixel, or no Bitmap
-has shown it for 300 frames.
+does where the store is shown at about a pixel a stage pixel, and once no
+Bitmap showing it is on the stage, whether the walk reached it or, standing
+unchanged, took its span as it was. Past the budget, a texture is asked for
+again only every 60 frames.
+
+The record is drawn only once a Bitmap shows the store, so what a draw drew
+must still draw the same then: content that draws one scratch Shape, changed
+between draws, several times before the bitmap is first shown gets no texture,
+and its bitmap shows as with the option off. A record that no Bitmap on the
+stage shows within 300 frames of its last draw, or of its store leaving the
+stage, lets go of what it drew, so a bitmap never shown large (a thumbnail of
+loaded content) does not keep that content alive.
 
 A record can be drawn again only while what it drew would draw the same:
 `DisplayObject.invalidate` stamps each object with `pickWork.changes`
@@ -268,9 +283,10 @@ texture, which takes the old one's place once all of it drew. A record keeps
 at most 256 draws and fills; a fill of the whole store starts it again, so a
 store cleared and drawn into on every frame keeps one frame's.
 
-After a lost context the texture is not made again: what the store's own
-texture held of the draws was lost too, and the Bitmap shows the store, as
-with the option off, till its record starts again.
+A lost context ends every record begun before it, with a texture or not
+(DisplayBitmaps' `generation`): what the store's own texture held of the
+draws may have gone with it, which no version of the store tells, and the
+Bitmap shows the store, as with the option off, till its record starts again.
 
 What it costs: a store's texture takes zoom² times the store's memory, at
 most 64 MB, and the textures together 256 MB by default
@@ -280,10 +296,10 @@ are shown as they are. Each draw the record follows into a texture renders
 zoom² times the pixels again, in more tiles for a large store, beside the
 store's own draw; each draw into a store with a record walks the drawn
 subtree once more to note what it samples. The record is the store's alone
-(a WeakMap keyed by it) and holds the objects drawn while the store lives, so
-art drawn and dropped lives as long as its bitmap does; nothing outside the
-store reaches the record, so a store let go of goes with its record and its
-texture.
+(a WeakMap keyed by it) and holds the objects drawn while its bitmap is shown
+or waits to be, so art drawn and dropped lives as long as that; nothing
+outside the store reaches the record, so a store let go of goes with its
+record and its texture.
 
 ## A SWF's bitmaps
 

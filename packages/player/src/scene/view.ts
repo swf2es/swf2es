@@ -296,6 +296,8 @@ export class RenderView implements Drawer {
    * the frame's walk would.
    */
   private snapshotting = false;
+  /** The top of the display list the last render walked: the stage, for what is on it. */
+  private walkedTop: DisplayObject | null = null;
   /** The stores shown at display resolution, under RenderViewOptions' `bitmapResolution`; null without. */
   private readonly displayBitmaps: DisplayBitmaps | null;
   /** Target pixels a pixel of what filters run on, where not the scale: in a 3D object's bitmap. */
@@ -363,8 +365,9 @@ export class RenderView implements Drawer {
             this.textures,
             {
               textureLimit: () => this.textureLimit,
-              draw: (o, m, x, y, width, height, samples, zoom, id, opaque) =>
-                this.drawTexels(o, m, x, y, width, height, samples, zoom, id, opaque),
+              draw: (o, m, x, y, width, height, samples, zoom, id, opaque, margin) =>
+                this.drawTexels(o, m, x, y, width, height, samples, zoom, id, opaque, margin),
+              stage: () => this.walkedTop,
               fill: (id, r, pixel) =>
                 this.backend.fillTexture(this.textures, id, r.x, r.y, r.width, r.height, pixel),
             },
@@ -415,6 +418,7 @@ export class RenderView implements Drawer {
 
   /** The context came back: the backend made again, and every texture added again as it is drawn. */
   private readonly restored = () => {
+    this.displayBitmaps?.contextLost();
     this.drawnRoot = null;
     this.spans.drop();
     this.backend.restore(this.geometries);
@@ -619,6 +623,7 @@ export class RenderView implements Drawer {
       top = top.parent;
     }
 
+    this.walkedTop = top;
     const free = spans.begin(this.scene, this.rows, this.keptGeneration, top);
     this.scene = free.scene;
     this.rows = free.rows;
@@ -2077,7 +2082,8 @@ export class RenderView implements Drawer {
   /**
    * `o` drawn as `drawInto` draws it, through `m` in a store's pixels at
    * `zoom` texels a pixel, into `width` by `height` texels of texture `id`
-   * at (x, y): a store's draw at display resolution (DisplayBitmaps).
+   * at (x, y): a store's draw at display resolution (DisplayBitmaps), drawn
+   * `margin` texels wider each way for filters to read past its edges.
    */
   private drawTexels(
     o: DisplayObject,
@@ -2090,16 +2096,21 @@ export class RenderView implements Drawer {
     zoom: number,
     id: number,
     opaque: boolean,
+    margin: number,
   ): boolean {
     if (this.gl.isContextLost()) {
       return false;
     }
 
+    // Drawn `margin` texels wider each way, only what lies within composited.
+    const across = width + 2 * margin;
+    const down = height + 2 * margin;
+    const shifted = margin ? { ...m, tx: m.tx + margin / zoom, ty: m.ty + margin / zoom } : m;
     const drawn = this.drawAlone(
       o,
-      m,
-      width,
-      height,
+      shifted,
+      across,
+      down,
       samples,
       (n) =>
         this.backend.drawIntoTexture(
@@ -2111,13 +2122,14 @@ export class RenderView implements Drawer {
           this.filters,
           this.keeps,
           this.target,
-          width,
-          height,
+          across,
+          down,
           n,
           id,
           x,
           y,
           opaque,
+          margin,
         ),
       zoom,
     );

@@ -31,6 +31,7 @@ function follower(budget = 1 << 30) {
     new Textures(),
     {
       textureLimit: () => 16384,
+      stage: () => null,
       draw: (_o, _m, _x, _y, _w, _h, _samples, zoom) => {
         draws.push(zoom);
         return true;
@@ -150,6 +151,28 @@ test("a draw that changes colours, shows the store itself or whose object change
   display.shown(changed, 2);
   display.frame();
   assert.equal(display.texture(changed), null);
+});
+
+test("a record no Bitmap shows for 300 frames lets go of what it drew; a lost context ends it", (t) => {
+  const { display } = follower();
+  t.after(() => display.destroy());
+
+  const unshown = new BitmapStore(20, 20, true, 0);
+  draw(display, unshown, new ShapeObject(null));
+  for (let i = 0; i < 301; i++) {
+    display.frame();
+  }
+
+  display.shown(unshown, 2);
+  display.frame();
+  assert.equal(display.texture(unshown), null);
+
+  const lost = new BitmapStore(20, 20, true, 0);
+  draw(display, lost, new ShapeObject(null));
+  display.contextLost();
+  display.shown(lost, 2);
+  display.frame();
+  assert.equal(display.texture(lost), null);
 });
 
 test("each change of a display object stamps it later than any draw before", () => {
