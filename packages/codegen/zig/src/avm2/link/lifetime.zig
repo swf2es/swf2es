@@ -311,7 +311,7 @@ fn vacate(dom: *Domain, domain: u32) Allocator.Error!void {
     const gpa = dom.gpa;
     try dom.abcs.push(gpa, &no_abc);
     try dom.abcDomain.push(gpa, domain);
-    try dom.abcBase.push(gpa, no_bytes.ptr);
+    try dom.abcBase.push(gpa, &no_bytes);
     try dom.abcBuffer.push(gpa, &no_bytes);
     try dom.abcVerified.push(gpa, 0);
     try dom.abcWeight.push(gpa, 0);
@@ -674,7 +674,7 @@ pub fn loadDomain(loaded: *Loaded, words: []const u8) Allocator.Error!bool {
         try loaded.flags.append(gpa, @truncate(reader.next()));
         try loaded.lengths.append(gpa, reader.next());
         try dom.abcBuffer.push(gpa, &no_bytes);
-        try dom.abcBase.push(gpa, no_bytes.ptr);
+        try dom.abcBase.push(gpa, &no_bytes);
     }
 
     const entries = reader.count(5);

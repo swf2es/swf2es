@@ -59,6 +59,13 @@ const exports = [_][]const u8{
     "domainLogMark",
     "domainLogSince",
     "domainReplay",
+    "domainCompact",
+    "domainRebuildStep",
+    "domainSaveBytes",
+    "domainSavedAbcBytes",
+    "domainLoad",
+    "domainLoadAbc",
+    "domainLoadRebuild",
 };
 
 /// What the test build exports beside them.
@@ -88,6 +95,7 @@ const testing_exports = exports ++ [_][]const u8{
     "domainEmitEach",
     "domainEmitEachBytes",
     "domainPartBudget",
+    "domainRebuild",
     "avm1Opcodes",
     "avm1Dump",
     "avm1Check",

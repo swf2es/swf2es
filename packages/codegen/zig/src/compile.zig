@@ -82,6 +82,9 @@ pub fn callStarts() void {
 pub fn release() void {
     forgetModules();
     forgetVerified();
+    dropRebuild();
+    dropLoading();
+    revived_bottom = -1;
     if (current) |box| {
         unmake(box);
         current = null;
@@ -128,6 +131,8 @@ pub fn domainAdd(bytes: []const u8, builtin: bool, appDomain: i32) Allocator.Err
 
 /// A new application domain, a child of `parent`'s: its number, or -1 if `parent` was never made or was dropped.
 pub fn domainChild(parent: i32) Allocator.Error!i32 {
+    // A rebuild under way shares the domain tree this grows.
+    leaveRebuild();
     if (!isLive(try domain(), parent)) {
         return -1;
     }
@@ -186,16 +191,39 @@ pub fn domainRestore(index: i32, bytes: []const u8) Allocator.Error!i32 {
 /// that needs a rebuild (1, or 2 `stepped`) waits for stage 6's: until
 /// then no rebuild ever is, so none needs one.
 pub fn domainRevive(appDomain: i32, stepped: bool) Allocator.Error!i32 {
-    _ = stepped;
     abandon();
     const dom = try domain();
     if (appDomain < 0) {
         return -1;
     }
 
-    const revived = lifetime.revive(dom, @intCast(appDomain));
-    std.debug.assert(revived <= 0);
-    return revived;
+    const bottom: u32 = @intCast(appDomain);
+    const top = if (bottom < dom.domainState.len) lifetime.evictedTop(dom, bottom) else bottom;
+    const revived = lifetime.revive(dom, bottom);
+    if (revived <= 0) {
+        return revived;
+    }
+
+    if (stepped) {
+        startRebuild(newRebuild(dom, null) catch |err| {
+            lifetime.unrevive(dom, bottom, top);
+            return err;
+        }, partBudget());
+        revived_bottom = appDomain;
+        revived_top = top;
+        return 2;
+    }
+
+    const done = domainRebuild(false) catch |err| {
+        lifetime.unrevive(dom, bottom, top);
+        return err;
+    };
+    if (!done) {
+        lifetime.unrevive(dom, bottom, top);
+        return -1;
+    }
+
+    return 1;
 }
 
 /// Record what application domain `appDomain` has found by a name, in the
@@ -311,6 +339,8 @@ fn abandon() void {
 
         pending = null;
     }
+
+    leaveRebuild();
 }
 
 /// The kept and pending modules let go of, and their memory with them.
@@ -1074,4 +1104,277 @@ fn replayed(dom: *Domain, kind: u8, abc: u32, a: u32, b: u32) Allocator.Error!bo
     };
     const t = if (b < owners) lifetime.traitsOf(dom, abc, a, b) else -1;
     return t >= 0 and try dom.traits.resolve(dom, @intCast(t)) == 0;
+}
+
+// The rebuild, saving and loading (compile.ts tells each export's why).
+
+/// A rebuild under way: the new domain it builds, in an arena of its own,
+/// and the domain it builds from where that is not the current one but a
+/// loaded one, given back with it.
+const Rebuilding = struct {
+    box: *Box,
+    source: ?*Box,
+    rebuild: lifetime.Rebuild,
+};
+
+/// The rebuild a part at a time and the garbage each part may make, and the
+/// evicted domains it revives, from `revived_bottom` up to `revived_top`;
+/// -1 for none.
+var rebuilding: ?*Rebuilding = null;
+var rebuilding_budget: u64 = 0;
+var revived_bottom: i32 = -1;
+var revived_top: u32 = 0;
+
+/// The domain domainLoad started, until domainLoadRebuild, and the garbage its parts may make.
+const Loading = struct {
+    box: *Box,
+    loaded: lifetime.Loaded,
+};
+var loading: ?*Loading = null;
+var loading_budget: u64 = 0;
+
+/// A rebuild of `from`, `source`'s domain if one is given, into a new domain.
+fn newRebuild(from: *Domain, source: ?*Box) Allocator.Error!*Rebuilding {
+    const pages = memory.pages().allocator();
+    const r = try pages.create(Rebuilding);
+    errdefer pages.destroy(r);
+    const box = try make(from.apiVersion);
+    errdefer unmake(box);
+    r.* = .{ .box = box, .source = source, .rebuild = try .init(from, &box.dom) };
+    return r;
+}
+
+/// A rebuild's new domain, and the loaded one it built from, given back.
+fn freeRebuild(r: *Rebuilding) void {
+    unmake(r.box);
+    if (r.source) |source| {
+        unmake(source);
+    }
+
+    memory.pages().allocator().destroy(r);
+}
+
+fn dropRebuild() void {
+    if (rebuilding) |r| {
+        freeRebuild(r);
+        rebuilding = null;
+    }
+}
+
+fn dropLoading() void {
+    if (loading) |l| {
+        unmake(l.box);
+        memory.pages().allocator().destroy(l);
+        loading = null;
+    }
+}
+
+/// Start `r`, for domainRebuildStep to do a part of `budget` bytes of garbage at a time.
+fn startRebuild(r: *Rebuilding, budget: u64) void {
+    dropRebuild();
+    rebuilding = r;
+    rebuilding_budget = budget;
+}
+
+/// Leave the rebuild under way, which changed nothing of the domain but
+/// what it revives.
+fn leaveRebuild() void {
+    if (rebuilding != null) {
+        dropRebuild();
+        unreviveRebuilt();
+        if (current) |box| {
+            box.dom.decoder = null;
+        }
+    }
+}
+
+/// Evict again the domains a rebuild that failed or was left was reviving, as revive found them.
+fn unreviveRebuilt() void {
+    if (revived_bottom >= 0) {
+        if (current) |box| {
+            lifetime.unrevive(&box.dom, @intCast(revived_bottom), revived_top);
+        }
+
+        revived_bottom = -1;
+    }
+}
+
+/// A part of `r`, in a Change of its new domain: whether done. Running out
+/// of memory leaves the new domain to be given back.
+fn stepRebuild(r: *Rebuilding, budget: u64) Allocator.Error!bool {
+    return domain_.changed(&r.box.dom, &r.box.arena, stepFresh, .{ &r.rebuild, budget });
+}
+
+fn stepFresh(_: *Domain, rebuild: *lifetime.Rebuild, budget: u64) Allocator.Error!bool {
+    return rebuild.step(budget);
+}
+
+/// Make `r`'s new domain the domain, if it did not fail: whether it was.
+/// The old one is given back, with what was kept of it.
+fn rebuilt(r: *Rebuilding) bool {
+    if (r.rebuild.failed) {
+        freeRebuild(r);
+        return false;
+    }
+
+    // A closure's scope is found by verifying its ABC, which domainEmitEach
+    // does once for its first method: the new domain has none found yet.
+    forgetVerified();
+    forgetModules();
+    const old = current;
+    current = r.box;
+    current.?.dom.decoder = null;
+    if (old) |box| {
+        unmake(box);
+    }
+
+    if (r.source) |source| {
+        unmake(source);
+    }
+
+    memory.pages().allocator().destroy(r);
+    return true;
+}
+
+/// Rebuild the domain without the ABCs of domains not live, once memory
+/// would otherwise grow and they hold enough to keep it from growing:
+/// whether it was (or, `stepped`, started).
+pub fn domainCompact(stepped: bool) Allocator.Error!bool {
+    const dom = try domain();
+    if (!lifetime.wantsRebuild(dom, partBudget(), part_budget, lifetime.WANT_InPlace)) {
+        return false;
+    }
+
+    return domainRebuild(stepped);
+}
+
+/// The domain built again from its live ABCs, worth it or not; false,
+/// leaving it, if one did not link. With `stepped`, started, for
+/// domainRebuildStep to do a part at a time.
+pub fn domainRebuild(stepped: bool) Allocator.Error!bool {
+    abandon();
+    const r = try newRebuild(try domain(), null);
+    if (stepped) {
+        startRebuild(r, partBudget());
+        return true;
+    }
+
+    _ = stepRebuild(r, std.math.maxInt(u64)) catch |err| {
+        freeRebuild(r);
+        return err;
+    };
+    return rebuilt(r);
+}
+
+/// The next part of the rebuild domainCompact, domainRevive or
+/// domainLoadRebuild started: 0 while some is left, 1 once done, -1 if it
+/// failed, leaving the domain as it was and a domain being revived
+/// evicted, or if none was started. Running out of memory fails it too.
+pub fn domainRebuildStep() Allocator.Error!i32 {
+    const r = rebuilding orelse return -1;
+    const done = stepRebuild(r, rebuilding_budget) catch |err| {
+        rebuilding = null;
+        freeRebuild(r);
+        unreviveRebuilt();
+        return err;
+    };
+    if (!done) {
+        return 0;
+    }
+
+    rebuilding = null;
+    if (rebuilt(r)) {
+        revived_bottom = -1;
+        return 1;
+    }
+
+    unreviveRebuilt();
+    if (current) |box| {
+        box.dom.decoder = null;
+    }
+
+    return -1;
+}
+
+/// What a rebuild reads of the domain but its ABCs' bytes, for another
+/// instance to rebuild it in a memory of its own (domainLoad).
+pub fn domainSaveBytes(gpa: Allocator) Allocator.Error![]const u8 {
+    const dom = try domain();
+    var out: std.ArrayList(u8) = .empty;
+    try lifetime.saveDomain(dom, gpa, &out);
+    return out.items;
+}
+
+/// The bytes of live ABC `index`, as added, for domainLoadAbc; null, no address, for another.
+pub fn domainSavedAbcBytes(index: i32) Allocator.Error!?[]const u8 {
+    const dom = try domain();
+    if (index < 0 or !lifetime.savedLive(dom, @intCast(index))) {
+        return null;
+    }
+
+    return lifetime.savedBytes(dom, @intCast(index));
+}
+
+/// In a new instance, start a domain as another's domainSaveBytes saved
+/// it: whether the words were that, for domainLoadAbc to give its live ABCs
+/// and domainLoadRebuild to rebuild it.
+pub fn domainLoad(words: []const u8) Allocator.Error!bool {
+    abandon();
+    dropLoading();
+    const dom = try domain();
+    const pages = memory.pages().allocator();
+    const l = try pages.create(Loading);
+    errdefer pages.destroy(l);
+    const box = try make(dom.apiVersion);
+    errdefer unmake(box);
+    l.* = .{ .box = box, .loaded = .{ .dom = &box.dom } };
+    if (!try lifetime.loadDomain(&l.loaded, words)) {
+        unmake(box);
+        pages.destroy(l);
+        return false;
+    }
+
+    // The rebuild's parts held to the garbage that size allowed for, as the
+    // old instance's wantsRebuild counted it; memory grown at once, by a
+    // block given back at once.
+    loading_budget = part_budget;
+    const size = lifetime.loadedSize(&l.loaded, loading_budget);
+    if (size >= lifetime.MOVE_Limit) {
+        unmake(box);
+        pages.destroy(l);
+        return false;
+    }
+
+    pages.free(try pages.alloc(u8, @intCast(size)));
+    loading = l;
+    return true;
+}
+
+/// Give ABC `index` of the domain domainLoad started its bytes: 0, -1, or a VerifyError.
+pub fn domainLoadAbc(index: i32, bytes: []const u8) Allocator.Error!i32 {
+    const l = loading orelse return -1;
+    if (index < 0) {
+        return -1;
+    }
+
+    return lifetime.loadAbc(&l.loaded, @intCast(index), bytes);
+}
+
+/// Start rebuilding the domain domainLoad started, given all its live ABCs,
+/// as the domain this instance compiles once domainRebuildStep is done:
+/// whether it was started.
+pub fn domainLoadRebuild() Allocator.Error!bool {
+    const l = loading orelse return false;
+    if (!lifetime.loadedAll(&l.loaded)) {
+        return false;
+    }
+
+    abandon();
+    forgetVerified();
+    forgetModules();
+    const r = try newRebuild(&l.box.dom, l.box);
+    memory.pages().allocator().destroy(l);
+    loading = null;
+    startRebuild(r, loading_budget);
+    return true;
 }

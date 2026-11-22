@@ -302,6 +302,42 @@ pub export fn domainReplay(log: [*]const u8, log_len: u32, index: i32) bool {
     return orFailed(bool, avm2.domainReplay(gpa(), staged(u8, log, log_len), index));
 }
 
+pub export fn domainCompact(stepped: bool) bool {
+    return orFailed(bool, avm2.domainCompact(stepped));
+}
+
+pub export fn domainRebuild(stepped: bool) bool {
+    return orFailed(bool, avm2.domainRebuild(stepped));
+}
+
+pub export fn domainRebuildStep() i32 {
+    return avm2.domainRebuildStep() catch |err| {
+        _ = fail(err);
+        return -1;
+    };
+}
+
+pub export fn domainSaveBytes() usize {
+    return handOut(avm2.domainSaveBytes(gpa()) catch |err| return fail(err));
+}
+
+pub export fn domainSavedAbcBytes(index: i32) usize {
+    const bytes = avm2.domainSavedAbcBytes(index) catch |err| return fail(err);
+    return if (bytes) |b| handOut(b) else handOutNone();
+}
+
+pub export fn domainLoad(words: [*]const u8, len: u32) bool {
+    return orFailed(bool, avm2.domainLoad(staged(u8, words, len)));
+}
+
+pub export fn domainLoadAbc(index: i32, bytes: [*]const u8, len: u32) i32 {
+    return orFailed(i32, avm2.domainLoadAbc(index, staged(u8, bytes, len)));
+}
+
+pub export fn domainLoadRebuild() bool {
+    return orFailed(bool, avm2.domainLoadRebuild());
+}
+
 pub export fn domainUsage() usize {
     return handOut(avm2.domainUsage(gpa()) catch |err| return fail(err));
 }
