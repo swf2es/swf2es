@@ -302,6 +302,10 @@ of its own.
 
 ### AssemblyScript (`packages/codegen/assembly`)
 
+- **Frozen during the port to Zig** (docs/zig-codegen.md on branch
+  `zig/stage-0`): change nothing here but fixes, each made in both
+  compilers, so that the port's stages are not chasing a moving target.
+
 - Group files by bytecode, then by compiler stage (`avm2/abc/`, `avm2/link/`,
   `avm2/ir/`, `avm2/emit/`), not by kind: no `utils/`. A helper lives next to
   its only user; what AVM1 and AVM2 come to share lives beside `avm2/`.
