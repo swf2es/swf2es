@@ -163,11 +163,11 @@ function libraries(c: Compiler, r: Results, version: number, list: [string, Uint
 
   for (const [index, [name]] of list.entries()) {
     r.case(`module ${name} at ${version}`, () => {
-      const parts = [handed(c, c.domainModuleBytes("", index, true, false))];
+      // Each part copied as it is handed out: any call may grow memory.
+      const parts = [handed(c, c.domainModuleBytes("", index, true, false)).slice()];
       while (!c.domainModuleDone()) {
-        parts[parts.length - 1] = parts[parts.length - 1].slice();
         c.__collect();
-        parts.push(handed(c, c.domainModuleMoreBytes()));
+        parts.push(handed(c, c.domainModuleMoreBytes()).slice());
       }
 
       return r.blob(`module ${name} at ${version}`, Buffer.concat(parts));
@@ -1466,10 +1466,10 @@ function emitLast(c: Compiler, r: Results, name: string, count: number): void {
 function moduleLast(c: Compiler, r: Results, name: string, budget: number): void {
   linked(c, r, `${name}: module`, () => {
     c.domainPartBudget(budget);
-    const parts = [handed(c, c.domainModuleBytes("", -1, true, false))];
+    // Each part copied as it is handed out: any call may grow memory.
+    const parts = [handed(c, c.domainModuleBytes("", -1, true, false)).slice()];
     while (!c.domainModuleDone()) {
-      parts[parts.length - 1] = parts[parts.length - 1].slice();
-      parts.push(handed(c, c.domainModuleMoreBytes()));
+      parts.push(handed(c, c.domainModuleMoreBytes()).slice());
     }
 
     c.domainPartBudget(0);
