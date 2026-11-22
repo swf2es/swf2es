@@ -20,12 +20,13 @@ git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/a
                               # vendor/minimp3, vendor/zlib, vendor/lzma-sdk, vendor/libtess2 and vendor/jxrlib
                               # (C compiled into packages/native's wasm)
 pnpm install
-pnpm build       # asc → codegen.wasm, then tsc -b for all packages, then the browser build
+pnpm build       # asc → codegen.wasm, the pinned Zig → codegen-zig.wasm (docs/zig-codegen.md;
+                 # Zig downloaded once), then tsc -b for all packages, then the browser build
 pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
-pnpm test        # unit, conformance, library, program, fuzz, player, web, site, packaging and
-                 # desktop tests (needs podman or docker, and Chrome; CHROME names another
+pnpm test        # unit, conformance, library, program, fuzz, parity, player, web, site, packaging
+                 # and desktop tests (needs podman or docker, and Chrome; CHROME names another
                  # browser; the desktop's are skipped without Electron's binary)
 pnpm test:checked # the same with every array access bounds-checked, and the player's
                   # shortcuts and the renderer's spans checked against full walks
@@ -190,6 +191,15 @@ pnpm as3:format               # format them and the tests' scripts with Apache R
                               # the PATH); tools/as3-format.ts names what it leaves as written
 SWF2ES_PLAYERGLOBAL=adobe ... # the unit, player, web and corpus tests on Flash Player's
                               # playerglobal in place of the player's own (tests/player/libraries.ts)
+node packages/codegen/zig/build.ts [--update | --verify]   # the compiler in Zig while it is
+                              # ported (docs/zig-codegen.md), as pnpm build builds it; --update runs
+                              # its inline tests (zig build test in packages/codegen/zig), builds with
+                              # fresh caches and writes zig/digests.json, --verify fails where they
+                              # differ (CI's zig job)
+node tests/parity/run.ts [suite...]   # the compiler in Zig's results against AssemblyScript's,
+                              # byte for byte, and its 0xAA build's against its own (CI's zig job)
+SWF2ES_CODEGEN=zig ...        # the CLI, the codegen unit tests and the Chrome tests' pages on the
+                              # compiler in Zig, as far as it is ported
 pnpm --filter @swf2es/native build:wasm   # rebuild packages/native's wasm (compress, mp3, and render:
                               # bitmap, tessellate, lines) with the pinned Zig, after the zig tests;
                               # pnpm build only checks their inputs' digests

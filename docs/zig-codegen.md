@@ -1,13 +1,13 @@
 # The compiler in Zig
 
-Status: draft, design and migration plan only, for review. Read against
-`dev` at fcecef29 (the merge of #1183) and #1185 (open, `perf/codegen-memory`).
-The earlier spikes are on local branches, `experiment/zig-abc` and
-`experiment/zig-avm1`. Where this says "estimate", nothing was measured
-for this draft; where it says "to check", the code was not read to
-confirm it.
+Status: under way, on stacked pull requests from stage 0 (`zig/stage-0`,
+on `dev` at 52aac10d, the merge of #1185). The plan was read against
+`dev` at fcecef29 and #1185; the earlier spikes are on local branches,
+`experiment/zig-abc` and `experiment/zig-avm1`. Where this says
+"estimate", nothing was measured; where it says "to check", the code was
+not read to confirm it.
 
-Decided since the draft:
+Decided:
 
 - **Stacked pull requests, nothing merged to `dev` until the port is
   complete.** Each stage is a pull request on the one before it (stage
@@ -16,9 +16,22 @@ Decided since the draft:
   compiler, the switch or the parity job; they arrive with the stack.
   When a stage below is merged into its base, the ones above are
   retargeted first, before its branch is deleted.
-- **`assembly/` is frozen** from the start of the port (after #1185
-  lands) until the swap, but for fixes, each of which is made in both.
-  Section 10's first question is answered by this.
+- **`assembly/` is frozen** from the merge of #1185 (52aac10d) until the
+  swap, but for fixes, each of which is made in both. Section 10's first
+  question is answered by this.
+- **Inside `@swf2es/codegen`**, at `packages/codegen/zig/` (`build.zig`,
+  `src/`, each file's tests at its end), beside `assembly/`; not in
+  `@swf2es/native`, which shares only the toolchain (`tools/zig.ts`).
+- **Zig 0.17.0, pinned for good; ReleaseSafe shipped;** M1's memory
+  (section 2): a bump arena per call and one per `Domain`, over a page
+  allocator of fixed chunks that never doubles memory.
+- **The Zig wasm is built, not checked in.** Only digests are
+  (`packages/codegen/zig/digests.json`); `pnpm build` runs the pinned Zig,
+  downloaded once by `tools/zig.ts`, and CI builds it again and compares
+  (section 7).
+- **A panic is recovered from**: the wrapper makes a fresh instance and
+  adds the live ABCs again, and the load that panicked fails as a
+  VerifyError would (section 7).
 
 ## Why
 
@@ -331,9 +344,13 @@ What Zig adds to the purity rule, since nothing zeroes its memory:
 
 - An arena hands back memory with the last call's bytes in it. Where
   AssemblyScript relied on `new StaticArray` being zero, the port
-  allocates zeroed. A test build fills every freed chunk and every reset
-  arena with 0xAA and must give the same modules; `pnpm determinism`
-  runs it in place of the checked build.
+  allocates zeroed (`memory.allocZeroed`). A test build,
+  `testing-zig-poison.wasm`, fills every freed run and every rolled-back
+  allocation with 0xAA and must give the same modules: the parity
+  harness compares it with `codegen-zig.wasm` on every suite, and under
+  `SWF2ES_CODEGEN=zig` `testing-module.ts` loads it where the checked
+  build is asked for, so that `pnpm determinism` runs it in place of the
+  checked build.
 - No address is ever hashed, compared or written; no `std.HashMap` is
   iterated into output (`IdTable` is ported as it is).
 - Indices and sizes are `u32`, not `usize`, wherever they are stored or
@@ -381,7 +398,11 @@ Recommended:
   builds beside them. `SWF2ES_CODEGEN=zig` makes the node loaders (the
   CLI's, `tests/unit/codegen/testing-module.ts`, the test packages') and
   the Chrome tests' pages load the second. `createCodegen` itself reads
-  no environment; it tells the two by their exports.
+  no environment; it tells the two by their exports. `SWF2ES_CODEGEN`
+  already named a directory holding another copy of the release build,
+  for the A/B benchmarks (`tests/programs/ab.ts`); `zig`, and `as` after
+  the swap, are compilers' names, and any other value is still such a
+  directory.
 - Until stage 6 the Zig module is not a compiler: the switch is only
   good for the stages it has, and the harness skips the rest.
 - Not recommended: one `Codegen` over both, Zig's AVM1 with
@@ -428,10 +449,9 @@ compared: they report memory, which differs by design.
 - The same corpus run natively and compared with the wasm's output by
   digest, which is what "native equals wasm" means in section 8.
 
-**CI.** During the port: a `parity` job builds both compilers and runs
-the harness on the stages the Zig one has; the `lint` job rebuilds the
-Zig wasm with the pinned Zig and fails on a difference from the one
-checked in, as it does for `packages/native`. The existing jobs stay on
+**CI.** During the port: a `zig` job runs the inline tests, builds the
+Zig wasm again with fresh caches and fails on a difference from
+`digests.json`, and runs the harness on the stages the Zig one has. The existing jobs stay on
 AssemblyScript. Before the swap: the whole of `pnpm test`, `pnpm
 corpus` and `pnpm tamarin:swf2es` once with `SWF2ES_CODEGEN=zig`, in CI.
 After the swap: the jobs run on Zig, and the parity job runs with the
@@ -483,14 +503,15 @@ For AVM2, from reading `assembly/`:
 - **Zeroed memory.** `new StaticArray<T>(n)` and a grown `Array` are
   zero (section 3).
 - **Strings across the API.** `domainFound`'s URI and name arrive as
-  UTF-16 and `internText` encodes them with `String.UTF8.encode`, which
-  keeps a lone surrogate as three bytes where `TextEncoder` writes
-  U+FFFD (to check); the wrapper encodes those two as AssemblyScript
-  does. Going out, `String.UTF8.decodeUnsafe` turns an ABC's bytes into
+  UTF-16 and `internText` encodes them with `String.UTF8.encode`, whose
+  default error mode is WTF-8: a lone surrogate is three bytes, where
+  `TextEncoder` writes U+FFFD. The wrapper encodes every string so
+  (`toUtf8` in `src/zig.ts`). Going out, `String.UTF8.decodeUnsafe` turns an ABC's bytes into
   the string an export returns (`avm1/compile.ts`, `emit/refs.ts`),
-  without `TextDecoder`'s replacement of invalid sequences. Each export
-  that changes from a string to bytes is compared on names that are not
-  valid UTF-8.
+  without `TextDecoder`'s replacement of invalid sequences; the wrapper
+  decodes as it does (`fromUtf8`: `TextDecoder` where the bytes are valid
+  UTF-8, AssemblyScript's reading where not). Each export that changes
+  from a string to bytes is compared on names that are not valid UTF-8.
 - **Text in the emitters.** `Output.text` writes the low byte of each
   UTF-16 unit; the emitters' own text is ASCII. Some 370 lines build a
   name or a snippet as a template string first. Writing those straight
@@ -504,10 +525,11 @@ For AVM2, from reading `assembly/`:
 - **`Math.fround`, `Math.imul`**: `@floatCast` and `*%`.
 - **Recursion.** The structure emitter, the dominator walk and
   `Output.uint` recurse. Frames differ in size, so a pathological input
-  may overflow one compiler's stack and not the other's. Zig's stack is
-  placed first in memory so that an overflow traps and cannot write
-  into the heap (to check with Zig 0.17's linker options), and
-  its size is set from the deepest the fuzzers and the corpus reach.
+  may overflow one compiler's stack and not the other's. Zig 0.17's
+  linker places the stack first in memory (`__stack_pointer` starts at
+  the stack's size, the static data after it), so an overflow traps and
+  cannot write into the heap. Its size, 1 MiB in stage 0, is to be set
+  from the deepest the fuzzers and the corpus reach.
 - **`rows()`, `weigh`, `memory.size()`** feed only the compaction
   policy, never a module. M1 ports them with Zig's own row sizes.
 
@@ -529,19 +551,26 @@ more:
 
 - The pinned Zig 0.17.0 through `tools/zig.ts` (`findZig`,
   `ZIG_VERSION`), never upgraded.
-- `packages/codegen/build.ts`, on the helper `packages/native/build.ts`
-  is made of, moved to `tools/` to be shared: it runs `zig build test`,
-  then `zig build`, and writes `packages/codegen/wasm/codegen.wasm` and
-  `testing.wasm` with a digest of their inputs (the Zig sources,
-  `build.zig`, `ZIG_VERSION`). `--check` verifies the digest without a
-  toolchain, and `pnpm build` runs it, copies the wasm to `dist/` and
-  stamps it. Ordinary builds and `pnpm install` need no Zig.
-- The binaries are checked in as files, not base64: hosts fetch
-  `codegen.wasm` by URL (`@swf2es/codegen/codegen.wasm`), and the
-  browser build copies it beside the bundle.
-- CI's `lint` job rebuilds and runs `git diff --exit-code` on them, as
-  it does for native's `binary.ts`. The slice's builds were
-  deterministic.
+- `packages/codegen/zig/build.ts`, on `tools/zig.ts`'s `runZig` and
+  `inputDigest`: `pnpm build` runs it after asc. It builds
+  `dist/codegen-zig.wasm`, stamped by `stamp.ts` as `codegen.wasm` is,
+  and the test builds `dist-test/testing-zig.wasm` and
+  `testing-zig-poison.wasm`. Nothing is checked in but
+  `packages/codegen/zig/digests.json`: the digest of the inputs (the Zig
+  sources, `build.zig`, `build.ts`, `stamp.ts`, `ZIG_VERSION`) and each
+  module's SHA-256. A build whose inputs are the digested ones must give
+  those modules, or fails; one whose modules are already those does
+  nothing, and needs no Zig. Zig's caches are kept in
+  `~/.cache/swf2es/zig-codegen-cache`: the first build compiles Zig's
+  build runner, about 70 s, later ones take under a second. `--update`
+  runs `zig build test`, builds with fresh caches and writes the digests.
+- Every `pnpm build` thus needs the pinned Zig: from the PATH, or
+  downloaded once (`tools/zig.ts` has the Linux and macOS releases; on
+  Windows it must be on the PATH). CI caches it and Zig's caches.
+- CI's `zig` job runs `build.ts --verify`: the inline tests, a build with
+  fresh caches, and a failure where the inputs or a module are not
+  `digests.json`'s. The builds are deterministic: the same digests from
+  fresh and kept caches, here and in CI.
 - `build.zig` names the exports (`export_symbol_names`), disables the
   entry, builds `wasm32-freestanding` with bulk memory, nontrapping
   float-to-int, sign extension and mutable globals, single-threaded and
@@ -557,11 +586,22 @@ It also ends the separate checked build: `pnpm test:checked`,
 `dist-test-checked` and `SWF2ES_CHECKED` go, since the shipped build is
 the checked one.
 
-A panic is `env.abort` and a trap. The wrapper turns it into an error
-for the load that was compiling and marks the instance unusable; what
-happens next is an open question (section 10). Running out of memory is
-not a panic: it is `error.OutOfMemory` up to the export and a sticky
-code.
+A panic is `env.abort`, with its message, and a trap. `src/zig.ts`
+throws it as a `CodegenPanic` and marks the instance dead: every later
+call throws one too. As decided, `createCodegen` then recovers, in the
+stage that ports the save and load (6): a fresh instance, the live ABCs
+added again from what the dead one saves, or from the player's journal
+where it cannot save, and the load that panicked returns a VerifyError
+as a rejected ABC does. A trap leaves the instance's memory readable,
+but the call it stopped half done: each entry that changes the domain
+keeps its arena's mark and its tables' states for the length of the call
+(as it does to roll back when it runs out of memory), and saving first
+rolls back an entry a panic stopped, so that what is saved is the domain
+before the load that panicked. The wrapper
+already swaps instances for #1185's moves, so recovery is one more way
+to `moved()`. Running out of memory is not a panic: it is
+`error.OutOfMemory` up to the export and a sticky code
+(`codegenError()`), thrown by the wrapper as asc's trap was.
 
 **Size.** There is no stated budget for the browser build; `swf2es.js`
 is 1.88 MB and `worker.js` 1.79 MB beside the wasm's 0.26 MB. From the
@@ -571,6 +611,12 @@ ReleaseSmall and 450 to 550 KB in ReleaseFast or ReleaseSafe, perhaps
 170 to 200 KB gzipped against 94. Speed from the slice: ReleaseSafe
 0.73 to 0.85 of AssemblyScript's time before the idiomatic pass, about
 equal after it; `std.Io.Writer` cost about 9%.
+
+Stage 0's scaffold (memory, panics, the ABI, two exports), ReleaseSafe:
+`codegen-zig.wasm` 3,863 bytes, 1,953 gzipped. Its build with fresh
+caches, the inline tests included, takes about 160 s here, most of it
+compiling Zig's build runner and the native tests; with `pnpm build`'s
+kept caches, under a second.
 
 Measure, at the end of stages 1, 2 and 5 and before the swap, for Safe,
 Fast and Small: bytes raw and gzipped, compile time (the libraries,
@@ -672,9 +718,8 @@ Risks:
   memory is short" if it does not hold.
 - **The root still grows** over a long session; M2 removes the dead
   weight and the stalls, not the live weight.
-- **Checked-in binaries** of some 0.5 MB each, two of them, on a
-  package that changed 85 times in a month, add tens of megabytes to
-  the repository's history a month.
+- **Every build needs Zig**: some 50 MB downloaded once, and a first
+  build of about 70 s, where none was needed before; CI caches both.
 - **Two compilers for some weeks**, and a moving target.
 - **Zig 0.17 for good** means its bugs for good; the slice and
   `packages/native` have met none that mattered.
@@ -689,7 +734,7 @@ For the user to decide:
    the digests. This replaces the checked-in binaries described in
    section 7 for the compiler; `packages/native` keeps its own.
 3. **After a panic**, is the compiler dead for the page, or recovered?
-   Decided: recovered. The wrapper makes a fresh instance and adds the
+   Decided: recovered (section 7). The wrapper makes a fresh instance and adds the
    live ABCs again (#1185's save and load, or the player's journal where
    the dead instance can't be read), at a rebuild's cost, and the load
    that panicked fails as a VerifyError would.
