@@ -133,6 +133,7 @@ pub const Change = struct {
         change.* = .{ .saved = dom.*, .mark = arena.mark() };
         change.saved.undo = null;
         dom.undo = &change.undo;
+        dom.memoCleared = false;
     }
 
     pub fn done(_: *Change, dom: *Domain) void {
@@ -140,6 +141,7 @@ pub const Change = struct {
     }
 
     pub fn rollBack(change: *Change, dom: *Domain, arena: *memory.Arena) void {
+        const cleared = dom.memoCleared;
         change.undo.rollBack();
         dom.* = change.saved;
         dom.strings.forgetFrom(dom.stringPtr.len);
@@ -150,8 +152,15 @@ pub const Change = struct {
         dom.catchScopes.forgetFrom(dom.catchKey.len);
         dom.vectorOf.forgetFrom(dom.vectorParam.len);
         dom.traits.members.forgetFrom(dom.traits.memberTraits.len);
-        // A cache, whose rows the call may have written over from the first.
-        dom.clearBindingMemo();
+        // A cache: its answers from before the call kept, as a retry then
+        // finds and weighs them as the call would have; unless the call
+        // cleared it, and wrote over its rows from the first.
+        if (cleared) {
+            dom.clearBindingMemo();
+        } else {
+            dom.bindingMemo.forgetFrom(dom.memoType.len);
+        }
+
         arena.restore(change.mark);
     }
 };
@@ -240,6 +249,9 @@ pub const Domain = struct {
     memoAbc: Rows(u32) = .{},
     memoName: Rows(u32) = .{},
     memoBinding: Rows(u32) = .{},
+    /// Whether the memo was cleared since the Change began, which a
+    /// rollback then cannot give back its rows from before.
+    memoCleared: bool = false,
 
     // Classes by domain-wide id; ABC a's instance i is classStart[a] + i.
     classStart: Rows(u32) = .{},
@@ -423,6 +435,7 @@ pub const Domain = struct {
     /// finds the same in it as in a new one, and a large one is not left
     /// behind in the arena by each finding the runtime reports.
     pub fn clearBindingMemo(self: *Domain) void {
+        self.memoCleared = true;
         self.bindingMemo.clear();
         self.memoType.truncate(0);
         self.memoAbc.truncate(0);
