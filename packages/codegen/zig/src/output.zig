@@ -141,7 +141,20 @@ pub const Output = struct {
     /// What string() writes between the quotes, for a literal made of several strings.
     pub fn chars(self: *Output, bytes: []const u8) Allocator.Error!void {
         try self.reserve(@intCast(bytes.len));
+
+        // Most names fit in one write. After the first escape, use the
+        // ordinary loop so escape-heavy strings only classify each byte once.
         var i: usize = 0;
+        while (i < bytes.len) : (i += 1) {
+            const b = bytes[i];
+            if (b < ' ' or b >= 0x7f or b == '"' or b == '\\') {
+                break;
+            }
+        }
+        if (i > 0) {
+            try self.text(bytes[0..i]);
+        }
+
         while (i < bytes.len) {
             const b = bytes[i];
             if (b < 0x80) {
@@ -247,6 +260,13 @@ test "the AVM2 emitters' methods write as AssemblyScript's Output does" {
     try out.byte(' ');
     try out.string("a\"\\\n\xc3\xa9\xed\xa0\x80\xf0\x9f\x98\x80\xff");
     try std.testing.expectEqualStrings("x=-1234567890123 0 0.1 -0 1e+21 \"a\\\"\\\\\\x0a\\u00e9\\ud800\\ud83d\\ude00\\u00ff\"", out.written());
+
+    out.reset();
+    try out.chars("");
+    try out.chars(" !#[]~");
+    try out.chars("plain\x7fend");
+    try out.chars("\"tail");
+    try std.testing.expectEqualStrings(" !#[]~plain\\x7fend\\\"tail", out.written());
 }
 
 /// A JavaScript number literal for a double: exact, and valid for NaN,
