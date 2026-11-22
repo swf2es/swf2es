@@ -908,6 +908,68 @@ std.Io.Writer's size.
 For stage 5: `Output.init` reserves 64 KB up front, so each `Output` is
 a whole run in the call arena; an emitter made per method or per block
 should reuse one, as AssemblyScript's reuse their buffers.
+(`ModuleEmitter.renew` does so for `domainEmitEach` without reuse.)
+
+*Stage 5, measured.* Every emitter file is translated call for call;
+`domainEmit` (a method alone), the module exports and `domainEmitEach`
+come out byte for byte as AssemblyScript's on every corpus: 70,611
+bodies of the corpus SWFs alone (61.5 MB of code) and 116,561 of the
+oracle's (90.1 MB); 47,747 module cases of the corpus SWFs and 90,069 of
+the oracle's, each module a part at a time, its source map, entries and
+each entry compiled again alone; the libraries; and methods nested to
+MAX_NESTING and past it. What stage 5 changed of the plan:
+
+- A module written a part at a time lasts past the call that started
+  it, and so does a kept one, for its source map and entries: both are
+  in an arena of their own (`compile.zig`), given back when the next
+  module starts or the domain changes under it. The method emitter's
+  scratch is the call's arena, handed to it again as each part starts
+  (`ModuleEmitter.prepare`), as AssemblyScript's collector frees it
+  between calls; the `Verifier` takes the allocator its results and
+  queue live in.
+- The translation recurses along the dominator tree, as
+  AssemblyScript's does, rather than taking a work list: its depth is
+  bounded by MAX_NESTING, which `analyze` holds each block to before any
+  code is written. 499 nested merges, the deepest structured, take 13 KB
+  of the shadow stack.
+- Any call may grow memory, Zig's call arena taking a run as a call
+  starts: a host copies or decodes what a call hands out before the next,
+  as the host does.
+
+Size of the release, the emitters reached (stage 4's probe in brackets):
+
+| Build | Bytes | Gzipped |
+|---|---|---|
+| ReleaseSafe | 530,926 (333,974) | 179.9 KB (115.5) |
+| ReleaseSmall | 351,531 (233,821) | 124.7 KB (83.5) |
+| ReleaseFast | 637,444 (347,324) | 179.3 KB (109.2) |
+| ReleaseSafe + `wasm-opt -Oz` | 475,830 | 173.3 KB |
+| ReleaseSmall + `wasm-opt -Oz` | 312,746 | 119.8 KB |
+| ReleaseSmall, safety on in `abc/` | 359,597 | 128.0 KB |
+| ReleaseSmall, safety on in `abc/`, `link/` and `ir/` | 366,406 | 130.3 KB |
+| ReleaseSmall, safety on in `emit/` | 365,136 | 130.5 KB |
+| AssemblyScript's codegen.wasm | 259,116 | 94.4 KB |
+
+ReleaseSafe is 1.91 times AssemblyScript's gzipped, under section 7's
+bound of twice. Safety itself is cheap: `@setRuntimeSafety(true)` in
+every function of the code that reads untrusted input (the decoder,
+verifier and parser) costs 3.3 KB gzipped over ReleaseSmall, 5.7 with
+the linker and the IR; ReleaseSafe's 55 KB more is mostly its
+optimization for speed. (Safety set so covers each function's own code:
+what is inlined from another file keeps that file's setting.) The
+emitters' code, by file, ReleaseSafe and ReleaseSmall: module 44.5 and
+29.9 KB, method 39.2 and 20.8, objects 34.2 and 21.8, blocks (with
+instructions inlined) 26.5 and 16.2, stack-names 8.5 and 3.1, refs 8.4
+and 5.6, structure 6.4 and 3.3, values 6.1 and 3.8; the rest is inlined.
+
+Compile time, the median of 11 interleaved runs, each module a part at a
+time as the host writes it, Zig's against AssemblyScript's: the
+libraries 1.30, as3pb 1.18, a large application's 29 ABCs 1.22 in
+ReleaseSafe; 1.26, 1.09 and 1.16 in ReleaseSmall; 1.07, 0.97 and 1.05 in
+ReleaseFast; ReleaseSmall with safety in `abc/` 1.26, 1.15 and 1.09.
+ReleaseSafe is over section 7's 1.15. Memory after compiling: 14.3, 12.7
+and 4.9 MiB, against AssemblyScript's 16.0 each. `codegen-session.ts`
+plays the player, which takes keys and rebuilds: it waits for stage 6.
 
 The parser's tables go to the allocator it is given (stage 3: the
 domain's arena) and what only the parse needs (a set's members while
