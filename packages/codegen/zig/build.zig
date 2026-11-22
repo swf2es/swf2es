@@ -70,6 +70,7 @@ const testing_exports = exports ++ [_][]const u8{
     "domainIr",
     "domainCheckIr",
     "domainIrAll",
+    "domainEmit",
     "avm1Opcodes",
     "avm1Dump",
     "avm1Check",

@@ -37,6 +37,7 @@ const TESTING_SIGNATURES: Record<string, Signature> = {
   domainIr: ["i32", "str"],
   domainCheckIr: ["", "str"],
   domainIrAll: ["", "str"],
+  domainEmit: ["i32", "str"],
 };
 
 /** The test build, or the one that fills freed memory with 0xAA, compiled. */

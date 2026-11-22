@@ -13,6 +13,8 @@ const ops = @import("../avm2/abc/opcodes.zig");
 const ir_ = @import("../avm2/ir/ir.zig");
 const Ir = ir_.Ir;
 const traits_ = @import("../avm2/link/traits.zig");
+const MethodEmitter = @import("../avm2/emit/method.zig").MethodEmitter;
+const stack_names = @import("../avm2/emit/stack-names.zig");
 
 /// The domain's binding of `name` in the namespace of type `type` (NS_*) and
 /// URI `uri`, visible at `version` from application domain `appDomain`:
@@ -213,6 +215,39 @@ pub fn domainVerifyAll(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 
 /// as domainVerifyAll does: "B<n> @<pc> stack [types] scope [types]" per
 /// block, then a line per instruction, "<pc>: [dst =] op srcs [a b c] : type",
 /// a trailing ! marking a type known not null; "error N" if it failed.
+/// The JavaScript function body `body` of the domain's last ABC compiles to,
+/// after verifying the ABC as domainVerifyAll does; "error N" if it failed.
+pub fn domainEmit(dom: *Domain, gpa: Allocator, body: u32) Allocator.Error![]const u8 {
+    if (dom.abcs.len == 0) {
+        return "not verified";
+    }
+
+    const index = dom.abcs.len - 1;
+    const abc = dom.abcs.get(index);
+    const results = try code.verifyMethods(dom, index);
+    if (body >= results.len) {
+        return "not verified";
+    }
+
+    if (results[body] != 0) {
+        return if (results[body] < 0) "not verified" else std.fmt.allocPrint(gpa, "error {d}", .{results[body]});
+    }
+
+    var decoder: BodyDecoder = try .init(gpa, abc, dom.abcBuffer.get(index), dom, index);
+    const method = abc.bodyMethod.get(body);
+    const global = dom.methodStart.get(index) + method;
+    const result = try decoder.decode(body, dom.traits.scopeOf(global));
+    if (result.@"error" != 0) {
+        return std.fmt.allocPrint(gpa, "error {d}", .{result.@"error"});
+    }
+
+    var emitter: MethodEmitter = try .init(gpa, dom, index);
+    emitter.claims = decoder.claims.items;
+    emitter.functionName = try stack_names.identifierOf(gpa, try stack_names.stackName(dom, gpa, index, global));
+    try emitter.method(method, global, &decoder.ir);
+    return emitter.out.written();
+}
+
 pub fn domainIr(dom: *Domain, gpa: Allocator, body: u32) Allocator.Error![]const u8 {
     if (dom.abcs.len == 0) {
         return "not verified";
