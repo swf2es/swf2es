@@ -26,7 +26,7 @@ import {
   instantiate as instantiateZig,
   SIGNATURES,
 } from "../../packages/codegen/dist/zig.js";
-import { isAs3, readActions, readSwf } from "../../packages/format/dist/index.js";
+import { isAs3, readActions, readDoAbc, readSwf } from "../../packages/format/dist/index.js";
 import { type Avm1Swf, avm1Swfs, testBlocks } from "../conformance/determinism-avm1.ts";
 import { bindTesting, zigTestingModule } from "../unit/codegen/zig-testing.ts";
 
@@ -44,6 +44,8 @@ const expected: string[] = JSON.parse(
  */
 class Results {
   readonly lines: string[] = [];
+  /** Each line's case name, which a large result's bytes are kept by. */
+  readonly names: string[] = [];
   readonly blobs = new Map<string, Uint8Array>();
 
   readonly capture: ReadonlySet<string>;
@@ -54,6 +56,7 @@ class Results {
 
   /** Case `name`'s result, or what it threw. */
   case(name: string, run: () => string | number | boolean): void {
+    this.names.push(name);
     try {
       this.lines.push(`${name}: ${run()}`);
     } catch (error) {
@@ -682,6 +685,114 @@ function mutatedBlocks(count: number): Avm1Swf[] {
 
 let corpusCounted = false;
 
+/** DoABC and DoABC2 tags' codes. */
+const DO_ABC = [72, 82];
+
+/** The ABCs of the corpus's AS3 SWFs (where it was fetched) and of SWF2ES_PRIVATE's, the latter reported only as private. */
+function swfAbcs(): [string, Uint8Array][] {
+  const corpus = new URL("../player/corpus/ruffle/tests/tests/swfs/", import.meta.url);
+  const files: [string, string][] = [];
+  try {
+    for (const name of readdirSync(corpus, { recursive: true, encoding: "utf8" }).sort()) {
+      if (name.endsWith(".swf")) {
+        files.push([name, fileURLToPath(new URL(name, corpus))]);
+      }
+    }
+  } catch {
+    // Not fetched.
+  }
+
+  for (const [i, file] of (process.env.SWF2ES_PRIVATE ?? "").split(" ").filter(Boolean).entries()) {
+    files.push([`private ${i}`, file]);
+  }
+
+  const found: [string, Uint8Array][] = [];
+  for (const [name, file] of files) {
+    let swf: ReturnType<typeof readSwf>;
+    try {
+      swf = readSwf(new Uint8Array(readFileSync(file)));
+    } catch {
+      continue;
+    }
+
+    for (const [k, tag] of swf.tags.filter((t) => DO_ABC.includes(t.code)).entries()) {
+      found.push([`${name} abc ${k}`, readDoAbc(swf.bytes, tag).abc]);
+    }
+  }
+
+  return found;
+}
+
+/** Every ABC there is: the libraries and the tests' (abcs), and the SWFs'. */
+let allAbcs: [string, Uint8Array][] | null = null;
+const everyAbc = () => {
+  allAbcs ??= [...abcs(), ...swfAbcs()];
+  return allAbcs;
+};
+
+/** The tests' ABCs mutated, seeded: bytes flipped, inserted, removed, the block cut short. */
+function mutatedAbcs(count: number): [string, Uint8Array][] {
+  const seeds = abcs().filter(([, bytes]) => bytes.length < 64 * 1024);
+  const { below } = random(7);
+  const found: [string, Uint8Array][] = [];
+  for (let k = 0; k < count; k++) {
+    const [name, seed] = seeds[below(seeds.length)];
+    const bytes = [...seed];
+    for (let edits = 1 + below(6); edits > 0; edits--) {
+      const at = below(bytes.length + 1);
+      switch (below(4)) {
+        case 0:
+          bytes.splice(at, 0, below(256));
+          break;
+        case 1:
+          bytes.splice(at, 1);
+          break;
+        case 2:
+          bytes.length = Math.min(bytes.length, at + 4);
+          break;
+        default:
+          bytes[at] = below(256);
+          break;
+      }
+    }
+
+    found.push([`${name} mutated ${k}`, Uint8Array.from(bytes)]);
+  }
+
+  return found;
+}
+
+/** Reads of every kind from a prefix of the ABC, as reader.test.ts reads. */
+const KINDS = Uint8Array.from({ length: 64 }, (_, i) => (i * 7 + 3) % 8);
+
+/**
+ * A pool dump with what AssemblyScript's leaves unspecified written as `*`:
+ * a pool that failed among its namespace sets has no table of members, and
+ * AssemblyScript's dump read the sets before past its end, whatever memory
+ * followed. Such a dump has an error, sets and no multinames.
+ */
+function poolDumped(text: string): string {
+  if (!text.includes("\nerror ") || !text.includes("nsset ") || text.includes("\nmn ")) {
+    return text;
+  }
+
+  return text.replace(/^nsset (\d+) .*$/gm, "nsset $1 *");
+}
+
+/** An ABC's dumps: its pool, its tables as a SWF's and as a library's, and reads of every kind. */
+function abcDumps(c: Compiler, r: Results, name: string, bytes: Uint8Array): void {
+  r.case(`${name}: pool`, () =>
+    r.blob(`${name}: pool`, Buffer.from(poolDumped(c.poolDump(bytes)))),
+  );
+  for (const builtin of [false, true]) {
+    r.case(`${name}: tables, builtin ${builtin}`, () =>
+      r.blob(`${name}: tables, builtin ${builtin}`, Buffer.from(c.abcDump(bytes, builtin))),
+    );
+  }
+
+  r.case(`${name}: reads`, () => Array.from(c.readAll(bytes.subarray(0, 96), KINDS)).join(","));
+}
+
 const SUITES: Suite[] = [
   {
     name: "version",
@@ -770,6 +881,33 @@ const SUITES: Suite[] = [
           if (offset < block.length) {
             r.case(`block ${k}: action at ${offset}`, () => c.avm1Action(block, offset));
           }
+        }
+      }
+    },
+  },
+  {
+    name: "abc-dumps",
+    build: "testing",
+    needs: ["poolDump", "abcDump", "readAll", "opcodeTable"],
+    run: (c, r) => {
+      r.case("opcodes", () => c.opcodeTable());
+      for (const [i, [name, bytes]] of everyAbc().entries()) {
+        abcDumps(c, r, name, bytes);
+        if (i % 32 === 31) {
+          c.__collect();
+        }
+      }
+    },
+  },
+  {
+    name: "abc-mutated",
+    build: "testing",
+    needs: ["poolDump", "abcDump", "readAll"],
+    run: (c, r) => {
+      for (const [i, [name, bytes]] of mutatedAbcs(4000).entries()) {
+        abcDumps(c, r, name, bytes);
+        if (i % 32 === 31) {
+          c.__collect();
         }
       }
     },
@@ -905,7 +1043,7 @@ for (const suite of SUITES.filter((s) => wanted.length === 0 || wanted.includes(
     const [la, lb] = [results[a].lines, results[b].lines];
     const at = differs(la, lb);
     if (at >= 0) {
-      const key = la[at]?.slice(0, la[at].indexOf(": "));
+      const key = results[a].names[at];
       mismatches.push(
         `${b} differs from ${a} at case ${at + 1} of ${la.length}:\n    ${a}: ${la[at]}\n    ${b}: ${lb[at]}` +
           (key ? await showBlobs(suite, key, a, b) : ""),
