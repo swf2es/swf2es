@@ -6,6 +6,7 @@ import { runInNewContext } from "node:vm";
 import { readShape, readSwf, zlibCompress } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/render";
 import { morphAt } from "../../../../packages/player/dist/display/morph.js";
+import type { ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";
 import { shapeLayers } from "../../../../packages/player/dist/display/shapes.js";
 import type { MorphCharacter } from "../../../../packages/player/dist/display/timeline.js";
 import { readLibrary } from "../../../../packages/player/dist/display/timeline.js";
@@ -103,6 +104,16 @@ function movie(fill: number | w.BitmapFill): Uint8Array {
   });
 }
 
+/** Layers as plain objects, as shapeLayers makes them: a library's shape reads its paths through accessors. */
+function plainLayers(layers: ShapeLayer[]): ShapeLayer[] {
+  return layers.map((layer) => ({
+    fills: layer.fills.map(({ fill, contours, winding }) => ({ fill, contours, winding })),
+    strokes: layer.strokes.map(({ line, paths, paint }) =>
+      paint ? { line, paths, paint } : { line, paths },
+    ),
+  }));
+}
+
 const shapeIn = (bytes: Uint8Array) => readLibrary(readSwf(bytes)).characters.get(1);
 
 test("a SWF read again shares its shapes with the first, and only the shapes alike", () => {
@@ -158,13 +169,13 @@ test("a shape is drawn into layers when first asked for, as it was at once", () 
   }
 
   // An accessor, not layers made as the SWF was read.
-  assert.equal(typeof Object.getOwnPropertyDescriptor(shape, "layers")?.get, "function");
+  assert.ok(!Object.hasOwn(shape, "layers"));
   assert.deepEqual(Object.keys(shape.shape).sort(), ["bounds", "edgeBounds"]);
 
   const tag = swf.tags.find((t) => t.code === 2 || t.code === 22 || t.code === 32 || t.code === 83);
   assert.ok(tag);
   const eager = shapeLayers(readShape(swf.bytes, tag.code, tag.offset, tag.length));
-  assert.deepEqual(shape.layers, eager);
+  assert.deepEqual(plainLayers(shape.layers), eager);
   assert.equal(shape.layers, shape.layers);
 });
 

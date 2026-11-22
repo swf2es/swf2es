@@ -211,6 +211,11 @@ node tests/bench/enumeration/run.ts [<dir A> <dir B>] [runs]   # for-in and for 
 node tests/bench/avm1-names.ts [<checkout A> <checkout B>] [runs]   # AVM1 names on clips of many
                               # children: the pointer moved over a thousand clips, each asked for
                               # onPress and the rest, and a script's member reads, two checkouts
+node --expose-gc tests/bench/codegen-session.ts [--loads N] [--checkout DIR] [--cache] [--grows]
+                              # codegen's memory over a long session played by the player in node:
+                              # a large main SWF loading items into its domain, most of them again,
+                              # and maps into children; memory, live and dead weight, rebuilds and
+                              # which exports grew memory, a window of loads at a time
 node tests/bench/typed/run.ts [<dir A> <dir B>] [runs]   # new of classes and calls the compiler
                               # binds (class-typed parameters given subclasses, interfaces, null),
                               # as the ones above
@@ -302,6 +307,10 @@ of its own.
 - Prefer no new dependencies; ask before adding one.
 
 ### AssemblyScript (`packages/codegen/assembly`)
+
+- **Frozen during the port to Zig** (docs/zig-codegen.md on branch
+  `zig/stage-0`): change nothing here but fixes, each made in both
+  compilers, so that the port's stages are not chasing a moving target.
 
 - Group files by bytecode, then by compiler stage (`avm2/abc/`, `avm2/link/`,
   `avm2/ir/`, `avm2/emit/`), not by kind: no `utils/`. A helper lives next to

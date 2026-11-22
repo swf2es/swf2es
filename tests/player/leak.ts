@@ -104,11 +104,11 @@ const BOUND = 64 * 1024;
 const CODEGEN_CEILING = 16 * 1024 * 1024;
 /**
  * The ceiling where compactions raise the high-water mark: the shared gear
- * uncached, whose dead domains building up before a compaction, and a
- * compaction making new tables beside the old, take it from 16 to 32 MiB
- * within 300 loads; and with the cache, where they take it from 8 to 16
- * after some 20 loads and to 32 after some hundreds or not at all. Never
- * further in 4,000.
+ * uncached, whose dead domains building up before a compaction take it
+ * from 16 to some 20 MiB within 300 loads, a compaction moving the domain
+ * to a new instance of the size its live ABCs need; and with the cache,
+ * where it starts at 8. A compaction in place, before there was a new
+ * instance to move to, took it to 32.
  */
 const COMPACTING_CEILING = 32 * 1024 * 1024;
 

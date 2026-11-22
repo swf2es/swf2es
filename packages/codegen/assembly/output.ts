@@ -302,6 +302,12 @@ export function handOut(out: Output | null, from: u32 = 0): usize {
   return changetype<usize>(out.bytes) + from;
 }
 
+/** `length` bytes at `ptr`, which something live holds, handed out as handOut hands out an Output's. */
+export function handOutBytes(ptr: usize, length: u32): usize {
+  handedLength = length;
+  return ptr;
+}
+
 /** How many bytes the last call that handed some out (handOut) gave. */
 export function outputLength(): u32 {
   return handedLength;

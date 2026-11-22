@@ -657,6 +657,46 @@ test("dropping other domains changes no module, and memory stops growing", {
   assert.equal(testing.domainModule("b\nx", 1), module);
 });
 
+test("a compaction in place, a part at a time, never grows memory", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  // With no spare instance to move to: the new tables made beside the old
+  // and the dead ones only where the three fit, each part's garbage
+  // collected before the next, as the wrapper does.
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  testing.domainReset(SWF_31);
+  testing.domainAdd(builtin, true);
+  const main = testing.domainChild(0) as number;
+  for (let n = 0; n < 20; n++) {
+    assert.equal(testing.domainAdd(builtin, true, main), 0);
+    assert.notEqual(testing.domainModule("", -1, false), "");
+  }
+
+  let compactions = 0;
+  for (let n = 0; n < 150; n++) {
+    const child = testing.domainChild(main) as number;
+    assert.equal(testing.domainAdd(builtin, true, child), 0);
+    assert.notEqual(testing.domainModule("", -1, false), "");
+    testing.domainDrop(child);
+    testing.__collect();
+    const before = testing.memory.buffer.byteLength;
+    if (testing.domainCompact(true)) {
+      let step = testing.domainRebuildStep();
+      while (step === 0) {
+        testing.__collect();
+        step = testing.domainRebuildStep();
+      }
+
+      testing.__collect();
+      assert.equal(step, 1);
+      assert.equal(testing.memory.buffer.byteLength, before, `load ${n}`);
+      compactions++;
+    }
+  }
+
+  assert.ok(compactions > 0);
+});
+
 test("what resolved lazily resolves alike after a rebuild, though an ancestor defines its type later", {
   skip: !existsSync(generated) && "oracle/avmplus missing",
 }, () => {

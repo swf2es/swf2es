@@ -88,6 +88,9 @@ export const DOMAIN_Live: u8 = 0;
 export const DOMAIN_Evicted: u8 = 1;
 export const DOMAIN_Dropped: u8 = 2;
 
+/** What an ABC weighs for each of its bytes before it links: them, and what parsing them took. */
+export const ABC_Weight: u64 = 3;
+
 /** The kinds of the log's entries (see Domain.logKind). */
 export const LOG_None: u8 = 0;
 /** A finding, by its index in the found tables. */
@@ -370,7 +373,9 @@ export class Domain {
     addClassNames(this, index);
     this.addBindings(index);
     // The bytes three times: a copy, and the tables parsing made of them.
-    this.abcWeight.push(<u32>min<u64>(3 * <u64>abc.length + this.rows() - rows, 0xffffffff));
+    this.abcWeight.push(
+      <u32>min<u64>(ABC_Weight * <u64>abc.length + this.rows() - rows, 0xffffffff),
+    );
     return true;
   }
 

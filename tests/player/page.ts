@@ -2017,16 +2017,6 @@ async function toggling(root: Player["root"], count: number): Promise<DisplayObj
   return children;
 }
 
-/** The memory of the codegen instance made last, the opened SWF's, for stepSwf to tell its size. */
-let codegenMemory: WebAssembly.Memory | null = null;
-const instantiate = WebAssembly.instantiate.bind(WebAssembly);
-WebAssembly.instantiate = (async (module: WebAssembly.Module, imports?: WebAssembly.Imports) => {
-  const instance = await instantiate(module, imports);
-  const memory = instance.exports.memory;
-  codegenMemory = memory instanceof WebAssembly.Memory ? memory : codegenMemory;
-  return instance;
-}) as typeof WebAssembly.instantiate;
-
 /**
  * Play a SWF with no scripts a frame for each of `sizes`, the renderer
  * resized before it to that width, height and resolution, as a host
@@ -2986,7 +2976,7 @@ async function stepSwf(
 
     return {
       lines: trace.length,
-      codegen: codegenMemory?.buffer.byteLength ?? 0,
+      codegen: scripting?.codegen.memoryBytes() ?? 0,
       live: scripting?.codegen.usage().live ?? 0,
       display: view?.displayBitmapBytes ?? 0,
       error: null,
