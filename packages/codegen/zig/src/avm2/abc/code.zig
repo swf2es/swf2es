@@ -1171,7 +1171,10 @@ pub const Verifier = struct {
         if (!self.first and domain.captures == self.captures) {
             const entry = self.entry;
             if (domain.logKind.len == entry + 1) {
-                // The entry this verifier added: no row from before the call.
+                // The entry this verifier added, maybe in an earlier call,
+                // when it runs a part at a time: kept for a rollback, which
+                // puts the log's length back but not a row written over.
+                domain.keepTruncated(entry);
                 domain.logKind.truncate(entry);
                 domain.logAt.truncate(entry);
                 domain.logAbc.truncate(entry);

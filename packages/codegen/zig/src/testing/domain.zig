@@ -921,6 +921,7 @@ fn hashField(h: *std.hash.Wyhash, dom: *const Domain, comptime name: []const u8)
         std.mem.eql(u8, name, "bindingMemo") or
         // Addresses into the ABCs' bytes, which abcBuffer has by content.
         std.mem.eql(u8, name, "abcBase") or
+        std.mem.eql(u8, name, "truncated") or
         std.mem.startsWith(u8, name, "memo");
     if (comptime std.mem.eql(u8, name, "stringPtr")) {
         h.update(std.mem.asBytes(&dom.stringPtr.len));
@@ -1377,6 +1378,13 @@ fn partsRetried(source: Allocator) !u64 {
     var made: Made = undefined;
     try made.init(source);
     defer made.deinit();
+    // Twice: the second verification of the ABC, not its first, drops its
+    // log entry as it ends, a part after the one that added it.
+    const first = try writeParts(source, &made);
+    return first *% 31 +% try writeParts(source, &made);
+}
+
+fn writeParts(source: Allocator, made: *Made) !u64 {
     const dom = made.dom;
     const index = dom.abcs.len - 1;
     var attempt: u32 = 0;

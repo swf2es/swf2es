@@ -134,16 +134,32 @@ pub const Change = struct {
         change.saved.undo = null;
         dom.undo = &change.undo;
         dom.memoCleared = false;
+        dom.truncated = null;
+        change.saved.truncated = null;
     }
 
     pub fn done(_: *Change, dom: *Domain) void {
         dom.undo = null;
+        dom.truncated = null;
     }
 
     pub fn rollBack(change: *Change, dom: *Domain, arena: *memory.Arena) void {
         const cleared = dom.memoCleared;
+        const truncated = dom.truncated;
         change.undo.rollBack();
         dom.* = change.saved;
+        // A row from before the Change, truncated and maybe written over by
+        // a push since: its length is back, and its values with it.
+        if (truncated) |t| {
+            if (t.entry < dom.logKind.len) {
+                dom.logKind.set(t.entry, t.kind);
+                dom.logAt.set(t.entry, t.at);
+                dom.logAbc.set(t.entry, t.abc);
+                dom.logA.set(t.entry, t.a);
+                dom.logB.set(t.entry, t.b);
+            }
+        }
+
         dom.strings.forgetFrom(dom.stringPtr.len);
         dom.namespaces.forgetFrom(dom.nsType.len);
         dom.bindings.forgetFrom(dom.bindingNs.len);
@@ -197,6 +213,16 @@ pub fn addAbc(dom: *Domain, arena: *memory.Arena, bytes: []const u8, builtin: bo
     _ = try dom.attach(abc, buffer, appDomain);
     return abc.@"error";
 }
+
+/// A log entry as it was before a truncation (Domain.keepTruncated).
+pub const Truncated = struct {
+    entry: u32,
+    kind: u8,
+    at: u32,
+    abc: u32,
+    a: u32,
+    b: u32,
+};
 
 pub const Domain = struct {
     /// The domain's arena, and the call's.
@@ -252,6 +278,9 @@ pub const Domain = struct {
     /// Whether the memo was cleared since the Change began, which a
     /// rollback then cannot give back its rows from before.
     memoCleared: bool = false,
+    /// The log entry a verification truncated in the Change under way, as
+    /// it was, for a rollback to write back (keepTruncated).
+    truncated: ?Truncated = null,
 
     // Classes by domain-wide id; ABC a's instance i is classStart[a] + i.
     classStart: Rows(u32) = .{},
@@ -434,6 +463,20 @@ pub const Domain = struct {
     /// Forget getBinding's answers. The table keeps its room: a lookup
     /// finds the same in it as in a new one, and a large one is not left
     /// behind in the arena by each finding the runtime reports.
+    /// Keep log entry `entry` as it is, before a truncation, for a rollback.
+    pub fn keepTruncated(self: *Domain, entry: u32) void {
+        if (self.undo != null and self.truncated == null) {
+            self.truncated = .{
+                .entry = entry,
+                .kind = self.logKind.get(entry),
+                .at = self.logAt.get(entry),
+                .abc = self.logAbc.get(entry),
+                .a = self.logA.get(entry),
+                .b = self.logB.get(entry),
+            };
+        }
+    }
+
     pub fn clearBindingMemo(self: *Domain) void {
         self.memoCleared = true;
         self.bindingMemo.clear();
