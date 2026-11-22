@@ -33,5 +33,7 @@
   "modules-tests",
   "modules-swfs",
   "modules-mutated",
-  "libraries"
+  "libraries",
+  "modules-plans",
+  "exports-random"
 ]
