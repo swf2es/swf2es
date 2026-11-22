@@ -243,19 +243,21 @@ export interface Codegen {
    * memory would otherwise grow and they hold enough to keep it from
    * growing, or memory is far above what the live ones need: whether it
    * did. Done in a new instance of the compiler, made ahead, which takes
-   * the old one's place, so that its memory, which never shrinks, goes
-   * with it. A rebuild links every live ABC again and verifies them again,
-   * seconds for a large application, so a host calls this when it has
-   * time, as when idle; nothing else does.
+   * the old one's place, so that its memory goes with it, where that takes
+   * less memory or a rebuild in place would not fit; else in place, only
+   * where the new tables fit beside the old. A rebuild links every live
+   * ABC again and verifies them again, seconds for a large application, so
+   * a host calls this when it has time, as when idle; nothing else does.
    */
   compact(): boolean;
   /**
    * What the ABCs hold of codegen's memory, roughly, in bytes: the live
    * ones', and the dropped and evicted domains' that compact would free;
-   * and the size of codegen's memory, which never shrinks.
+   * and the size of codegen's memory, which grows and never shrinks but
+   * when compact moves the domain to a new instance.
    */
   usage(): { live: number; dead: number; memory: number };
-  /** The size of codegen's memory in bytes, which never shrinks: cheap, for a host that shows it often. */
+  /** The size of codegen's memory in bytes, as usage gives it: cheap, for a host that shows it often. */
   memoryBytes(): number;
   /**
    * Evict application domain `appDomain` and its descendants while the host
@@ -383,11 +385,14 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     );
   }
 
-  // Or before it wrote a module a part at a time.
-  if (!WebAssembly.Module.exports(module).some((e) => e.name === "domainModuleMoreBytes")) {
-    throw new Error(
-      "codegen.wasm has no domainModuleMoreBytes export, which the wrapper expects: it is older than the wrapper",
-    );
+  // Or before it wrote a module a part at a time, or rebuilt its domain a
+  // part at a time and in another instance.
+  for (const name of ["domainModuleMoreBytes", "domainRebuildStep", "domainSaveBytes"]) {
+    if (!WebAssembly.Module.exports(module).some((e) => e.name === name)) {
+      throw new Error(
+        `codegen.wasm has no ${name} export, which the wrapper expects: it is older than the wrapper`,
+      );
+    }
   }
 
   // codegen.wasm uses AssemblyScript's minimal runtime, which collects
@@ -542,7 +547,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // asynchronous, that the next rebuild is done in (see moved): wasm memory
   // never shrinks, so one done in place keeps, for good, as much as the
   // dead tables and the old and the new took together. Made at once, and
-  // again once one is taken.
+  // again once one is taken or could not be made or used.
   let spare: typeof wasm | null = null;
   let making = false;
   const prepare = () => {
@@ -559,17 +564,11 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       );
     }
   };
-  // The domain rebuilt in the spare instance, from what this one saves of it
-  // and its live ABCs' bytes, read where they are, and the spare taken for
-  // this one, whose memory goes with it: whether it was. The ABCs' copies in
-  // the spare are its garbage once parsed, collected every few megabytes.
-  const moved = () => {
-    const into = spare;
-    if (into === null) {
-      return false;
-    }
-
-    spare = null;
+  // The domain rebuilt in `into`, a new instance, from what this one saves
+  // of it and its live ABCs' bytes, read where they are: whether it was. The
+  // ABCs' copies in it are its garbage once parsed, collected every few
+  // megabytes.
+  const rebuiltIn = (into: typeof wasm) => {
     const saved = wasm.domainSaveBytes();
     if (!into.domainLoad(new Uint8Array(wasm.memory.buffer, saved, wasm.outputLength()))) {
       return false;
@@ -591,7 +590,29 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       }
     }
 
-    if (!into.domainLoadRebuild() || !rebuild(into)) {
+    return into.domainLoadRebuild() && rebuild(into);
+  };
+  // The domain rebuilt in the spare instance, which then takes this one's
+  // place, whose memory goes with it: whether it was. One that failed, or
+  // trapped as its memory could not grow, is let go of, the domain left
+  // here as it was, and another made.
+  const moved = () => {
+    const into = spare;
+    if (into === null) {
+      return false;
+    }
+
+    spare = null;
+    let done = false;
+    try {
+      done = rebuiltIn(into);
+    } catch {
+      done = false;
+    }
+
+    prepare();
+    if (!done) {
+      size = wasm.memory.buffer.byteLength;
       return false;
     }
 
@@ -600,7 +621,6 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     wasm = into;
     size = wasm.memory.buffer.byteLength;
     calls = 0;
-    prepare();
     return true;
   };
   prepare();
@@ -673,10 +693,12 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     },
     compact() {
       // Done in the spare instance, once there is one and that would take
-      // less memory; else in place, where the new tables are made
-      // while the old are live: what earlier calls left is collected first,
-      // and the old tables once it is done, before the next call's
-      // allocations would grow memory past them.
+      // less memory, or in place would not fit; else in place, where the
+      // new tables are made while the old are live, only where they fit:
+      // what earlier calls left is collected first, and the old tables once
+      // it is done, before the next call's allocations would grow memory
+      // past them.
+      prepare();
       if (spare !== null && collected(wasm.domainWantsCompact(true))) {
         wasm.__collect();
         if (moved()) {
@@ -684,7 +706,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         }
       }
 
-      if (!collected(wasm.domainWantsCompact())) {
+      if (!collected(wasm.domainWantsCompact(false, spare !== null))) {
         return false;
       }
 

@@ -24,6 +24,12 @@ import { TRAITS_Class, TRAITS_Instance, TRAITS_Script } from "./traits";
 /** What a log entry kept for an evicted domain weighs. */
 const KEPT_Weight: u64 = 36;
 
+/**
+ * The most memory a rebuild elsewhere grows the new instance by at once:
+ * the allocator's largest block is a gigabyte.
+ */
+export const MOVE_Limit: u64 = (1 << 30) - (1 << 20);
+
 /** The size of memory below which a rebuild elsewhere is not worth it for shrinking it alone. */
 const SHRINK_Floor: u64 = 32 << 20;
 
@@ -223,34 +229,42 @@ function inChain(dom: Domain, d: u32, top: u32, bottom: u32): bool {
  * reserve is what the next loads may add, twice the largest of the last
  * 16 ABCs' weights and a part's garbage, a sixteenth to a half of memory.
  *
- * Elsewhere, it is due once the tables come within the reserve of wasm
- * memory's size, which a load would then grow, or memory is four times
- * what the other instance would take (rebuiltSize), and SHRINK_Floor, as
- * a large compile, or the dead tables of a session, left it; and only if
- * that instance would take an eighth less than this one at least, or a
- * rebuild in place, the new tables beside the old, would not fit, and
- * grow memory to twice its size: the new instance's memory holds the live
- * tables alone, and this one's goes with it, but a move that gains less
- * is done in place.
+ * Elsewhere, the other instance's memory holds the live tables alone,
+ * and this one's goes with it. It is due once the tables come within the
+ * reserve of wasm memory's size, which a load would then grow, and the
+ * ABCs of domains not live weigh DEAD_Floor, a sixteenth of memory and a
+ * quarter of the live ones', as a large application's rebuild takes
+ * seconds; or once memory is four times what the other instance would
+ * take (rebuiltSize), and SHRINK_Floor, as a large compile, or the dead
+ * tables of a session, left it. And only where that instance would take
+ * an eighth less than this one at least, or a rebuild in place would not
+ * fit, and less than MOVE_Limit, the largest block it can grow by.
  *
- * In place, the new tables are made beside the old, so it is due before
- * the two, with twice the live ones for them and their garbage, come
- * within the reserve: a rebuild after that would grow memory itself,
- * which never shrinks, and memory past what the live ones alone need is
- * no use.
- *
- * Either way it must free enough, as a large application's takes
- * seconds: the ABCs of domains not live must weigh DEAD_Floor, a
- * sixteenth of memory and a quarter of the live ones', but where a
- * rebuild elsewhere shrinks memory.
+ * In place, the new tables are made beside the old and the dead ones, so
+ * it is done only while the three and a part's garbage fit in memory,
+ * which never shrinks, by an estimate closer than full's, and once a few
+ * more loads, a reserve, would leave them no room; for dead ones of an
+ * eighth of memory and half the live ones', so that it is not done every
+ * few loads; and, where there is a `spare` instance, only if a move would
+ * not take less memory, as for a small domain, whose new instance's
+ * margins weigh more than it: else a move, once memory would grow, frees
+ * the old tables' room too, and is done less often. Past that it waits:
+ * memory then grows as the loads need it, not by twice its size at once.
  */
-export function wantsRebuild(dom: Domain, part: u64, elsewhere: bool): bool {
+export function wantsRebuild(dom: Domain, part: u64, elsewhere: bool, spare: bool): bool {
   addWeights(dom);
   const size = (<u64>memory.size()) << 16;
   let largest: u64 = 0;
+  let largestLive: u64 = 0;
   const count = dom.abcWeight.length;
-  for (let i = max(0, count - 16); i < count; i++) {
-    largest = max<u64>(largest, dom.abcWeight[i]);
+  for (let i = 0; i < count; i++) {
+    if (i >= count - 16) {
+      largest = max<u64>(largest, dom.abcWeight[i]);
+    }
+
+    if (dom.abcs[i] !== NO_ABC && dom.isLive(<u32>i)) {
+      largestLive = max<u64>(largestLive, dom.abcWeight[i]);
+    }
   }
 
   // A part may make more garbage than its budget counts.
@@ -258,26 +272,29 @@ export function wantsRebuild(dom: Domain, part: u64, elsewhere: bool): bool {
   const reserve = min(size >> 1, max(size >> 4, (largest << 1) + garbage));
   const live = dom.liveWeight + dom.keptWeight;
   const dead = dom.deadWeight;
-  const worth = dead >= max(max(DEAD_Floor, size >> 4), live >> 2);
+  const rebuilt = rebuiltSize(live, largestLive, part);
+  const smaller = rebuilt <= size - (size >> 3);
+  // The old tables, the dead and the new, by a closer estimate than full's,
+  // which would leave a small domain's rebuild in place never fitting:
+  // before a rebuild the heap held about the tables' weight.
+  const beside = live + dead + live;
+  const fits = beside + (beside >> 3) + part < size;
   if (elsewhere) {
-    let largestLive: u64 = 0;
-    for (let i = 0; i < count; i++) {
-      if (dom.abcs[i] !== NO_ABC && dom.isLive(<u32>i)) {
-        largestLive = max<u64>(largestLive, dom.abcWeight[i]);
-      }
-    }
-
-    // In place, the new tables beside the old, it would grow memory itself.
-    const rebuilt = rebuiltSize(live, largestLive, part);
-    const fits = !full(live + dead + live, garbage, size);
+    const worth = dead >= max(max(DEAD_Floor, size >> 4), live >> 2);
     return (
       ((worth && full(live + dead, reserve, size)) || size >= max(SHRINK_Floor, rebuilt << 2)) &&
-      (rebuilt <= size - (size >> 3) || (!fits && rebuilt < size << 1))
+      (smaller || !fits) &&
+      rebuilt < MOVE_Limit
     );
   }
 
-  const rebuilding = 2 * (live + (live >> 2) + (live >> 3));
-  return worth && full(live + dead, reserve + rebuilding, size) && !full(live, reserve, size);
+  return (
+    !(spare && smaller) &&
+    dead >= max(max(DEAD_Floor, size >> 3), live >> 1) &&
+    fits &&
+    beside + (beside >> 3) + part + reserve >= size &&
+    !full(live, reserve, size)
+  );
 }
 
 /**
@@ -342,24 +359,16 @@ export function traitsOf(dom: Domain, abc: u32, kind: u32, owner: u32): i32 {
  * revival. Nothing of the other ABCs is left in it, not even a name only
  * they spelled. Each live ABC links as it did, since no ABC let go of was
  * seen by a live one, and what a method compiles to depends only on the
- * ABCs its domain sees and on those answers, so it compiles alike. Null,
- * leaving dom one as it was, if an ABC does not link again or an answer
- * comes out an error, which would be a bug.
- */
-export function rebuilt(dom: Domain): Domain | null {
-  const rebuild = new Rebuild(dom);
-  rebuild.step(u64.MAX_VALUE);
-  return rebuild.fresh;
-}
-
-/**
- * rebuilt a part at a time, so that a host may collect each part's garbage
+ * ABCs its domain sees and on those answers, so it compiles alike.
+ *
+ * Made a part at a time, so that a host may collect each part's garbage
  * before the next: step until it returns true, with nothing else changing
  * the domain or decoding in between. A large application's rebuild
  * verifies every verified ABC again, whose garbage, made in one call, took
- * more memory than the new tables. The parts do what rebuilt does, in its
+ * more memory than the new tables. The parts do the same in the same
  * order, however they are cut; `fresh` is the new Domain once done, or
- * null if an ABC did not link or an answer came out an error.
+ * null, leaving the old one as it was, if an ABC did not link again or an
+ * answer came out an error, which would be a bug.
  */
 @final
 export class Rebuild {

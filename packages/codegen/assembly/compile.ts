@@ -27,6 +27,7 @@ import {
   loadDomain,
   loadedAll,
   loadedSize,
+  MOVE_Limit,
   Rebuild,
   restore,
   revive,
@@ -87,6 +88,8 @@ export function domainAdd(bytes: Uint8Array, builtin: bool, appDomain: i32 = 0):
 
 /** A new application domain, a child of `parent`'s: its number, or -1 if `parent` was never made or was dropped. */
 export function domainChild(parent: i32): i32 {
+  // A rebuild under way shares the domain tree this grows.
+  leaveRebuild();
   return isLive(parent) ? <i32>domain.childDomain(<u32>parent) : -1;
 }
 
@@ -172,7 +175,7 @@ export function domainRevive(appDomain: i32, stepped: bool = false): i32 {
   }
 
   if (stepped) {
-    rebuilding = new Rebuild(domain);
+    start(new Rebuild(domain), rebuildBudget());
     revivedBottom = <i32>bottom;
     revivedTop = top;
     return 2;
@@ -197,7 +200,7 @@ export function domainRevive(appDomain: i32, stepped: bool = false): i32 {
  * at a time.
  */
 export function domainCompact(stepped: bool = false): bool {
-  if (!wantsRebuild(domain, rebuildBudget(), false)) {
+  if (!wantsRebuild(domain, rebuildBudget(), false, false)) {
     return false;
   }
 
@@ -205,7 +208,7 @@ export function domainCompact(stepped: bool = false): bool {
 }
 
 /**
- * The domain built again from its live ABCs (see rebuilt in avm2/link/lifetime.ts), worth it
+ * The domain built again from its live ABCs (see Rebuild in avm2/link/lifetime.ts), worth it
  * or not, as the fuzzers ask; false, leaving it, if one did not link. With
  * `stepped`, started, for domainRebuildStep to do a part at a time.
  */
@@ -213,7 +216,7 @@ export function domainRebuild(stepped: bool = false): bool {
   abandon();
   const rebuild = new Rebuild(domain);
   if (stepped) {
-    rebuilding = rebuild;
+    start(rebuild, rebuildBudget());
     return true;
   }
 
@@ -226,9 +229,9 @@ export function domainRebuild(stepped: bool = false): bool {
  * while some is left, the host collecting garbage before it asks for the
  * next, 1 once done, and -1 if it failed, leaving the domain as it was,
  * and a domain being revived evicted, or if none was started. A part makes
- * about rebuildBudget's bytes of garbage, so that codegen's memory, which
- * never shrinks, holds the old tables and the new and little more:
- * verifying every ABC again in one call took more than the tables.
+ * about the bytes of garbage the rebuild was started with (rebuildBudget),
+ * so that memory holds the old tables, if any, and the new and little
+ * more: verifying every ABC again in one call took more than the tables.
  * Nothing else may be called in between but __collect: anything that
  * compiles or changes the domain abandons it (see abandon).
  */
@@ -238,7 +241,7 @@ export function domainRebuildStep(): i32 {
     return -1;
   }
 
-  if (!rebuild.step(rebuildBudget())) {
+  if (!rebuild.step(rebuildingBudget)) {
     return 0;
   }
 
@@ -249,6 +252,7 @@ export function domainRebuildStep(): i32 {
   }
 
   unreviveRebuilt();
+  releaseDecoder();
   return -1;
 }
 
@@ -265,8 +269,19 @@ function rebuildBudget(): u64 {
     : partBudget;
 }
 
-/** The rebuild a part at a time, and the evicted domains it revives, from `revivedBottom` up to `revivedTop`; -1 for none. */
+/** Start `rebuild`, for domainRebuildStep to do a part of `budget` bytes of garbage at a time. */
+function start(rebuild: Rebuild, budget: u64): void {
+  rebuilding = rebuild;
+  rebuildingBudget = budget;
+}
+
+/**
+ * The rebuild a part at a time and the garbage each part may make, and the
+ * evicted domains it revives, from `revivedBottom` up to `revivedTop`; -1
+ * for none.
+ */
 let rebuilding: Rebuild | null = null;
+let rebuildingBudget: u64 = 0;
 let revivedBottom: i32 = -1;
 let revivedTop: u32 = 0;
 
@@ -330,8 +345,16 @@ export function domainLoad(words: Uint8Array): bool {
     return false;
   }
 
-  // Memory grown at once, by a block let go of at once (see rebuiltSize).
-  heap.free(heap.alloc(<usize>loadedSize(loaded, rebuildBudget())));
+  // Memory grown at once, by a block let go of at once (see rebuiltSize),
+  // and the rebuild's parts held to the garbage that size allowed for.
+  loadingBudget = rebuildBudget();
+  const size = loadedSize(loaded, loadingBudget);
+  if (size >= MOVE_Limit) {
+    loading = null;
+    return false;
+  }
+
+  heap.free(heap.alloc(<usize>size));
   return true;
 }
 
@@ -362,12 +385,13 @@ export function domainLoadRebuild(): bool {
   loading = null;
   verified = null;
   written = null;
-  rebuilding = new Rebuild(into.dom);
+  start(new Rebuild(into.dom), loadingBudget);
   return true;
 }
 
-/** The domain domainLoad started, until domainLoadRebuild. */
+/** The domain domainLoad started, until domainLoadRebuild, and the garbage its parts may make. */
 let loading: Loaded | null = null;
+let loadingBudget: u64 = 0;
 
 /**
  * Record what application domain `appDomain` has found by a name, in the
@@ -522,8 +546,14 @@ function abandon(): void {
     pending = null;
   }
 
-  // A rebuild left part way changed nothing of the domain but what it
-  // revived; the decoder may be made for its new one.
+  leaveRebuild();
+}
+
+/**
+ * Leave the rebuild under way, which changed nothing of the domain but
+ * what it revives; the decoder may be made for its new one.
+ */
+function leaveRebuild(): void {
   if (rebuilding !== null) {
     rebuilding = null;
     unreviveRebuilt();
@@ -697,16 +727,17 @@ function emitEach(bodies: string, reuse: bool, which: i32): Output {
 }
 
 /**
- * Whether domainCompact would rebuild now or, with `elsewhere`, whether a
- * rebuild in another instance (domainSaveBytes) is worth it: memory would
+ * Whether domainCompact would rebuild now, the host holding a `spare`
+ * instance or not, or, with `elsewhere`, whether a rebuild in another
+ * instance (domainSaveBytes) is worth it: memory would
  * grow before long and the ABCs of dropped and evicted domains hold
  * enough to keep it from growing, or, elsewhere, memory is far above what
  * the live ones need (see wantsRebuild in avm2/link/lifetime.ts). A pure
  * query, so that a host collects garbage before a rebuild only when one
  * is due.
  */
-export function domainWantsCompact(elsewhere: bool = false): bool {
-  return wantsRebuild(domain, rebuildBudget(), elsewhere);
+export function domainWantsCompact(elsewhere: bool = false, spare: bool = false): bool {
+  return wantsRebuild(domain, rebuildBudget(), elsewhere, spare);
 }
 
 /**

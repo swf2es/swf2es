@@ -48,21 +48,26 @@ three, with the same VerifyError numbers:
    rebuild in place kept, for good, as much as the dead tables and the
    old and the new ones took together, and over a long session of busy
    real content that loads some 1,500 SWFs, many of them again and
-   again, memory went from one doubling to the next. The new instance is given
-   what a rebuild reads of the domain, its log and the live ABCs' bytes,
-   and its memory is grown at once to what they will hold, by an estimate
-   from the tables' rows, so that it holds the live tables and a reserve,
-   and the old instance's memory goes with it. It is due when the tables
-   come near memory's size, which a load would then grow, and the dead
-   ABCs weigh 4 MB, a sixteenth of memory and a quarter of the live ones,
-   so that a rebuild of seconds is not done for a few megabytes; or when
-   memory is four times what the live ones need, as a large compile
-   leaves it; and only where the new instance would take an eighth less
-   memory at least, or a rebuild in place would not fit and double it. Otherwise, as until the new instance is made, `compact`
-   rebuilds in place, before the old tables and the new would no longer
-   fit. `usage` tells the estimate, and `compact` asks the same
-   before it collects and rebuilds; a host calls it when it has time, as
-   the player does when idle. A rebuild
+   again, memory went from one doubling to the next. The new instance is
+   given what a rebuild reads of the domain, its log and the live ABCs'
+   bytes, and its memory is grown at once to what they will hold, by an
+   estimate from the tables' rows, so that it holds the live tables and a
+   reserve, and the old instance's memory goes with it. It is due when
+   the tables come near memory's size, which a load would then grow, and
+   the dead ABCs weigh 4 MB, a sixteenth of memory and a quarter of the
+   live ones, so that a rebuild of seconds is not done for a few
+   megabytes; or when memory is four times what the live ones need, as a
+   large compile leaves it; and only where the new instance would take an
+   eighth less memory at least, or a rebuild in place would not fit.
+   Otherwise, and while there is no new instance, as one that could not
+   be made or used, `compact` rebuilds in place only while the old tables,
+   the dead and the new fit in memory, once a few more loads would leave
+   them no room, for dead ones of an eighth of memory and half the live
+   ones, and, with a new instance at hand, only where a move would not
+   take less memory, as for a small domain; past that it waits, and
+   memory grows only as the loads need it. `usage` tells the estimate, and `compact` asks the same before it
+   collects and rebuilds; a host calls it when it has time, as the player
+   does when idle. A rebuild
    links the live ABCs again, in their places, and does again, where it
    happened, what the domain has logged: each finding recorded, and the
    first answer to what resolves lazily, a traits' types, a method's

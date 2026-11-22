@@ -276,6 +276,48 @@ test("a long session's compactions rebuild the domain in a new instance, whose m
   assert.equal(codegen.compileModule(["b", "a"], 1), compiled);
 });
 
+test("a compaction never grows codegen's memory, however large the live ABCs", {
+  skip,
+}, async () => {
+  // A main domain of many ABCs, live for good, and as many loads again
+  // into children that go, compacting after each: the tables come near
+  // memory's size where the new ones no longer fit beside the old, and in
+  // place such a rebuild doubled memory. Moved, or put off, memory grows
+  // only as the loads grow it: a move to a new instance a little larger,
+  // where memory was about to grow anyway, at most.
+  const builtin = new Uint8Array(await readFile(new URL("builtin.abc", generated)));
+  const turn = () => new Promise((resolve) => setImmediate(resolve));
+  const codegen = await createCodegen(module);
+  await turn();
+  codegen.reset();
+  assert.equal(codegen.add(builtin, true), 0);
+  codegen.compileModule();
+  const main = codegen.childDomain(0);
+  for (let n = 0; n < 100; n++) {
+    assert.equal(codegen.add(builtin, true, main), 0);
+    codegen.compileModule();
+  }
+
+  let compactions = 0;
+  for (let n = 0; n < 150; n++) {
+    const child = codegen.childDomain(main);
+    assert.equal(codegen.add(builtin, true, child), 0);
+    codegen.compileModule();
+    codegen.dropDomain(child);
+    await turn();
+    const before = codegen.memoryBytes();
+    if (codegen.compact()) {
+      compactions++;
+      assert.ok(
+        codegen.memoryBytes() <= before,
+        `load ${n}: ${before} to ${codegen.memoryBytes()}`,
+      );
+    }
+  }
+
+  assert.ok(compactions > 0);
+});
+
 test("a module's source map and entries are written when asked for, from it alone", () => {
   testing.domainReset(50);
   testing.domainAdd(script([0x24, 7, 0x24, 5, 0xa0, 0x48]), false);
