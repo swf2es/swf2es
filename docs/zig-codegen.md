@@ -691,6 +691,10 @@ the slice's measurement. Eleven interleaved runs: the corpus's 1,680 AVM1
 SWFs' modules 474 ms against AssemblyScript's 444 (1.07), memory 14.4
 against 16.0 MiB; the obfuscated SWF's module, every block and its 19,722
 units alone, 1,699 ms against 2,213 (0.77), memory 248 against 356 MiB.
+The production path's high water on it, step by step in one instance
+(what index.ts calls): the module kept, 191 MiB (AssemblyScript 356);
+every block from the held SWF in one call, 248; every unit from it, 248.
+The test-only emitEach with a fresh emitter a block reaches 220 alone.
 One AVM1 unit test (`avm1-emit.test.ts`'s lazy blocks) reads
 `Codegen.usage()`, which waits for stage 3's `domainUsage`.
 
