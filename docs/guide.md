@@ -156,18 +156,19 @@ it through a Bitmap scaled to fit, as a map flattened for speed. Flash
 stretches those pixels when the stage is shown larger, and so does the
 player, so in a large window or on a dense screen such art looks blocky
 beside vectors drawn directly. `configure({ bitmapResolution: "display" })`
-keeps such a bitmap at the screen's resolution instead, up to 4 screen
-pixels a stage pixel, while scripts only draw display objects into it,
-fill it and show it, and draws it again when the window's scale changes:
-it then looks as the vectors would. It departs from Flash only on the
-screen: each draw goes into a copy at the bitmap's own size too, as it
-would with the option off, and whatever reads the bitmap's pixels gets
-that copy's, the pixels Flash would have made; the bitmap stays at that
-size from then on. It costs texture memory, the square of the scale times
-the bitmap's and the copy's (about 37 MB for a stage-sized bitmap shown at
-3840 by 2160, 4 MB without), at most 256 MB for all of them by default
-(`bitmapResolutionBudget` on the renderer), and the GPU time of drawing
-that many more pixels when the SWF draws into it. It is off by default,
+shows such a bitmap at the screen's resolution instead, up to 4 screen
+pixels a stage pixel, for as long as scripts only draw display objects into
+it and fill it since it was of one colour, and draws it again when the
+scale it is shown at changes: it then looks as the vectors would. It departs
+from Flash only on the screen: the bitmap itself, and every pixel scripts
+read of it, are as with the option off. Anything else that changes the
+bitmap, such as setPixel or copyPixels into it, shows it as Flash would from
+then on. It costs texture memory, the square of the scale times the bitmap's
+(about 33 MB for a stage-sized bitmap shown at 3840 by 2160), at most 256 MB
+for all of them by default (`bitmapResolutionBudget` on the renderer), the GPU
+time of drawing that many more pixels when the SWF draws into a bitmap shown
+so, and the art drawn, which the renderer keeps while the bitmap lives to
+draw it again. It is off by default,
 `"stage"`; [Bitmaps](architecture/bitmaps.md) has the details.
 
 It has `load(url | bytes)` and `destroy()`, which

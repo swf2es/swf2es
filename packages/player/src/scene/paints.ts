@@ -19,7 +19,6 @@ import type { PixelRect } from "../bitmap/pixel-rect.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import type { GradientFill } from "../display/shapes.js";
 import { makeRoom, moveLast, same } from "../display/value-lists.js";
-import { areaDown, type DisplayBitmaps, texelsOf } from "./display-bitmaps.js";
 import { type BitmapSampling, type PartPaint, radialTexels } from "./shapes.js";
 
 /**
@@ -40,8 +39,6 @@ interface Kept {
   copy: StoreCopy | null;
   /** Whether it is kept however long it goes undrawn, as it holds what was drawn alone. */
   pinned: boolean;
-  /** Texels a pixel of a store drawn at display resolution (BitmapStore.atDisplay); null for any other. */
-  zoom: number | null;
 }
 
 /** What a store's GPU copy asks of the renderer, on textures by id; each null or false where it cannot. */
@@ -65,45 +62,21 @@ class StoreCopy implements GpuCopy {
   ) {}
 
   read(): Uint32Array {
-    const { width, height } = this.store;
-    const zoom = this.paints.zoomOf(this.store);
-    if (zoom !== null) {
-      // Drawn again at the store's size, where what was drawn into it would draw so still.
-      const again = this.paints.display?.demoted(this.store) ?? null;
-      if (again) {
-        this.paints.readBack(this.store);
-        return again;
-      }
-    }
-
-    const across = zoom === null ? width : texelsOf(width, zoom);
-    const down = zoom === null ? height : texelsOf(height, zoom);
-    const bytes = this.paints.readStore(this.handle, across, down);
+    const bytes = this.paints.readStore(this.handle, this.store.width, this.store.height);
     // Gone with a lost context: what the CPU held before the draws.
     if (!bytes) {
       return this.store.lostOnGpu(this);
     }
 
     this.paints.readBack(this.store);
-    return zoom === null
-      ? argbOf(bytes)
-      : areaDown(argbOf(bytes), across, down, width, height, zoom);
+    return argbOf(bytes);
   }
 
   copy(source: BitmapStore, rect: PixelRect, dx: number, dy: number): boolean {
-    // A copy into a store at display resolution writes whole pixels: read back first.
-    if (this.paints.zoomOf(this.store) !== null) {
-      return false;
-    }
-
     return this.paints.copyStore(source, rect, this.handle, dx, dy);
   }
 
   fill(rect: PixelRect, pixel: number): boolean {
-    if (this.paints.zoomOf(this.store) !== null) {
-      return this.paints.display?.filled(this.store, this.handle, rect, pixel) ?? false;
-    }
-
     return this.paints.fillStore(this.handle, rect, pixel);
   }
 
@@ -115,8 +88,6 @@ class StoreCopy implements GpuCopy {
 /** Bitmaps' and gradients' textures, made as first drawn and kept while they are. */
 export class Paints {
   private readonly stores = new WeakMap<BitmapStore, Kept>();
-  /** What keeps stores at display resolution, where the renderer does (RenderView's `bitmapResolution`). */
-  display: DisplayBitmaps | null = null;
   /** Each gradient's textures, by the region a radial one covers (null for a linear one), the latest used last. */
   private readonly gradients = new WeakMap<
     GradientFill,
@@ -161,15 +132,8 @@ export class Paints {
    * store still of the one colour it was made (`solidPixel`) is made by
    * clearing the texture to it, with no pixels made, converted or uploaded.
    */
-  storeTexture(store: BitmapStore, idle?: number, shown = false): TextureHandle {
+  storeTexture(store: BitmapStore, idle?: number): TextureHandle {
     const kept = this.stores.get(store);
-    if (kept && kept.zoom !== null && !shown && this.textures.alive(kept.handle)) {
-      // Sampled by anything but a Bitmap on the stage (a fill, a mesh, a filter's map, a draw into
-      // another store): its pixels read back at the store's size, and uploaded so.
-      void store.readable;
-      kept.version = -1;
-    }
-
     if (kept && this.textures.alive(kept.handle)) {
       const id = kept.handle.id;
       // What was drawn, filled or copied into the texture is newest there: shown as it is.
@@ -182,11 +146,6 @@ export class Paints {
         // Counted current only once set: pixels that could not be made are asked for again.
         this.textures.set(id, store.width, store.height, this.bytesOf(store, id), idle);
         kept.version = store.version;
-        if (kept.zoom !== null) {
-          kept.zoom = null;
-          refuseDisplay(store);
-        }
-
         store.uploaded();
       } else if (idle !== undefined) {
         this.textures.idleWithin(id, idle);
@@ -208,11 +167,6 @@ export class Paints {
       this.collected.unregister(kept);
     }
 
-    // What a lost context took of a store at display resolution is not drawn again so.
-    if (store.atDisplay) {
-      refuseDisplay(store);
-    }
-
     const solid = store.holdsAlpha ? null : store.solidPixel;
     const handle =
       solid === null
@@ -220,55 +174,8 @@ export class Paints {
         : this.textures.addFilled(store.width, store.height, solid, idle);
     // The texture holds the pixels now: a library bitmap's go till they are read, made again then.
     store.uploaded();
-    this.stores.set(store, {
-      handle,
-      version: store.version,
-      copy: null,
-      pinned: false,
-      zoom: null,
-    });
+    this.stores.set(store, { handle, version: store.version, copy: null, pinned: false });
     return handle;
-  }
-
-  /** Texels a pixel of `store`'s texture where it holds the store at display resolution; else null. */
-  zoomOf(store: BitmapStore): number | null {
-    const kept = this.stores.get(store);
-    return kept && this.textures.alive(kept.handle) ? kept.zoom : null;
-  }
-
-  /**
-   * `handle`, a `width` by `height` texture (`scratch`) drawn as `store`
-   * at `zoom` texels a pixel, made the store's texture in place of the one
-   * it had, which goes; `drawn` is to follow.
-   */
-  adopt(store: BitmapStore, handle: TextureHandle, zoom: number): void {
-    const kept = this.stores.get(store);
-    if (kept) {
-      if (kept.copy) {
-        store.copies.delete(kept.copy);
-        if (store.gpu === kept.copy) {
-          store.gpu = null;
-        }
-      }
-
-      this.collected.unregister(kept);
-      if (this.textures.alive(kept.handle)) {
-        this.textures.remove(kept.handle.id);
-      }
-    }
-
-    this.stores.set(store, { handle, version: store.version, copy: null, pinned: false, zoom });
-  }
-
-  /** A `width` by `height` texture of its own cleared to `pixel`, premultiplied ARGB, till `drop`ped. */
-  scratch(width: number, height: number, pixel: number): TextureHandle {
-    return this.textures.addFilled(width, height, pixel, Number.POSITIVE_INFINITY);
-  }
-
-  drop(handle: TextureHandle): void {
-    if (this.textures.alive(handle)) {
-      this.textures.remove(handle.id);
-    }
   }
 
   /**
@@ -301,7 +208,6 @@ export class Paints {
    * texture goes idle as any other.
    */
   readBack(store: BitmapStore): void {
-    refuseDisplay(store);
     const kept = this.stores.get(store);
     if (kept?.pinned) {
       kept.pinned = false;
@@ -472,10 +378,4 @@ export function paintSampler(part: PartPaint, smoothing: boolean): number {
   }
 
   return paint.spread === 1 ? MIRROR : paint.spread === 2 ? REPEAT : CLAMP;
-}
-
-/** `store` kept at Flash's resolution from now on: read, written on the CPU or lost at the display's. */
-function refuseDisplay(store: BitmapStore): void {
-  store.atDisplay = false;
-  store.displayRefused = true;
 }

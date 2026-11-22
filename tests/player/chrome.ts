@@ -868,14 +868,25 @@ export interface SteppedPage {
   /**
    * Start a SWF at `url` on the page, letting go of any opened before;
    * what stopped it, if anything. `cached` gives its player the page's
-   * IndexedDB module cache, which every such player shares.
+   * IndexedDB module cache, which every such player shares. `display`
+   * gives it a renderer that draws each frame at twice the stage and shows
+   * bitmaps at that resolution (RenderViewOptions' `bitmapResolution`).
    */
-  open(swf: Uint8Array, url: string, cached?: boolean): Promise<string | null>;
-  /** Play the opened SWF until it has traced `lines` lines or played `frames` frames. */
+  open(swf: Uint8Array, url: string, cached?: boolean, display?: boolean): Promise<string | null>;
+  /**
+   * Play the opened SWF until it has traced `lines` lines or played `frames` frames; `display`,
+   * the texture its bitmaps hold at display resolution then.
+   */
   step(
     lines: number,
     frames: number,
-  ): Promise<{ lines: number; codegen: number; live: number; error: string | null }>;
+  ): Promise<{
+    lines: number;
+    codegen: number;
+    live: number;
+    display: number;
+    error: string | null;
+  }>;
   /** Play a SWF for a frame, as runPlayer does a job; what stopped it, if anything. */
   run(swf: Uint8Array, url: string): Promise<string | null>;
   /** What the opened SWF has traced, a line each. */
@@ -907,8 +918,8 @@ export function withSteppedPage<T>(
       };
       const base64 = (swf: Uint8Array) => JSON.stringify(Buffer.from(swf).toString("base64"));
       return run({
-        open: (swf, url, cached = false) =>
-          answer(`openSwf(${base64(swf)}, ${JSON.stringify(url)}, ${cached})`),
+        open: (swf, url, cached = false, display = false) =>
+          answer(`openSwf(${base64(swf)}, ${JSON.stringify(url)}, ${cached}, ${display})`),
         step: (lines, frames) => answer(`stepSwf(${lines}, ${frames})`),
         trace: () => answer("traceSwf()"),
         close: async () => {

@@ -210,90 +210,80 @@ with it. Without a renderer, as in node, a store is the CPU's alone.
 ## Bitmaps at the display's resolution
 
 Content often flattens vector art: it draws still layers into a BitmapData
-the stage's size and shows that through a Bitmap, often unsmoothed, in
-the layers' place. Flash stretches those pixels when the stage is shown
-larger, and so does the renderer by default, so on a large or dense
-screen the art turns blocky beside vectors drawn directly. With
-`bitmapResolution: "display"` (RenderViewOptions, the element's
-`configure`, the desktop app's View › Sharp Bitmaps), off by default, the
-renderer keeps such a store at the screen's resolution instead
-(`scene/display-bitmaps.ts`).
+the stage's size and shows that through a Bitmap, often unsmoothed, in the
+layers' place. Flash stretches those pixels when the stage is shown larger,
+and so does the renderer by default, so on a large or dense screen the art
+turns blocky beside vectors drawn directly. With `bitmapResolution:
+"display"` (RenderViewOptions, the element's `configure`, the desktop app's
+View › Sharp Bitmaps), off by default, the renderer shows such a bitmap at
+the screen's resolution instead (`scene/display-bitmaps.ts`).
 
-A store made of one colour is promoted on its first GPU draw of a display
-object (`drawInto`): its texture is made at the screen's pixels a stage
-pixel, exactly (2.7 stays 2.7) and at most 4, as many texels as that makes
-of the store's pixels, the last partly covered. A draw at display resolution
-renders the object as the stage would at that scale: lines, filters and text
-at that many units a pixel, hairlines a texel wide, at the draw's own 4 × 4
-samples, in tiles of at most 4096 / samples texels a side, so the samples'
-layer never outgrows what a draw at a texel a pixel already takes. An identity
-colour transform counts as none, so a layer drawn with its own
-`transform.colorTransform` stays on the GPU. `fillRect` fills the texels
-under the rectangle, its edges rounded. A Bitmap on the stage shows the
-texture through a quad of its texels, each 1/zoom of a pixel. Where that
-places texels one for one on the screen's pixels (a Bitmap the stage's size
-at its scale), the quad goes onto whole pixels and is read unsmoothed, which
-gives the pixels a stage drawing the same art would. Elsewhere it is smoothed,
-whatever the Bitmap's `smoothing`.
+The store itself goes on exactly as with the option off: every draw, fill,
+read, copy and filter takes its own way, so what scripts read is the pixels
+Flash's would be, whatever the option. Beside it the renderer keeps a record
+of a store that was all of one colour (as made, or filled whole) and since
+was only drawn into with display objects in the normal blend mode, with no
+colour transform or one that changes nothing, and filled: `drawObject` tells
+the renderer of each draw once done (`Drawer.drawn`), with the store's
+version before it, and fillRect tells it of each fill (`BitmapStore.fillWatch`).
+A record stands for the store while the store's version is the one it last
+saw: anything else that changes the store (a pixel set, a copy into it, a
+scroll, a draw of a bitmap or with a colour transform) leaves it behind,
+and the record ends there till a whole fill or a draw into a store of one
+colour starts it again. So does a draw whose subtree shows the store itself,
+or one that would not draw the same again from the record (below). Reads
+change no version and leave the record as it is.
 
-Scripts never see the difference. Each store at display resolution keeps a
-store of its own at its size, a shadow, made of the same colour, and every
-fill and draw goes into the shadow too, first, by `drawDisplayObject` with
-the matrix, colour transform and clip the script gave it: as the store
-itself would have gone with the option off, at the same moment. (First,
-because the renderer reuses the fill geometry an earlier draw built: a draw
-at the store's size after one at display resolution came out a level apart
-here and there.) The first operation that reads the store's pixels or writes
-them on the CPU (getPixel, getPixels, copyPixels in or out, a draw with a
-colour transform or blend, setPixel, scroll, applyFilter, encode, hit tests
-and the rest) goes through `BitmapStore.readable`, which reads the GPU copy
-back; for a store at display resolution that is the shadow's pixels, which
-are the option-off ones exactly, and the store stays at a texel a pixel from
-then on, its shadow let go of. The display keeps the sharper texture till
-the store next changes. (Were a shadow ever missing, the texture would be
-averaged down by area instead, `areaDown`.) A store's texture sampled by anything but a Bitmap on the stage (a
-bitmap fill, drawTriangles, a displacement map, a BitmapData.draw of
-something showing it) is brought back so first; a draw from a script does it
-before it walks for the stores its subtree samples (`settle`).
+Each frame a Bitmap on the stage shows a store with a record, the walk notes
+the screen pixels one of the store's pixels takes there (`DisplayBitmaps.shown`).
+At the next frame's start, where that is more than 1.1, the record is drawn
+into a texture of the renderer's own, made at that scale exactly (2.7 stays
+2.7), at most 4, within a texture and 16M texels: each draw as the stage would
+draw the art at that scale, lines, filters and text at that many units a
+pixel, hairlines a texel wide, at the draw's own 4 × 4 samples, in tiles of at
+most 4096 / samples texels a side so the samples' layer never outgrows what a
+draw at a texel a pixel takes; an object with filters, which read past a
+tile's edge, is drawn whole instead, at fewer samples where it is large.
+Fills fill the texels under them, their edges rounded. From then on each
+draw and fill the record follows goes into the texture too, and the Bitmap
+shows the texture through a quad of its texels, each 1/zoom of a pixel:
+where that lands them one for one on the screen's pixels, on whole pixels
+and read unsmoothed, which gives what the stage drawing the same art gives;
+elsewhere smoothed. While the record no longer stands for the store, the
+Bitmap shows the store as with the option off, its texture let go of. So it
+does where the store is shown at about a pixel a stage pixel, or no Bitmap
+has shown it for 300 frames.
 
-The renderer also records the store's colour and every fill and draw since,
-each draw with `pickWork.changes` once drawn: `DisplayObject.invalidate`
-stamps each change of an object with that count (`changedAt`), so a draw
-would draw the same again while nothing in its object's subtree is stamped
-later, none of the stores its fills sample changed version, and nothing in
-it hangs on what lies outside the subtree or changes unseen (a mask, 3D, a
-shader, a video). Only the texture is drawn again from it, so a stamp missed
-could only show stale art, never give scripts other pixels. A fill of the
-whole store starts the record again; past 256 steps without one it is let
-go of, and the store keeps its scale.
+A record can be drawn again only while what it drew would draw the same:
+`DisplayObject.invalidate` stamps each object with `pickWork.changes`
+(`changedAt`), and a draw's object qualifies while nothing in its subtree is
+stamped later than the draw, none of the stores its fills sample changed
+version, and nothing in it hangs on what lies outside the subtree or changes
+unseen: a mask, 3D, a shader, a displacement map or a video. Where it no
+longer does, the record ends and the Bitmap shows the store. When the scale
+the store is shown at strays from the texture's by more than 0.2 % and holds
+for eight rendered frames (a window resized or maximised, moved to a screen
+of another density, a Bitmap scaled), the record is drawn again into a new
+texture, which takes the old one's place once all of it drew. A record keeps
+at most 256 draws and fills; a fill of the whole store starts it again, so a
+store cleared and drawn into on every frame keeps one frame's.
 
-A store is first drawn at the screen's pixels a stage pixel, as no Bitmap
-may show it yet. Each frame a Bitmap on the stage shows it, the walk notes
-the screen pixels a pixel of the store takes there (`DisplayBitmaps.shown`):
-a bitmap sized to a map's size is often shown a little larger or smaller
-than a pixel a stage pixel. When that scale, capped as above, strays from
-the texture's by more than 0.2 % and holds for eight rendered frames (a
-window resized or maximised, moved to a screen of another density, or a
-Bitmap shown larger), a store whose record still replays is drawn again at
-it into a new texture, which takes the old one's place only once all of it
-drew, so its texels land on the screen's pixels again; one whose record no
-longer does keeps its scale and is shown resampled. A fill of a whole store
-of one colour leaves it of one colour (`BitmapStore.fillPixel`), so a store
-cleared before its first draw is promoted too; a store cleared and drawn
-into on every frame keeps a record of one frame's draws.
+After a lost context the texture is not made again: what the store's own
+texture held of the draws was lost too, and the Bitmap shows the store, as
+with the option off, till its record starts again.
 
-What it costs: a store's texture takes zoom² times the memory, at most 64 MB
-(16M texels), and its shadow as much again as the store at a texel a pixel;
-the stores at display resolution take 256 MB together by default
+What it costs: a store's texture takes zoom² times the store's memory, at
+most 64 MB, and the textures together 256 MB by default
 (`bitmapResolutionBudget`; less where `navigator.deviceMemory` says 4 GB or
-less, 32 MB a GB, and 128 MB on a touch-only device), past which new stores
-stay at a texel a pixel. A draw renders zoom² times the pixels, in more tiles
-for a large store, plus the shadow's draw at the store's size, and the record
-holds the objects drawn till the store is read, disposed or collected. A
-draw with no colour transform goes on the GPU both times; one with the
-layer's own identity transform, as content often passes, draws the shadow
-through the snapshot it takes with the option off, read back. Nothing else
-is read back while scripts only draw, fill and show.
+less, 32 MB a GB, and 128 MB on a touch-only device), past which more stores
+are shown as they are. Each draw the record follows into a texture renders
+zoom² times the pixels again, in more tiles for a large store, beside the
+store's own draw; each draw into a store with a record walks the drawn
+subtree once more to note what it samples. The record is the store's alone
+(a WeakMap keyed by it) and holds the objects drawn while the store lives, so
+art drawn and dropped lives as long as its bitmap does; nothing outside the
+store reaches the record, so a store let go of goes with its record and its
+texture.
 
 ## A SWF's bitmaps
 

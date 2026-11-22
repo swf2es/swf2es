@@ -1,11 +1,18 @@
-// Vector art drawn into a BitmapData the stage's size and shown through an
-// unsmoothed Bitmap scaled to the art's size, as content flattens a map's
-// still layers: on the left the bitmap, on the right the same art drawn as
-// vectors. The bitmap takes about the half's width and a height in proportion,
-// each layer drawn through a matrix that fits it, its own colour transform
-// and a clip of the bitmap's size. Thirty frames on a grid of its pixels is
-// traced, which reads it back, and a marker filled: what scripts see of it
-// at its size, and how it shows after.
+// Vector art drawn into a BitmapData and shown through an unsmoothed Bitmap
+// scaled to the art's size, as content flattens a map's still layers: in the
+// top 240 rows, on the left the bitmap, on the right the same art drawn as
+// vectors. The bitmap takes about the half's width and a height in
+// proportion, each layer drawn through a matrix that fits it, its own colour
+// transform and a clip of the bitmap's size.
+//
+// Below them, bitmaps shown larger than a pixel a stage pixel that go other
+// ways: one cleared and drawn into from a turning sprite on every frame; one
+// whose first draw is of a sprite that shows that bitmap itself; one
+// disposed on frame 25; one whose Bitmap is scaled up on frame 12; a copy of
+// the main bitmap's pixels made on frame 20; and a shape filled with the main
+// bitmap. On frame 30 the main bitmap, the drawn-into one, the one that drew
+// itself and the copy are traced as grids of pixels, which reads them back,
+// and a marker is filled into the main one.
 package
 {
 	import flash.display.Bitmap;
@@ -15,6 +22,7 @@ package
 	import flash.display.Sprite;
 	import flash.events.Event;
 	import flash.geom.Matrix;
+	import flash.geom.Point;
 	import flash.geom.Rectangle;
 
 	public class Main extends Sprite
@@ -24,6 +32,13 @@ package
 		private static const ART_HEIGHT:Number = 480;
 
 		private var _data:BitmapData;
+		private var _live:BitmapData;
+		private var _self:BitmapData;
+		private var _spare:BitmapData;
+		private var _copy:BitmapData;
+		private var _turning:Sprite;
+		private var _strip:Sprite;
+		private var _grow:Bitmap;
 		private var _frame:int = 0;
 
 		public function Main()
@@ -62,28 +77,107 @@ package
 			left.addChildAt(shown, left.getChildIndex(ground));
 			left.removeChild(ground);
 			left.removeChild(details);
+
+			_strip = new Sprite();
+			_strip.y = 250;
+			addChild(_strip);
+			_turning = blobs(60, 40);
+			_live = new BitmapData(60, 40, true, 0);
+			strip(_live, 5, 1.25);
+			_self = new BitmapData(60, 40, true, 0);
+			strip(_self, 90, 1.25);
+			_spare = new BitmapData(40, 30, true, 0);
+			_spare.draw(blobs(40, 30));
+			strip(_spare, 175, 1.4);
+			var grown:BitmapData = new BitmapData(40, 30, true, 0);
+			grown.draw(blobs(40, 30));
+			_grow = strip(grown, 240, 1);
+			var filled:Shape = new Shape();
+			filled.graphics.beginBitmapFill(_data, new Matrix(0.25, 0, 0, 0.25));
+			filled.graphics.drawRect(0, 0, 40, 40);
+			filled.graphics.endFill();
+			filled.x = 300;
+			_strip.addChild(filled);
 			addEventListener(Event.ENTER_FRAME, onFrame);
+		}
+
+		/** A Bitmap of `data` in the strip at `x`, scaled by `scale`. */
+		private function strip(data:BitmapData, x:Number, scale:Number):Bitmap
+		{
+			var shown:Bitmap = new Bitmap(data);
+			shown.x = x;
+			shown.scaleX = shown.scaleY = scale;
+			_strip.addChild(shown);
+			return shown;
 		}
 
 		private function onFrame(e:Event):void
 		{
 			_frame++;
-			if (_frame != 30)
+			var m:Matrix = new Matrix();
+			m.translate(-30, -20);
+			m.rotate(_frame / 7);
+			m.translate(30, 20);
+			_live.fillRect(_live.rect, 0);
+			_live.draw(_turning, m);
+			switch (_frame)
 			{
-				return;
+				case 3:
+					// The strip, this bitmap's own Bitmap in it, drawn into it.
+					_self.draw(_strip, new Matrix(0.2, 0, 0, 0.2, 0, 0));
+					break;
+				case 12:
+					_grow.scaleX = _grow.scaleY = 1.4;
+					break;
+				case 20:
+					_copy = new BitmapData(_data.width, _data.height, true, 0);
+					_copy.copyPixels(_data, _data.rect, new Point(0, 0));
+					break;
+				case 25:
+					_spare.dispose();
+					break;
+				case 30:
+					trace("pixels " + grid(_data, 20));
+					trace("live " + grid(_live, 7));
+					trace("self " + grid(_self, 7));
+					trace("copy " + grid(_copy, 20));
+					_data.fillRect(new Rectangle(4, 4, 6, 6), 0xFFFF00FF);
+					break;
 			}
+		}
 
+		/** `data`'s pixels every `step` from (5, 5), in hexadecimal. */
+		private static function grid(data:BitmapData, step:int):String
+		{
 			var line:Array = [];
-			for (var y:int = 5; y < _data.height; y += 20)
+			for (var y:int = 5; y < data.height; y += step)
 			{
-				for (var x:int = 5; x < _data.width; x += 20)
+				for (var x:int = 5; x < data.width; x += step)
 				{
-					line.push(_data.getPixel32(x, y).toString(16));
+					line.push(data.getPixel32(x, y).toString(16));
 				}
 			}
 
-			trace("pixels " + line.join(" "));
-			_data.fillRect(new Rectangle(4, 4, 6, 6), 0xFFFF00FF);
+			return line.join(" ");
+		}
+
+		/** Coloured blobs and a hairline over `w` by `h`. */
+		private static function blobs(w:Number, h:Number):Sprite
+		{
+			var sprite:Sprite = new Sprite();
+			var s:Shape = new Shape();
+			sprite.addChild(s);
+			for (var i:int = 0; i < 6; i++)
+			{
+				s.graphics.beginFill([0xE53935, 0x1E88E5, 0x43A047][i % 3], 0.8);
+				s.graphics.drawCircle(w * (i + 1) / 7, h / 2 + (i % 2 ? 5 : -5), 6 + i);
+				s.graphics.endFill();
+			}
+
+			s.graphics.lineStyle(0, 0);
+			s.graphics.moveTo(2, 2);
+			s.graphics.lineTo(w - 2, h - 2);
+			return sprite;
 		}
 
 		/** A layer of the art: 0 the ground, 1 the details over it. */

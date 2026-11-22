@@ -48,7 +48,7 @@ import { type Linear, settledStretch, stretchOf } from "../display/stretch.js";
 import { StaticTextObject, settleFits, TextObject } from "../display/textobjects.js";
 import { VideoObject } from "../display/videoobject.js";
 import { Clips } from "../display/walk.js";
-import type { DrawCall, Drawer } from "../hosts.js";
+import type { Drawer } from "../hosts.js";
 import type { FocusHighlight } from "../input/focus-highlight.js";
 import type { Player } from "../player.js";
 import {
@@ -59,7 +59,7 @@ import {
   store as saffronStore,
 } from "../text/saffron.js";
 import { AdvancedTexts } from "./advanced.js";
-import { DisplayBitmaps } from "./display-bitmaps.js";
+import { DisplayBitmaps, type Shown, texelsOf } from "./display-bitmaps.js";
 import type { FillTessellator } from "./fills.js";
 import { FilterLayers, type KeptOutput } from "./filter-layers.js";
 import { undrawnFilter } from "./filters.js";
@@ -118,25 +118,25 @@ export interface RenderViewOptions {
    */
   checked?: boolean;
   /**
-   * The resolution BitmapData.draw of display objects keeps a store at:
-   * "stage", Flash's, a texel a pixel (the default); or "display", the
-   * screen's pixels a stage pixel, up to 4, while the store is only drawn
-   * into on the GPU, filled and shown by Bitmaps on the stage, so that
-   * vector art drawn into a bitmap the stage's size and scaled up looks as
-   * the vectors do (scene/display-bitmaps.ts). Scripts see the store at its
-   * size: what reads its pixels or writes them on the CPU brings it back at
-   * a texel a pixel, drawn again so where it can be, and it stays so.
+   * How a Bitmap on the stage shows vector art a SWF drew into its
+   * BitmapData: "stage", as Flash, its pixels stretched (the default); or
+   * "display", the art drawn again at the screen's pixels a stage pixel, up
+   * to 4, for a store only drawn into with display objects and filled since
+   * it was of one colour, so that a bitmap the stage's size scaled up looks
+   * as the vectors do (scene/display-bitmaps.ts). The store itself, and
+   * what scripts read of it, are as with "stage".
    */
   bitmapResolution?: "stage" | "display";
   /**
-   * The most bytes of texture stores at display resolution hold together,
-   * past which more stay at a texel a pixel: by default 256 MB, less on a
-   * device that says it has little memory or has a touch screen alone.
+   * The most bytes of texture the stores shown at the display's resolution
+   * take together, past which more are shown as they are: by default 256 MB,
+   * less on a device that says it has little memory or has a touch screen
+   * alone.
    */
   bitmapResolutionBudget?: number;
 }
 
-/** The bytes of texture stores at display resolution may hold by default (bitmapResolutionBudget). */
+/** The bytes of texture stores shown at display resolution may take by default (bitmapResolutionBudget). */
 function displayBudget(): number {
   const MB = 1 << 20;
   const nav = (globalThis as { navigator?: { deviceMemory?: number } }).navigator;
@@ -296,7 +296,7 @@ export class RenderView implements Drawer {
    * the frame's walk would.
    */
   private snapshotting = false;
-  /** The stores kept at display resolution, under RenderViewOptions' `bitmapResolution`; null without. */
+  /** The stores shown at display resolution, under RenderViewOptions' `bitmapResolution`; null without. */
   private readonly displayBitmaps: DisplayBitmaps | null;
   /** Target pixels a pixel of what filters run on, where not the scale: in a 3D object's bitmap. */
   private filterUnits: number | null = null;
@@ -360,18 +360,17 @@ export class RenderView implements Drawer {
     this.displayBitmaps =
       options.bitmapResolution === "display"
         ? new DisplayBitmaps(
-            this.paints,
+            this.textures,
             {
               textureLimit: () => this.textureLimit,
-              shownScale: () => this.screenScale ?? this.scale * this.resolution,
-              drawer: this,
               draw: (o, m, x, y, width, height, samples, zoom, id, opaque) =>
                 this.drawTexels(o, m, x, y, width, height, samples, zoom, id, opaque),
+              fill: (id, r, pixel) =>
+                this.backend.fillTexture(this.textures, id, r.x, r.y, r.width, r.height, pixel),
             },
             options.bitmapResolutionBudget ?? displayBudget(),
           )
         : null;
-    this.paints.display = this.displayBitmaps;
     this.background = options.background ?? 0xffffff;
     this.transparent = options.transparent ?? false;
     this.ownCanvas = !options.canvas;
@@ -588,8 +587,8 @@ export class RenderView implements Drawer {
       this.spans.drop();
     }
 
-    // Stores at display resolution drawn again where the screen's scale moved, before the walk
-    // shows them.
+    // Stores shown at display resolution drawn, again where the scale they are shown at moved,
+    // before the walk shows them.
     this.displayBitmaps?.frame();
 
     // The drawing buffer, which a browser may hold smaller than the canvas asks for.
@@ -1272,15 +1271,15 @@ export class RenderView implements Drawer {
 
     const store = isOther && o instanceof BitmapObject && !hidden ? o.store : null;
     if (store && !store.disposed && store.width > 0 && store.height > 0) {
-      // A Bitmap on the stage shows a store drawn at display resolution as it is; anything else
-      // reads it back at its size first (Paints.storeTexture).
-      const texture = this.paints.storeTexture(store, undefined, this.drawRoot === null);
-      const zoom = this.paints.zoomOf(store);
-      if (zoom !== null) {
+      // On the stage, at the display's resolution where it is shown so (DisplayBitmaps).
+      const display = this.displayBitmaps !== null && this.drawRoot === null;
+      const shown = display ? this.shownAtDisplay(store, at) : null;
+      if (shown) {
         // A quad of its texels, each 1/zoom of a pixel: where they land on the screen's pixels one
         // for one, put on whole ones and read unsmoothed, as the stage's own art draws; else
         // smoothed.
-        const quad = this.parts.quad(store.width * zoom, store.height * zoom);
+        const { zoom, handle } = shown;
+        const quad = this.parts.quad(texelsOf(store.width, zoom), texelsOf(store.height, zoom));
         const placed = this.moved;
         for (let k = 0; k < 4; k++) {
           placed[k] = this.places[at + 6 + k] / zoom;
@@ -1288,21 +1287,14 @@ export class RenderView implements Drawer {
 
         placed[4] = this.places[at + 10];
         placed[5] = this.places[at + 11];
-        const unit = this.target.scale / this.target.pixel;
-        if (this.drawRoot === null) {
-          // The scale its texels would land on the screen's pixels at, drawn again at it.
-          const p = this.places;
-          const area = Math.abs(p[at + 6] * p[at + 9] - p[at + 7] * p[at + 8]);
-          this.displayBitmaps?.shown(store, Math.sqrt(area) * unit);
-        }
-
-        const whole = wholeTexels(placed, unit);
+        const whole = wholeTexels(placed, this.target.scale / this.target.pixel);
         this.geometries.use(quad.id);
-        this.textures.use(texture.id);
+        this.textures.use(handle.id);
         const shownRow = this.rows.addPlaced(placed, 0, color);
         const smooth = !whole && this.smoothing;
-        this.scene.draw(quad.id, shownRow, NORMAL, texture.id, (smooth ? SMOOTH : 0) | CLAMP);
+        this.scene.draw(quad.id, shownRow, NORMAL, handle.id, (smooth ? SMOOTH : 0) | CLAMP);
       } else {
+        const texture = this.paints.storeTexture(store);
         const quad = this.parts.quad(store.width, store.height);
         const moved = wholePixels(
           this.places,
@@ -1963,7 +1955,6 @@ export class RenderView implements Drawer {
     height: number,
     samples = 4,
   ): Uint32Array {
-    this.displayBitmaps?.settle(o);
     const pixels = this.drawAlone(o, m, width, height, samples, (n) =>
       argbOf(
         this.backend.snapshot(
@@ -2001,7 +1992,6 @@ export class RenderView implements Drawer {
     width: number,
     height: number,
     samples: number,
-    call?: DrawCall,
   ): boolean {
     if (
       store.disposed ||
@@ -2010,15 +2000,6 @@ export class RenderView implements Drawer {
       this.gl.isContextLost()
     ) {
       return false;
-    }
-
-    const display = this.displayBitmaps;
-    if (display) {
-      display.settle(o);
-      const zoom = display.zoomFor(store);
-      if (zoom !== null) {
-        return display.drawInto(store, o, m, x, y, width, height, samples, zoom, call ?? null);
-      }
     }
 
     const handle = this.paints.storeTexture(store);
@@ -2049,16 +2030,42 @@ export class RenderView implements Drawer {
     return true;
   }
 
-  /**
-   * Whether `store` is drawn into at display resolution (`bitmapResolution`),
-   * as `drawInto` would draw it: BitmapData.draw then takes an identity
-   * colour transform as none, so that it comes here.
-   */
-  drawsAtDisplay(store: BitmapStore): boolean {
-    return !!this.displayBitmaps && this.displayBitmaps.zoomFor(store) !== null;
+  /** Whether draws into stores are followed (Drawer's `displayDraws`): under `bitmapResolution: "display"`. */
+  get displayDraws(): boolean {
+    return this.displayBitmaps !== null;
   }
 
-  /** The bytes of texture stores at display resolution hold, and how many they are, which a page may check. */
+  /** A draw into `store` done, followed to show it at the display's resolution (DisplayBitmaps). */
+  drawn(
+    store: BitmapStore,
+    o: DisplayObject,
+    m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    samples: number,
+    plain: boolean,
+    before: number,
+    solid: number | null,
+  ): void {
+    this.displayBitmaps?.drawn(store, o, m, x, y, width, height, samples, plain, before, solid);
+  }
+
+  /**
+   * The texture the Bitmap walked at `at` shows `store` through on the
+   * stage, at the display's resolution, where it has one; the scale it is
+   * shown at noted, which one is made at.
+   */
+  private shownAtDisplay(store: BitmapStore, at: number): Shown | null {
+    const display = this.displayBitmaps as DisplayBitmaps;
+    const p = this.places;
+    const area = Math.abs(p[at + 6] * p[at + 9] - p[at + 7] * p[at + 8]);
+    display.shown(store, Math.sqrt(area) * (this.target.scale / this.target.pixel));
+    return display.texture(store);
+  }
+
+  /** The bytes of texture the stores shown at the display's resolution take, and how many they are, which a page may check. */
   get displayBitmapBytes(): number {
     return this.displayBitmaps?.heldBytes ?? 0;
   }
@@ -2290,6 +2297,7 @@ export class RenderView implements Drawer {
   destroy(): void {
     this.canvas.removeEventListener("webglcontextlost", this.lost);
     this.canvas.removeEventListener("webglcontextrestored", this.restored);
+    this.displayBitmaps?.destroy();
     this.backend.destroy();
     this.parts.destroy();
     this.releaseOutlines();

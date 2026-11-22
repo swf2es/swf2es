@@ -295,6 +295,15 @@ export interface GpuCopy {
 }
 
 export class BitmapStore {
+  /**
+   * Told of each fillRect once done: the rect clipped, the pixel as the store
+   * keeps it, and the store's version before it. A renderer keeping bitmaps
+   * at the display's resolution follows the fills with it (DisplayBitmaps);
+   * null otherwise.
+   */
+  static fillWatch:
+    | ((store: BitmapStore, rect: PixelRect, pixel: number, before: number) => void)
+    | null = null;
   private cpu: Uint32Array;
   /**
    * The premultiplied pixel every pixel of a store is as made of one colour,
@@ -343,16 +352,6 @@ export class BitmapStore {
   private opaqueVersion = -1;
   disposed = false;
   /**
-   * Whether the renderer keeps the store's draws at the display's resolution
-   * rather than a texel a pixel (RenderViewOptions' `bitmapResolution`): only
-   * a store made of one colour and since drawn into on the GPU and filled.
-   * Scripts see the store at its size: its first read brings it back at a
-   * texel a pixel (`displayRefused`).
-   */
-  atDisplay = false;
-  /** Whether the store was read, written on the CPU or lost at display resolution, and stays at Flash's. */
-  displayRefused = false;
-  /**
    * The Bitmaps showing the store, told of each change so the renderer
    * looks at them; held weakly, so a Bitmap taken off the display list
    * and dropped is collected though the BitmapData lives on.
@@ -383,21 +382,6 @@ export class BitmapStore {
     if (width * height > LAZY_PIXELS) {
       this.made();
     }
-  }
-
-  /**
-   * A store of `pixel`, premultiplied as a store keeps it, as one made of
-   * its colour is: a store at display resolution drawn again (DisplayBitmaps).
-   */
-  static filled(width: number, height: number, transparent: boolean, pixel: number): BitmapStore {
-    const store = new BitmapStore(width, height, transparent, 0);
-    if (store.solid !== null) {
-      store.solid = pixel;
-    } else {
-      store.cpu.fill(pixel);
-    }
-
-    return store;
   }
 
   /** The pixels made of the one colour the store is, where they were not. */
@@ -676,33 +660,17 @@ export class BitmapStore {
       return;
     }
 
-    this.fillPixel(c, this.premultiplied(argb));
-  }
+    const pixel = this.premultiplied(argb);
+    const before = this.version;
+    if (!this.onGpu((copy) => copy.fill(c, pixel))) {
+      for (let y = c.y; y < c.y + c.height; y++) {
+        this.pixels.fill(pixel, y * this.width + c.x, y * this.width + c.x + c.width);
+      }
 
-  /** `c`, within the store, set to `pixel`, premultiplied as the store keeps it: fillRect's fill. */
-  fillPixel(c: PixelRect, pixel: number): void {
-    if (this.onGpu((copy) => copy.fill(c, pixel))) {
-      return;
-    }
-
-    // A store of one colour filled whole is of another, its pixels still not made: as a SWF
-    // clears a bitmap before it first draws into it.
-    if (
-      this.solidPixel !== null &&
-      !this.holdsAlpha &&
-      c.width === this.width &&
-      c.height === this.height
-    ) {
-      this.solid = pixel;
       this.changed();
-      return;
     }
 
-    for (let y = c.y; y < c.y + c.height; y++) {
-      this.pixels.fill(pixel, y * this.width + c.x, y * this.width + c.x + c.width);
-    }
-
-    this.changed();
+    BitmapStore.fillWatch?.(this, c, pixel, before);
   }
 
   /**

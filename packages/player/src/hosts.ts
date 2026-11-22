@@ -5,8 +5,6 @@
 // renderer's draws, fetches, sockets and the threads workers run on.
 import type { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "./bitmap/bitmap.js";
-import type { ColorTransformValues } from "./bitmap/composite.js";
-import type { PixelRect } from "./bitmap/pixel-rect.js";
 import type { Certificate } from "./certificates.js";
 import type { DisplayObject } from "./display/display.js";
 import type { VideoPicture } from "./media/video.js";
@@ -339,13 +337,6 @@ export interface FullScreenHost {
 
 type Affine = { a: number; b: number; c: number; d: number; tx: number; ty: number };
 
-/** BitmapData.draw's matrix, colour transform and clip, as a script gave them. */
-export interface DrawCall {
-  matrix: Affine;
-  color: ColorTransformValues | null;
-  clip: PixelRect | null;
-}
-
 /** A renderer's part in BitmapData.draw of a display object. */
 export interface Drawer {
   /** `o` through `m` into a w x h texture at `samples` a side, read back as premultiplied ARGB. */
@@ -369,13 +360,31 @@ export interface Drawer {
     width: number,
     height: number,
     samples: number,
-    call?: DrawCall,
   ): boolean;
   /**
-   * Whether `drawInto` draws into `store` at the display's resolution
-   * rather than Flash's (RenderViewOptions' `bitmapResolution`); absent, never.
+   * Whether the renderer follows draws into stores (`drawn`): where it keeps
+   * them at the display's resolution too (RenderViewOptions' `bitmapResolution`).
    */
-  drawsAtDisplay?(store: BitmapStore): boolean;
+  readonly displayDraws?: boolean;
+  /**
+   * `o` drawn into `store` as `drawInto` takes it, by whichever way it went:
+   * `plain` where it went source over with no colour transform but one that
+   * changes nothing; `before`, the store's version before, and `solid` the
+   * colour it was all of then, or null.
+   */
+  drawn?(
+    store: BitmapStore,
+    o: DisplayObject,
+    m: Affine,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    samples: number,
+    plain: boolean,
+    before: number,
+    solid: number | null,
+  ): void;
 }
 
 /**
