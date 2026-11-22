@@ -7,6 +7,7 @@ const builtin = @import("builtin");
 const options = @import("options");
 const memory = @import("memory.zig");
 const root = @import("root.zig");
+const avm1 = @import("testing/avm1.zig");
 
 pub const panic = root.panic;
 
@@ -76,6 +77,27 @@ export fn stackDeepest() u32 {
     return options.stack_size - stack_floor - at;
 }
 
+/// The AVM1 actions Flash knows, one a line (assembly/testing/avm1.ts).
+export fn avm1Opcodes() usize {
+    return root.handOut(avm1.opcodes(root.gpa()) catch |err| return root.failWriting(err));
+}
+
+/// An AVM1 block's regions as the flow finds them.
+export fn avm1Dump(bytes: [*]const u8, len: u32) usize {
+    return root.handOut(avm1.dump(root.gpa(), bytes[0..len]) catch |err| return root.failWriting(err));
+}
+
+/// avm1Dump briefly, for the fuzzer.
+export fn avm1Check(bytes: [*]const u8, len: u32) usize {
+    return root.handOut(avm1.check(root.gpa(), bytes[0..len]) catch |err| return root.failWriting(err));
+}
+
+/// The action at `offset` of an AVM1 block alone.
+export fn avm1Action(bytes: [*]const u8, len: u32, offset: i32) usize {
+    return root.handOut(avm1.action(root.gpa(), bytes[0..len], offset) catch |err| return root.failWriting(err));
+}
+
 test {
     _ = root;
+    _ = avm1;
 }

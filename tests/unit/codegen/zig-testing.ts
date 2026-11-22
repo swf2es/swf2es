@@ -13,6 +13,10 @@ const TESTING_SIGNATURES: Record<string, Signature> = {
   testingOverflow: ["i32", "i32"],
   stackPaint: ["", "void"],
   stackDeepest: ["", "i32"],
+  avm1Opcodes: ["", "str"],
+  avm1Dump: ["u8s", "str"],
+  avm1Check: ["u8s", "str"],
+  avm1Action: ["u8s i32", "str"],
 };
 
 /** The test build, or the one that fills freed memory with 0xAA, compiled. */
