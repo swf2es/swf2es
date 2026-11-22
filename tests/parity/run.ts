@@ -9,7 +9,7 @@
 // throws is recorded as its result, so one failure stops nothing.
 //
 // expected.json lists the suites that must be the same: one that differs,
-// or is no longer ported, fails. Each compiler's results go to out/, and
+// or is no longer ported, fails, and so does one the same but not listed. Each compiler's results go to out/, and
 // where a case's large result (a module) differs, both, with the first
 // line they differ at.
 //
@@ -34,10 +34,21 @@ const expected: string[] = JSON.parse(
   readFileSync(fileURLToPath(new URL("expected.json", import.meta.url)), "utf8"),
 );
 
-/** A suite's results: a line a case, and the large results the lines name by digest. */
+/**
+ * A suite's results: a line a case, large results by their digests. The
+ * bytes of a large result are kept only for the cases named in `capture`,
+ * which a second run asks for where the digests differ, so that a suite
+ * of a corpus does not hold every module of three compilers.
+ */
 class Results {
   readonly lines: string[] = [];
   readonly blobs = new Map<string, Uint8Array>();
+
+  readonly capture: ReadonlySet<string>;
+
+  constructor(capture: ReadonlySet<string> = new Set()) {
+    this.capture = capture;
+  }
 
   /** Case `name`'s result, or what it threw. */
   case(name: string, run: () => string | number | boolean): void {
@@ -49,9 +60,12 @@ class Results {
     }
   }
 
-  /** A large result, as its length and digest, kept to show where it differs. */
+  /** A large result, as its length and digest; its bytes too where they are asked for. */
   blob(name: string, bytes: Uint8Array): string {
-    this.blobs.set(name, bytes.slice());
+    if (this.capture.has(name)) {
+      this.blobs.set(name, bytes.slice());
+    }
+
     return `${bytes.length} ${createHash("sha256").update(bytes).digest("hex")}`;
   }
 }
@@ -234,15 +248,21 @@ function differs(a: string[], b: string[]): number {
   return at >= 0 ? at : a.length === b.length ? -1 : Math.min(a.length, b.length);
 }
 
-/** Two large results' first differing line, both written to out/ beside each other. */
-function showBlobs(suite: string, key: string, a: [string, Results], b: [string, Results]): string {
-  const [aName, aBytes] = [a[0], a[1].blobs.get(key)];
-  const [bName, bBytes] = [b[0], b[1].blobs.get(key)];
+/**
+ * Two compilers' large result of case `key`, run again with its bytes
+ * kept: their first differing line, both written to out/ beside each other.
+ */
+async function showBlobs(suite: Suite, key: string, aName: string, bName: string): Promise<string> {
+  const fresh = await instances(suite.build);
+  const [a, b] = [new Results(new Set([key])), new Results(new Set([key]))];
+  suite.run(fresh[aName], a);
+  suite.run(fresh[bName], b);
+  const [aBytes, bBytes] = [a.blobs.get(key), b.blobs.get(key)];
   if (!aBytes || !bBytes) {
     return "";
   }
 
-  const dir = join(out, suite);
+  const dir = join(out, suite.name);
   mkdirSync(dir, { recursive: true });
   const file = key.replace(/[^\w.-]+/g, "-");
   writeFileSync(join(dir, `${file}.${aName}`), aBytes);
@@ -250,7 +270,7 @@ function showBlobs(suite: string, key: string, a: [string, Results], b: [string,
   const aLines = Buffer.from(aBytes).toString("latin1").split("\n");
   const bLines = Buffer.from(bBytes).toString("latin1").split("\n");
   const at = differs(aLines, bLines);
-  return `\n    ${key}, line ${at + 1} (out/${suite}/${file}.*):\n      ${aName}: ${aLines[at]?.slice(0, 200)}\n      ${bName}: ${bLines[at]?.slice(0, 200)}`;
+  return `\n    ${key}, line ${at + 1} (out/${suite.name}/${file}.*):\n      ${aName}: ${aLines[at]?.slice(0, 200)}\n      ${bName}: ${bLines[at]?.slice(0, 200)}`;
 }
 
 const wanted = process.argv.slice(2);
@@ -288,7 +308,7 @@ for (const suite of SUITES.filter((s) => wanted.length === 0 || wanted.includes(
       const key = la[at]?.slice(0, la[at].indexOf(": "));
       mismatches.push(
         `${b} differs from ${a} at case ${at + 1} of ${la.length}:\n    ${a}: ${la[at]}\n    ${b}: ${lb[at]}` +
-          (key ? showBlobs(suite.name, key, [a, results[a]], [b, results[b]]) : ""),
+          (key ? await showBlobs(suite, key, a, b) : ""),
       );
     }
   }
@@ -300,7 +320,9 @@ for (const suite of SUITES.filter((s) => wanted.length === 0 || wanted.includes(
   if (mismatches.length && expected.includes(suite.name)) {
     failed++;
   } else if (!mismatches.length && !expected.includes(suite.name)) {
+    // A ratchet: what is the same is held so.
     console.log(`  ${suite.name} is the same now: add it to tests/parity/expected.json`);
+    failed++;
   }
 }
 
