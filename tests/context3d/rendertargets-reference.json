@@ -28,5 +28,12 @@
   "rendertargets small-sampled-1 ffffff00 ffffff00 ffffff00 ffffff00 ffffff00",
   "rendertargets upload-then-render ffff0000 ff0000ff ff0000ff ff0000ff ff0000ff",
   "rendertargets feedback 3604",
+  "rendertargets configured-back-64 ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff",
+  "rendertargets configured-texture-64 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000",
+  "rendertargets configured-back-80 3692",
+  "rendertargets configured-texture-80 ffff0000 ffff0000 ffff0000 ffff0000 ffff0000",
+  "rendertargets resize-preserved-texture ff00ff00 ff00ff00 ff00ff00 ff00ff00 ff00ff00",
+  "rendertargets refused-size 3780",
+  "rendertargets recovered-texture ff0000ff ff0000ff ff0000ff ff0000ff ff0000ff",
   "rendertargets complete"
 ]

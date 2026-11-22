@@ -217,7 +217,18 @@ export async function reconfiguration() {
     }
     const texture = c.createTexture(8, 8);
     c.setRenderTarget(texture);
-    rejects(() => c.configure(64, 64, true, 4));
+    c.configure(64, 64, true, 4);
+    c.clear(0, 1, 0, 1);
+    const target = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const status = gl.checkFramebufferStatus;
+    gl.checkFramebufferStatus = () => gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+    try {
+      rejects(() => c.configure(32, 32, false));
+    } finally {
+      gl.checkFramebufferStatus = status;
+    }
+    check(gl.getParameter(gl.FRAMEBUFFER_BINDING) === target, "failed resize unbound the texture");
+    check(color(c.read(), 32, 32, 64) === "ff0000ff", "failed resize lost the back buffer");
     c.setRenderTarget(null);
     check(gl.getError() === gl.NO_ERROR, "reconfiguration polluted GL state");
     c.dispose();
