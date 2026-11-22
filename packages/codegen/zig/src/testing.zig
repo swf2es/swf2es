@@ -187,6 +187,18 @@ export fn domainEmit(body: u32) usize {
     return root.handOut(avm2.changed(domain.domainEmit, .{ root.gpa(), body }) catch |err| return root.fail(err));
 }
 
+export fn domainEmitEach(bodies: [*]const u8, bodies_len: u32, reuse: bool, which: i32) usize {
+    return root.handOut(avm2.domainEmitEach(root.gpa(), bodies[0..bodies_len], reuse, which) catch |err| return root.fail(err));
+}
+
+export fn domainEmitEachBytes(bodies: [*]const u8, bodies_len: u32, reuse: bool, which: i32) usize {
+    return root.handOut(avm2.domainEmitEach(root.gpa(), bodies[0..bodies_len], reuse, which) catch |err| return root.fail(err));
+}
+
+export fn domainPartBudget(bytes: i32) void {
+    avm2.domainPartBudget(bytes);
+}
+
 export fn domainIrAll() usize {
     return root.handOut(avm2.changed(domain.domainIrAll, .{root.gpa()}) catch |err| return root.fail(err));
 }

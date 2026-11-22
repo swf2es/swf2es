@@ -45,6 +45,12 @@ const exports = [_][]const u8{
     "domainWantsCompact",
     "domainUsage",
     "domainParent",
+    "domainModule",
+    "domainModuleBytes",
+    "domainModuleMoreBytes",
+    "domainModuleDone",
+    "domainModuleEntries",
+    "domainSourceMap",
 };
 
 /// What the test build exports beside them.
@@ -71,6 +77,9 @@ const testing_exports = exports ++ [_][]const u8{
     "domainCheckIr",
     "domainIrAll",
     "domainEmit",
+    "domainEmitEach",
+    "domainEmitEachBytes",
+    "domainPartBudget",
     "avm1Opcodes",
     "avm1Dump",
     "avm1Check",

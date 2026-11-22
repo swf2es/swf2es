@@ -100,6 +100,10 @@ pub const ModuleEmitter = struct {
 
         methods.gpa = scratch;
         methods.heldText = try .init(scratch);
+        self.fillAbc = .empty;
+        self.fillTrait = .empty;
+        self.fillChain = .empty;
+        self.aliasMembers = .empty;
     }
 
     /// Write the whole module; the result is in `out` (module.ts tells what

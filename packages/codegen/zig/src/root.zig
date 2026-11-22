@@ -242,6 +242,30 @@ pub export fn domainWantsCompact(want: i32) bool {
     return orFailed(bool, avm2.domainWantsCompact(want));
 }
 
+pub export fn domainModule(hashes: [*]const u8, hashes_len: u32, index: i32, keep: bool, linkedOnly: bool) usize {
+    return handOut(avm2.domainModule(gpa(), staged(u8, hashes, hashes_len), index, keep, linkedOnly) catch |err| return fail(err));
+}
+
+pub export fn domainModuleBytes(hashes: [*]const u8, hashes_len: u32, index: i32, keep: bool, linkedOnly: bool) usize {
+    return handOut(avm2.domainModuleBytes(gpa(), staged(u8, hashes, hashes_len), index, keep, linkedOnly) catch |err| return fail(err));
+}
+
+pub export fn domainModuleMoreBytes() usize {
+    return handOut(avm2.domainModuleMoreBytes(gpa()) catch |err| return fail(err));
+}
+
+pub export fn domainModuleDone() bool {
+    return avm2.domainModuleDone();
+}
+
+pub export fn domainModuleEntries() usize {
+    return handOut(avm2.domainModuleEntries(gpa()) catch |err| return fail(err));
+}
+
+pub export fn domainSourceMap() usize {
+    return handOut(avm2.domainSourceMap(gpa()) catch |err| return fail(err));
+}
+
 pub export fn domainUsage() usize {
     return handOut(avm2.domainUsage(gpa()) catch |err| return fail(err));
 }
