@@ -28,5 +28,10 @@
   "emit-tests",
   "emit-swfs",
   "emit-mutated",
-  "emit-fuzz"
+  "emit-fuzz",
+  "emit-deep",
+  "modules-tests",
+  "modules-swfs",
+  "modules-mutated",
+  "libraries"
 ]
