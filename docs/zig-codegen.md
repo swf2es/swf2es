@@ -894,6 +894,17 @@ Stage 4 (the verifier and the IR: `avm2/ir/ir.ts`, `abc/code`,
   233,821 and 83.5; ReleaseFast 347,324 and 109.2; `wasm-opt -Oz` takes
   ReleaseSafe to 298,765 and 111.5, ReleaseSmall to 207,376 and 79.9.
 
+Stage 5 (the emitters), as it goes. `Output` has AssemblyScript's
+methods (`text`, `byte`, `int`, `uint`, `double`, `string`, `chars`,
+`hex`, `point`, `unit`, `append`, `reserve`, `reset`), so the emitters
+translate call for call. Measured on the source map's writer, the first
+file, in the probe: written into the buffer at each call site, grown
+first, it added 4,490 bytes (1.9 KB gzipped) in ReleaseSafe and 2,712 in
+ReleaseSmall; through std.Io.Writer's shared writeByte and writeAll,
+2,192 (1.1 KB) and 1,966. `byte` and `text` therefore go through the
+writer, keeping the methods' names: the API of AssemblyScript's Output at
+std.Io.Writer's size.
+
 For stage 5: `Output.init` reserves 64 KB up front, so each `Output` is
 a whole run in the call arena; an emitter made per method or per block
 should reuse one, as AssemblyScript's reuse their buffers.
