@@ -59,8 +59,14 @@ test("the compilers agree on what Zig's has ported", () => {
   }
 });
 
-test("an export Zig's compiler has not ported yet throws when it is called", () => {
-  assert.throws(() => zig.domainContext(-1), /codegen-zig.wasm has no domainContext yet/);
+test("Zig's compiler has every export of AssemblyScript's but its runtime's", async () => {
+  const exports = async (file: string) =>
+    WebAssembly.Module.exports(await compile(file)).map((e) => e.name);
+  const zigs = new Set(await exports("codegen-zig.wasm"));
+  const missing = (await exports("codegen.wasm")).filter(
+    (name) => !name.startsWith("__") && !zigs.has(name),
+  );
+  assert.deepEqual(missing, []);
 });
 
 test("a call that runs out of memory hands out nothing and says so, and does not trap", async () => {
