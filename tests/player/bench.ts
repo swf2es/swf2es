@@ -2245,6 +2245,7 @@ async function playFile(path: string): Promise<void> {
   const round = (v: number) => Math.round(v * 100) / 100;
   // The animation frames that played more than one of the SWF's, catching up, and none.
   const doubled = steps.filter((s) => s.frames > 1).length;
+  const drew = steps.filter((t) => t.draw > 0);
   const report = {
     renderer: played.gpu,
     parallel: played.parallel,
@@ -2271,8 +2272,18 @@ async function playFile(path: string): Promise<void> {
     },
     doubled,
     // Of the frames that drew, the median ms drawing and waiting for the GPU.
-    drawMedian: round(quantile(steps.filter((t) => t.draw > 0).map((t) => t.draw), 0.5)),
-    glMedian: round(quantile(steps.filter((t) => t.draw > 0).map((t) => t.gl), 0.5)),
+    drawMedian: round(
+      quantile(
+        drew.map((t) => t.draw),
+        0.5,
+      ),
+    ),
+    glMedian: round(
+      quantile(
+        drew.map((t) => t.gl),
+        0.5,
+      ),
+    ),
     displayMB: round(played.displayBytes / 2 ** 20),
     spikeMs: round(spikeMs),
     spikes: spikes.map((s) => ({

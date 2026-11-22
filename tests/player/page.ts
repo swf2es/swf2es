@@ -2214,6 +2214,10 @@ async function displayBitmapsSwf(
   const uncaught: unknown[] = [];
   const shots = [];
   const scripting = await scriptingFor(bytes, trace, null, uncaught, {});
+  if (!scripting) {
+    throw new Error("not an AS3 SWF");
+  }
+
   const player = new Player(bytes, scripting, null);
   const view = new RenderView({
     width: player.width,

@@ -247,10 +247,11 @@ first operation that reads the store's pixels or writes them on the CPU
 (getPixel, getPixels, copyPixels in or out, a draw with a colour transform or
 blend, setPixel, scroll, applyFilter, encode, hit tests and the rest) goes
 through `BitmapStore.readable`, which reads the GPU copy back. For a store at
-display resolution, that read replays the record at a texel a pixel into a
-texture of its own, the fills as fills and each draw as `drawInto` would
-have drawn it then, and reads that back: Flash's pixels, as the store would
-have held them with the option off. Where the record cannot be replayed (an
+display resolution, that read replays the record on a store of its own at
+the store's size, made of the same colour: the fills as fills, and each draw
+through `drawDisplayObject` with the matrix, colour transform and clip the
+script gave it, as it went with the option off. It reads that back: the
+pixels the store would have held with the option off. Where the record cannot be replayed (an
 object changed, a draw inside a walk, more than 256 steps without a fill of
 the whole store, which starts it again), the texture is averaged down by
 area instead, which matches but for lines thinner than a pixel, lighter there
