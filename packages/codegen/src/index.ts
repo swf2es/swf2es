@@ -666,7 +666,14 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // panics too, or a compile's log cannot be replayed, there is no second
   // attempt: the compiler is dead, and every call throws.
   type Entry =
-    | { kind: "add"; abc: Uint8Array; builtin: boolean; appDomain: number }
+    | {
+        kind: "add";
+        abc: Uint8Array;
+        builtin: boolean;
+        appDomain: number;
+        /** Its index, or -1 where it was rejected. */
+        index: number;
+      }
     | { kind: "child"; parent: number }
     | { kind: "drop" | "evict"; appDomain: number }
     | { kind: "revive"; appDomain: number; abcs: Iterable<[number, Uint8Array]> }
@@ -685,6 +692,36 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     } else if (log !== "") {
       journal.push({ kind: "log", index, log });
     }
+  };
+  // What a dropped domain's journal holds, let go of, so that the journal
+  // does not keep every ABC a long session loads: its ABCs' bytes give way
+  // to an empty ABC, which keeps their indices, a rejected one's entry
+  // goes, and so do the logs of its compiles. What a replay makes of them
+  // is dead and seen by no other domain, as theirs was.
+  const forgetDropped = () => {
+    const dropped = new Set<number>();
+    let kept = 0;
+    for (const entry of journal) {
+      const gone =
+        (entry.kind === "add" && wasm.domainState(entry.appDomain) === 2) ||
+        (entry.kind === "log" && dropped.has(entry.index));
+      if (entry.kind === "add" && gone) {
+        if (entry.index < 0) {
+          continue;
+        }
+
+        dropped.add(entry.index);
+        entry.abc = EMPTY_ABC;
+      }
+
+      if (entry.kind === "log" && gone) {
+        continue;
+      }
+
+      journal[kept++] = entry;
+    }
+
+    journal.length = kept;
   };
   const replayInto = (into: typeof wasm) => {
     into.domainReset(apiVersion);
@@ -789,11 +826,11 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         throw new Error(`application domain ${appDomain}: never made, or dropped`);
       }
 
+      journaled({ kind: "add", abc, builtin, appDomain, index: error === 0 ? added : -1 });
       if (error === 0) {
         added++;
       }
 
-      journaled({ kind: "add", abc, builtin, appDomain });
       return error;
     },
     childDomain(parent) {
@@ -809,6 +846,9 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       if (of === epoch) {
         collected(wasm.domainDrop(appDomain));
         journaled({ kind: "drop", appDomain });
+        if (zig) {
+          forgetDropped();
+        }
         chains.forget((d) => wasm.domainState(d) === 2);
       }
     },
@@ -1028,6 +1068,9 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
   return Object.defineProperties({}, descriptors) as Codegen;
 }
+
+/** An ABC with nothing in it, which a dropped domain's ABCs give way to in the journal of calls. */
+const EMPTY_ABC = Uint8Array.of(16, 0, 46, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
 /** The VerifyError an ABC whose load panicked Zig's compiler is rejected with: kCorruptABCError. */
 const PANICKED_ABC = 1107;
