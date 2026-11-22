@@ -33,8 +33,10 @@ import { type Avm1Swf, avm1Swfs, testBlocks } from "../conformance/determinism-a
 import { abc as abcOf, tables, u30 } from "../unit/codegen/abc-builder.ts";
 import { linkCases, resolveCases } from "../unit/codegen/link-cases.ts";
 import { bindTesting, zigTestingModule } from "../unit/codegen/zig-testing.ts";
+import { structuredAbcs } from "./body-fuzz.ts";
 import { linkAbcs } from "./link-abc.ts";
 import { richAbc } from "./rich-abc.ts";
+import { verifyErrorAbcs } from "./verify-errors.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const out = fileURLToPath(new URL("out/", import.meta.url));
@@ -1018,6 +1020,7 @@ function linkSeeds(): [string, Uint8Array][] {
     ...abcs().slice(3),
     ...[...linkCases, ...resolveCases].map((c): [string, Uint8Array] => [`case ${c.name}`, c.abc]),
     ["link user", linkAbcs().user],
+    ...verifyErrorAbcs(),
     ["rich 47.16", richAbc(true)],
   ];
 }
@@ -1399,15 +1402,26 @@ function calls(c: Compiler, r: Results, sequences: number, steps: number): void 
   }
 }
 
+/** The VerifyError numbers AssemblyScript's verify gave in the suite running, by number, for its report. */
+const verifyErrors = new Map<string, number>();
+
 /** What verifying the last ABC added gives: each body's error, the IR checked, and some bodies' IR. */
 function verifyLast(c: Compiler, r: Results, name: string, irs: number): void {
   let bodies = 0;
   linked(c, r, `${name}: verify`, () => {
     const text: string = c.domainVerifyAll();
     bodies = Number(/of (\d+) bodies$/.exec(text)?.[1] ?? 0);
+    if (r.compiler === "as") {
+      for (const [, error] of text.matchAll(/ error (\d+)$/gm)) {
+        verifyErrors.set(error, (verifyErrors.get(error) ?? 0) + 1);
+      }
+    }
+
     return r.blob(`${name}: verify`, Buffer.from(text));
   });
   linked(c, r, `${name}: check IR`, () => c.domainCheckIr());
+  // Every verified body's whole IR, entry frames and flags included.
+  linked(c, r, `${name}: full IR`, () => r.blob(`${name}: full IR`, Buffer.from(c.domainIrAll())));
   // Every body's for a small ABC; for a large one, spread over it.
   const step = Math.max(1, Math.ceil(bodies / irs));
   for (let b = 0; b < bodies; b += step) {
@@ -1843,7 +1857,7 @@ const SUITES: Suite[] = [
   {
     name: "verify-libraries",
     build: "testing",
-    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr"],
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr", "domainIrAll"],
     run: (c, r) => {
       const linking = new Linking(c, r);
       for (const [name, base] of Object.entries({ player: PLAYER, air: AIR, shell: SHELL })) {
@@ -1861,7 +1875,7 @@ const SUITES: Suite[] = [
   {
     name: "verify-tests",
     build: "testing",
-    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr"],
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr", "domainIrAll"],
     run: (c, r) =>
       verifySwfs(
         c,
@@ -1874,20 +1888,20 @@ const SUITES: Suite[] = [
   {
     name: "verify-swfs",
     build: "testing",
-    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr"],
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr", "domainIrAll"],
     run: (c, r) => verifySwfs(c, r, PLAYER, bySwf(swfAbcs()), 24),
   },
   {
     name: "verify-oracle",
     build: "testing",
-    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr"],
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr", "domainIrAll"],
     unavailable: () => (existsSync(oracleDir()) ? null : "no oracle cache"),
     run: (c, r) => verifySwfs(c, r, SHELL, oracleAbcs(), 8),
   },
   {
     name: "verify-mutated",
     build: "testing",
-    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr"],
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr", "domainIrAll"],
     run: (c, r) =>
       verifySwfs(
         c,
@@ -1896,6 +1910,27 @@ const SUITES: Suite[] = [
         mutatedCode(6000).map(([name, bytes]) => [name, [[name, bytes]]]),
         16,
       ),
+  },
+  {
+    name: "verify-fuzz",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr", "codeDump"],
+    run: (c, r) => {
+      // From the review of stage 4: structured bodies, linked after builtin alone.
+      const base = { version: API_VERSION, libraries: [builtinLibrary] };
+      const cases = structuredAbcs(4000, 1).map((bytes, k): [string, [string, Uint8Array][]] => [
+        `structured ${k}`,
+        [[`structured ${k}`, bytes]],
+      ]);
+      for (const [k, [name, [[, bytes]]]] of cases.entries()) {
+        codeDumps(c, r, name, bytes);
+        if (k % 64 === 63) {
+          c.__collect();
+        }
+      }
+
+      verifySwfs(c, r, base, cases, 5);
+    },
   },
   {
     name: "libraries",
@@ -2055,6 +2090,12 @@ for (const suite of SUITES.filter((s) => wanted.length === 0 || wanted.includes(
         `  ${suite.name}: AssemblyScript's stack ran out at ${ran.length} cases, where Zig's went on: ${ran.map((i) => results.as.names[i]).join("; ")}`,
       );
     }
+  }
+
+  if (verifyErrors.size) {
+    const counts = [...verifyErrors].sort((x, y) => Number(x[0]) - Number(y[0]));
+    console.log(`  ${suite.name}: VerifyErrors ${counts.map(([e, n]) => `${e}:${n}`).join(" ")}`);
+    verifyErrors.clear();
   }
 
   const mismatches: string[] = [];

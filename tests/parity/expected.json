@@ -22,5 +22,6 @@
   "verify-libraries",
   "verify-tests",
   "verify-swfs",
-  "verify-mutated"
+  "verify-mutated",
+  "verify-fuzz"
 ]
