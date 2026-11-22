@@ -683,15 +683,16 @@ For the user to decide:
 
 1. **Freeze or dual-write?** Decided: freeze, after #1185 lands, with
    the port on stacked pull requests merged to `dev` only when complete.
-2. **Check in the wasm, or build it?** The decision recorded here is
-   checked-in binaries with digests, as native. Given how often the
-   compiler changes, the alternative is to check in only the digest of
-   the inputs' expected output and have `pnpm build` run the pinned Zig
-   (downloaded once by `tools/zig.ts`). Which?
-3. **After a panic**, is the compiler dead for the page (as an
-   AssemblyScript abort is now), or does the wrapper make a fresh
-   instance and add the live ABCs again from the player's journal? The
-   second reuses #1185's save and load, and costs a rebuild's time.
+2. **Check in the wasm, or build it?** Decided: build it. Only the
+   digests are checked in, and `pnpm build` runs the pinned Zig
+   (downloaded once by `tools/zig.ts`); CI rebuilds and compares against
+   the digests. This replaces the checked-in binaries described in
+   section 7 for the compiler; `packages/native` keeps its own.
+3. **After a panic**, is the compiler dead for the page, or recovered?
+   Decided: recovered. The wrapper makes a fresh instance and adds the
+   live ABCs again (#1185's save and load, or the player's journal where
+   the dead instance can't be read), at a rebuild's cost, and the load
+   that panicked fails as a VerifyError would.
 4. **`POWERS10`.** Keep the frozen over-read values for good, so that
    doubles print as they do now, or correct Grisu2 after the swap,
    which changes some modules' bytes (never their values) and moves
