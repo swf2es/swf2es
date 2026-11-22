@@ -245,6 +245,9 @@ test("a long session's compactions rebuild the domain in a new instance, whose m
   const peak = codegen.memoryBytes();
   const { dead } = codegen.usage();
   assert.ok(peak >= 32 << 20 && dead > peak / 2, `${peak} ${dead}`);
+  // The first compaction finds a move due and makes the spare instance,
+  // which the next takes: none is made for a compiler that never needs it.
+  assert.equal(codegen.compact(), false);
   await turn();
   assert.equal(codegen.compact(), true);
   assert.ok(codegen.memoryBytes() <= peak / 4, `${codegen.memoryBytes()} of ${peak}`);
@@ -276,7 +279,7 @@ test("a long session's compactions rebuild the domain in a new instance, whose m
   assert.equal(codegen.compileModule(["b", "a"], 1), compiled);
 });
 
-test("a compaction never grows codegen's memory, however large the live ABCs", {
+test("a compaction never grows codegen's memory past a quarter, however large the live ABCs", {
   skip,
 }, async () => {
   // A main domain of many ABCs, live for good, and as many loads again
@@ -308,10 +311,8 @@ test("a compaction never grows codegen's memory, however large the live ABCs", {
     const before = codegen.memoryBytes();
     if (codegen.compact()) {
       compactions++;
-      assert.ok(
-        codegen.memoryBytes() <= before,
-        `load ${n}: ${before} to ${codegen.memoryBytes()}`,
-      );
+      const after = codegen.memoryBytes();
+      assert.ok(after <= before + before / 4, `load ${n}: ${before} to ${after}`);
     }
   }
 

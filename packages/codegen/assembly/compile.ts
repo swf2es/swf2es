@@ -36,6 +36,7 @@ import {
   savedLive,
   traitsOf,
   unrevive,
+  WANT_InPlace,
   wantsRebuild,
   weigh,
 } from "./avm2/link/lifetime";
@@ -200,7 +201,7 @@ export function domainRevive(appDomain: i32, stepped: bool = false): i32 {
  * at a time.
  */
 export function domainCompact(stepped: bool = false): bool {
-  if (!wantsRebuild(domain, rebuildBudget(), false, false)) {
+  if (!wantsRebuild(domain, rebuildBudget(), partBudget, WANT_InPlace)) {
     return false;
   }
 
@@ -346,8 +347,9 @@ export function domainLoad(words: Uint8Array): bool {
   }
 
   // Memory grown at once, by a block let go of at once (see rebuiltSize),
-  // and the rebuild's parts held to the garbage that size allowed for.
-  loadingBudget = rebuildBudget();
+  // and the rebuild's parts held to the garbage that size allowed for, as
+  // the old instance's wantsRebuild counted it.
+  loadingBudget = partBudget;
   const size = loadedSize(loaded, loadingBudget);
   if (size >= MOVE_Limit) {
     loading = null;
@@ -727,17 +729,15 @@ function emitEach(bodies: string, reuse: bool, which: i32): Output {
 }
 
 /**
- * Whether domainCompact would rebuild now, the host holding a `spare`
- * instance or not, or, with `elsewhere`, whether a rebuild in another
- * instance (domainSaveBytes) is worth it: memory would
- * grow before long and the ABCs of dropped and evicted domains hold
- * enough to keep it from growing, or, elsewhere, memory is far above what
- * the live ones need (see wantsRebuild in avm2/link/lifetime.ts). A pure
- * query, so that a host collects garbage before a rebuild only when one
- * is due.
+ * Whether a rebuild is due, as `want` asks (see wantsRebuild in
+ * avm2/link/lifetime.ts): 0 in place, as domainCompact does, with no
+ * spare instance, 1 in place beside a spare made or being made, 2 a move
+ * to it (domainSaveBytes), 3 whether a move will be due before long, for
+ * the host to make the spare then. A pure query, so that a host collects
+ * garbage before a rebuild only when one is due.
  */
-export function domainWantsCompact(elsewhere: bool = false, spare: bool = false): bool {
-  return wantsRebuild(domain, rebuildBudget(), elsewhere, spare);
+export function domainWantsCompact(want: i32 = 0): bool {
+  return want >= 0 && want <= 3 && wantsRebuild(domain, rebuildBudget(), partBudget, <u8>want);
 }
 
 /**

@@ -43,7 +43,8 @@ three, with the same VerifyError numbers:
    (`evictDomain`): no other sees their ABCs, which compile no more and
    keep their indices.
    `compact` rebuilds the domain without those ABCs, in a new instance
-   of the compiler made ahead, which then takes the old one's place
+   of the compiler made ahead, once a move will be due before long, not
+   for every compiler, which then takes the old one's place
    (`domainSaveBytes`, `domainLoad`): wasm memory never shrinks, so a
    rebuild in place kept, for good, as much as the dead tables and the
    old and the new ones took together, and over a long session of busy

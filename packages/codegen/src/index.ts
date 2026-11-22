@@ -253,10 +253,11 @@ export interface Codegen {
   /**
    * What the ABCs hold of codegen's memory, roughly, in bytes: the live
    * ones', and the dropped and evicted domains' that compact would free;
-   * and the size of codegen's memory, which grows and never shrinks but
-   * when compact moves the domain to a new instance.
+   * the size of codegen's memory, which grows and never shrinks but when
+   * compact moves the domain to a new instance; and how many such moves
+   * failed, each leaving the domain as it was, rebuilt in place if at all.
    */
-  usage(): { live: number; dead: number; memory: number };
+  usage(): { live: number; dead: number; memory: number; failedMoves: number };
   /** The size of codegen's memory in bytes, as usage gives it: cheap, for a host that shows it often. */
   memoryBytes(): number;
   /**
@@ -546,10 +547,12 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // A second instance of the compiler, made ahead as instantiating is
   // asynchronous, that the next rebuild is done in (see moved): wasm memory
   // never shrinks, so one done in place keeps, for good, as much as the
-  // dead tables and the old and the new took together. Made at once, and
-  // again once one is taken or could not be made or used.
+  // dead tables and the old and the new took together. Made only once a
+  // move will be due before long (WANT_Spare), not for every compiler, and
+  // taken by the move; and how many moves failed, which usage tells.
   let spare: typeof wasm | null = null;
   let making = false;
+  let failedMoves = 0;
   const prepare = () => {
     if (spare === null && !making) {
       making = true;
@@ -610,8 +613,8 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       done = false;
     }
 
-    prepare();
     if (!done) {
+      failedMoves++;
       size = wasm.memory.buffer.byteLength;
       return false;
     }
@@ -623,7 +626,6 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     calls = 0;
     return true;
   };
-  prepare();
   const collected = <T>(result: T, reclaim = false): T => {
     const grown = wasm.memory.buffer.byteLength;
     if (reclaim || grown > size || ++calls >= COLLECT_EVERY) {
@@ -686,7 +688,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     },
     usage() {
       const [live, dead, memory] = collected(wasm.domainUsage()).split(" ").map(Number);
-      return { live, dead, memory };
+      return { live, dead, memory, failedMoves };
     },
     memoryBytes() {
       return wasm.memory.buffer.byteLength;
@@ -694,19 +696,24 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     compact() {
       // Done in the spare instance, once there is one and that would take
       // less memory, or in place would not fit; else in place, where the
-      // new tables are made while the old are live, only where they fit:
+      // new tables are made while the old are live, only where they fit
+      // and, beside a spare made or being made, a move would not do better:
       // what earlier calls left is collected first, and the old tables once
       // it is done, before the next call's allocations would grow memory
       // past them.
-      prepare();
-      if (spare !== null && collected(wasm.domainWantsCompact(true))) {
+      if (spare === null && !making && collected(wasm.domainWantsCompact(WANT_Spare))) {
+        prepare();
+      }
+
+      if (spare !== null && collected(wasm.domainWantsCompact(WANT_Move))) {
         wasm.__collect();
         if (moved()) {
           return true;
         }
       }
 
-      if (!collected(wasm.domainWantsCompact(false, spare !== null))) {
+      const beside = spare !== null || making;
+      if (!collected(wasm.domainWantsCompact(beside ? WANT_InPlaceBesideSpare : WANT_InPlace))) {
         return false;
       }
 
@@ -862,6 +869,11 @@ function parseEntries(text: string): Map<number, string> {
 }
 
 const COLLECT_EVERY = 64;
+/** What domainWantsCompact is asked (see wantsRebuild in assembly/avm2/link/lifetime.ts). */
+const WANT_InPlace = 0;
+const WANT_InPlaceBesideSpare = 1;
+const WANT_Move = 2;
+const WANT_Spare = 3;
 /** How many bytes of ABCs a rebuild in the spare instance copies in between its collections. */
 const COPIED_BETWEEN_COLLECTIONS = 4 << 20;
 /** How many SWFs whose blocks or units are compiled codegen holds a copy of at most. */

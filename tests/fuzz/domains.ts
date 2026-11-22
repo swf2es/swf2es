@@ -351,13 +351,11 @@ function compare(step: number, i: number): void {
   }
 }
 
-/**
- * The rebuild the subject started a part at a time, each part of a budget
- * picked at random, from a body's worth to one part for all: 1 if done, -1
- * if it failed.
- */
+/** A part budget picked at random, from a body's worth to one part for all, which a rebuild takes as it starts. */
+const budget = () => pick([1, 64, 4096, 1 << 20, 0]);
+
+/** The rebuild the subject started a part at a time, to its end: 1 if done, -1 if it failed. */
 function stepRebuild(): number {
-  subject.domainPartBudget(pick([1, 64, 4096, 1 << 20, 0]));
   let stepped = subject.domainRebuildStep();
   while (stepped === 0) {
     stepped = subject.domainRebuildStep();
@@ -365,6 +363,12 @@ function stepRebuild(): number {
 
   subject.domainPartBudget(0);
   return stepped;
+}
+
+/** Start a rebuild in the subject with `start` under a part budget picked at random. */
+function begun<T>(start: () => T): T {
+  subject.domainPartBudget(budget());
+  return start();
 }
 
 /**
@@ -376,6 +380,7 @@ async function moved(): Promise<number> {
   const next = await loadTesting(build);
   const out = (address: number) =>
     new Uint8Array(current.memory.buffer, address, current.outputLength()).slice();
+  next.domainPartBudget(budget());
   if (!next.domainLoad(out(current.domainSaveBytes()))) {
     return -1;
   }
@@ -398,6 +403,7 @@ async function moved(): Promise<number> {
     current = was;
   }
 
+  was.domainPartBudget(0);
   return stepped;
 }
 
@@ -409,8 +415,13 @@ async function moved(): Promise<number> {
 async function revive(step: number, d: number): Promise<void> {
   const way = below(3);
   const once = async () => {
-    const revived = subject.domainRevive(d, way > 0);
-    return revived !== 2 ? revived : way === 1 ? stepRebuild() : await moved();
+    const revived = begun(() => subject.domainRevive(d, way > 0));
+    if (revived !== 2) {
+      subject.domainPartBudget(0);
+      return revived;
+    }
+
+    return way === 1 ? stepRebuild() : await moved();
   };
   let revived = await once();
   if (revived < 0) {
@@ -524,7 +535,7 @@ for (; step < steps && failures.length === 0; step++) {
       way === 3
         ? (await moved()) > 0
         : way === 1
-          ? subject.domainRebuild(true) && stepRebuild() > 0
+          ? begun(() => subject.domainRebuild(true)) && stepRebuild() > 0
           : subject.domainRebuild();
     if (done) {
       counts.rebuilds++;

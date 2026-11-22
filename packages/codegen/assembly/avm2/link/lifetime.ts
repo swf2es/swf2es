@@ -222,15 +222,16 @@ function inChain(dom: Domain, d: u32, top: u32, bottom: u32): bool {
 
 /**
  * Whether a rebuild, which links every live ABC again and does again
- * what resolved lazily, is worth it now, a part of `part` bytes of
- * garbage at a time (see Rebuild), in this instance's memory or, with
- * `elsewhere`, in another's (see saveDomain). The tables count by the
+ * what resolved lazily, is worth it now, as `want` asks (WANT_InPlace
+ * and the rest): in this instance's memory, a part of `part` bytes of
+ * garbage at a time (see Rebuild), or in another's (see saveDomain),
+ * parts of `movedPart` there. The tables count by the
  * ABCs' weight with three eighths more for what the estimate misses; the
  * reserve is what the next loads may add, twice the largest of the last
  * 16 ABCs' weights and a part's garbage, a sixteenth to a half of memory.
  *
- * Elsewhere, the other instance's memory holds the live tables alone,
- * and this one's goes with it. It is due once the tables come within the
+ * A move to the other instance, whose memory holds the live tables alone,
+ * this one's going with it, is due once the tables come within the
  * reserve of wasm memory's size, which a load would then grow, and the
  * ABCs of domains not live weigh DEAD_Floor, a sixteenth of memory and a
  * quarter of the live ones', as a large application's rebuild takes
@@ -244,14 +245,20 @@ function inChain(dom: Domain, d: u32, top: u32, bottom: u32): bool {
  * it is done only while the three and a part's garbage fit in memory,
  * which never shrinks, by an estimate closer than full's, and once a few
  * more loads, a reserve, would leave them no room; for dead ones of an
- * eighth of memory and half the live ones', so that it is not done every
- * few loads; and, where there is a `spare` instance, only if a move would
- * not take less memory, as for a small domain, whose new instance's
- * margins weigh more than it: else a move, once memory would grow, frees
- * the old tables' room too, and is done less often. Past that it waits:
- * memory then grows as the loads need it, not by twice its size at once.
+ * eighth of memory, half the live ones' and half DEAD_Floor, so that it
+ * is not done every few loads; and, beside a spare instance made or being
+ * made, only if a move would not take less memory, as for a small domain,
+ * whose new instance's margins weigh more than it: else a move, once
+ * memory would grow, frees the old tables' room too, and is done less
+ * often. Past that it waits: memory then grows as the loads need it, not
+ * by twice its size at once.
+ *
+ * WANT_Spare asks whether a move will be due before long: at half the dead
+ * weight and twice the reserve, or memory twice what the new instance
+ * would take, so that a host makes the spare only then, and has it when
+ * the move is due.
  */
-export function wantsRebuild(dom: Domain, part: u64, elsewhere: bool, spare: bool): bool {
+export function wantsRebuild(dom: Domain, part: u64, movedPart: u64, want: u8): bool {
   addWeights(dom);
   const size = (<u64>memory.size()) << 16;
   let largest: u64 = 0;
@@ -272,30 +279,41 @@ export function wantsRebuild(dom: Domain, part: u64, elsewhere: bool, spare: boo
   const reserve = min(size >> 1, max(size >> 4, (largest << 1) + garbage));
   const live = dom.liveWeight + dom.keptWeight;
   const dead = dom.deadWeight;
-  const rebuilt = rebuiltSize(live, largestLive, part);
+  // The new instance rebuilds with the parts its size was made for.
+  const rebuilt = rebuiltSize(live, largestLive, movedPart);
   const smaller = rebuilt <= size - (size >> 3);
-  // The old tables, the dead and the new, by a closer estimate than full's,
-  // which would leave a small domain's rebuild in place never fitting:
-  // before a rebuild the heap held about the tables' weight.
+  // The old tables, the dead and the new, by a closer estimate than full's:
+  // before a rebuild the heap held about the tables' weight, and with
+  // full's a small domain's rebuild in place, which fitted, never did.
   const beside = live + dead + live;
-  const fits = beside + (beside >> 3) + part < size;
-  if (elsewhere) {
-    const worth = dead >= max(max(DEAD_Floor, size >> 4), live >> 2);
+  const fits = beside + (beside >> 4) + part < size;
+  if (want === WANT_Move || want === WANT_Spare) {
+    // A spare is made once a move is half way due, to be there when it is.
+    const half = want === WANT_Spare ? 1 : 0;
+    const worth = dead >= max(max(DEAD_Floor, size >> 4), live >> 2) >> half;
     return (
-      ((worth && full(live + dead, reserve, size)) || size >= max(SHRINK_Floor, rebuilt << 2)) &&
+      ((worth && full(live + dead, reserve << half, size)) ||
+        size >= max(SHRINK_Floor, rebuilt << (2 - half))) &&
       (smaller || !fits) &&
       rebuilt < MOVE_Limit
     );
   }
 
   return (
-    !(spare && smaller) &&
-    dead >= max(max(DEAD_Floor, size >> 3), live >> 1) &&
+    !(want === WANT_InPlaceBesideSpare && smaller) &&
+    dead >= max(max(DEAD_Floor >> 1, size >> 3), live >> 1) &&
     fits &&
-    beside + (beside >> 3) + part + reserve >= size &&
+    beside + (beside >> 4) + part + reserve >= size &&
     !full(live, reserve, size)
   );
 }
+
+/** What wantsRebuild is asked: a rebuild in place with no spare instance, or beside one made or being made. */
+export const WANT_InPlace: u8 = 0;
+export const WANT_InPlaceBesideSpare: u8 = 1;
+/** A move to a spare instance (see saveDomain), or whether one will be due before long, for a host to make it ahead. */
+export const WANT_Move: u8 = 2;
+export const WANT_Spare: u8 = 3;
 
 /**
  * The memory a rebuild elsewhere grows the new instance to at once, for
