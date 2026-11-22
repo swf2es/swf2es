@@ -677,6 +677,16 @@ caches, the inline tests included, takes about 90 s here, most of it
 compiling Zig's build runner and the native tests; with `pnpm build`'s
 kept caches, under a second.
 
+Stage 1 (AVM1 on the scaffold): `codegen-zig.wasm` ReleaseSafe
+114,249 bytes (43,571 gzipped), ReleaseFast 132,109 (42,399), ReleaseSmall
+75,544 (29,933); the AVM1 part of AssemblyScript's was some 65 KB raw in
+the slice's measurement. Eleven interleaved runs: the corpus's 1,680 AVM1
+SWFs' modules 474 ms against AssemblyScript's 444 (1.07), memory 14.4
+against 16.0 MiB; the obfuscated SWF's module, every block and its 19,722
+units alone, 1,699 ms against 2,213 (0.77), memory 248 against 356 MiB.
+One AVM1 unit test (`avm1-emit.test.ts`'s lazy blocks) reads
+`Codegen.usage()`, which waits for stage 3's `domainUsage`.
+
 Measure, at the end of stages 1, 2 and 5 and before the swap, for Safe,
 Fast and Small: bytes raw and gzipped, compile time (the libraries,
 as3pb, a large application's ABC; 11 interleaved runs under the machine
