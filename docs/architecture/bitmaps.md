@@ -265,9 +265,12 @@ The record is drawn only once a Bitmap shows the store, so what a draw drew
 must still draw the same then: content that draws one scratch Shape, changed
 between draws, several times before the bitmap is first shown gets no texture,
 and its bitmap shows as with the option off. A record that no Bitmap on the
-stage shows within 300 frames of its last draw, or of its store leaving the
-stage, lets go of what it drew, so a bitmap never shown large (a thumbnail of
-loaded content) does not keep that content alive.
+stage shows within 300 rendered frames of its last draw lets go of what it
+drew, so a bitmap never shown (a thumbnail of loaded content) does not keep
+that content alive; one shown before waits 1,800 rendered frames after it
+left the stage. A bitmap whose record let go so, such as a screen cached in
+a bitmap, taken off and brought back later, is shown at a texel a pixel, as
+with the option off, until a fill of the whole of it starts its record again.
 
 A record can be drawn again only while what it drew would draw the same:
 `DisplayObject.invalidate` stamps each object with `pickWork.changes`

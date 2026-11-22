@@ -80,6 +80,8 @@ const STEPS = [
   { name: "2.7", resolution: 2.7, frames: 10, capture: true },
   { name: "1.8", resolution: 1.8, frames: 12, capture: true },
   { name: "read", resolution: 2.7, frames: 12, capture: true },
+  // Still for some 350 frames, the main bitmap's art changed on frame 40, its bytes held sampled
+  // every 50: a texture let go of while its Bitmap stands on the stage could not be made again.
   ...Array.from({ length: 7 }, (_, i) => ({
     name: `still-${i + 1}`,
     resolution: 2.7,

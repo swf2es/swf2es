@@ -53,10 +53,12 @@ const MOST_STEPS = 256;
 /** Rendered frames a new scale must hold before a store is drawn again at it: a resize's drag passes. */
 const STEADY_FRAMES = 8;
 /**
- * Rendered frames a store's record waits for a Bitmap on the stage to show it, after its last draw
- * or after it left the stage, before it lets go of what it drew.
+ * Rendered frames a store's record waits for a Bitmap on the stage to show it, after its last draw,
+ * before it lets go of what it drew; and longer for one shown before that left the stage, as a
+ * screen cached in a bitmap is taken off and put back.
  */
 const UNSHOWN_FRAMES = 300;
+const LEFT_FRAMES = 1800;
 /** Rendered frames before a texture the budget refused is asked for again. */
 const RETRY_FRAMES = 60;
 
@@ -136,7 +138,7 @@ interface Record {
   drawnAt: number;
   /** The context it began in (DisplayBitmaps' `generation`): a lost one took the store's draws. */
   generation: number;
-  /** Texels a pixel Bitmaps on the stage showed it at, the largest of a frame, and that frame. */
+  /** Texels a pixel Bitmaps on the stage showed it at, the largest of a frame, and that frame; -1 for never. */
   shownZoom: number;
   shownAt: number;
   /** A scale it is to be drawn again at, and for how many frames that has held. */
@@ -488,7 +490,7 @@ export class DisplayBitmaps {
         continue;
       }
 
-      if (this.frames - record.drawnAt > UNSHOWN_FRAMES) {
+      if (this.frames - record.drawnAt > (record.shownAt < 0 ? UNSHOWN_FRAMES : LEFT_FRAMES)) {
         record.steps = null;
         record.pending = false;
         continue;

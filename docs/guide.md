@@ -171,7 +171,10 @@ so, and the art drawn, which the renderer keeps while the bitmap is shown to
 draw it again. A bitmap is drawn at the screen's resolution once a Bitmap
 shows it, from what was drawn into it before: art changed between draws
 before then, such as one Shape redrawn and drawn several times, leaves the
-bitmap as Flash shows it. It is off by default,
+bitmap as Flash shows it; so does taking it off the stage for longer than
+1,800 rendered frames (300 for one never shown), after which it shows as
+Flash does until it is filled whole and drawn into again. It is off by
+default,
 `"stage"`; [Bitmaps](architecture/bitmaps.md) has the details.
 
 It has `load(url | bytes)` and `destroy()`, which

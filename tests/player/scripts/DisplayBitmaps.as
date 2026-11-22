@@ -171,6 +171,8 @@ package
 					_data.fillRect(new Rectangle(4, 4, 6, 6), 0xFFFF00FF);
 					break;
 				case 40:
+					// The art changed after its first show: a record let go of, or a texture made again from
+					// it, would show here as bytes lost in the still steps, sampled every 50 frames.
 					_ground.alpha = 0.5;
 					break;
 			}
