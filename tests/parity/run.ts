@@ -193,6 +193,18 @@ const MODULE_EXPORTS = [
   "domainPartBudget",
 ];
 
+const KEY_EXPORTS = [
+  "domainModule",
+  "domainLogMark",
+  "domainLogSince",
+  "domainReplay",
+  "domainContext",
+  "domainKeyHeaderBytes",
+  "domainKeyLogBytes",
+  "domainKeyFork",
+  "domainRevision",
+];
+
 const AVM1_EXPORTS = [
   "actionsModuleBytes",
   "actionsModuleEntries",
@@ -1781,6 +1793,49 @@ function moduleLast(c: Compiler, r: Results, name: string, budget: number): void
 }
 
 /**
+ * What a host keys the last ABC added's module by, around compiling it:
+ * the log the compile adds, as domainLogSince writes it, and that log
+ * replayed; the context, whole, after the libraries' entries and up to
+ * them; the key's header and the log of its application domain `child`
+ * and the root in blocks; how far the child's log is its parent's; and
+ * the revision. Every `count`-th ABC's module only is compiled.
+ */
+function keysLast(c: Compiler, r: Results, name: string, _count: number, child: number): void {
+  const address = (a: number) => (a === 0 ? "none" : Buffer.from(handed(c, a)).toString("latin1"));
+  linked(c, r, `${name}: compile`, () => {
+    const mark: number = c.domainLogMark();
+    const module = createHash("sha1")
+      .update(c.domainModule("", -1, false, false))
+      .digest("hex");
+    const since: string = c.domainLogSince(mark, -1);
+    return `${module} mark ${mark} since [${since}] replay ${c.domainReplay(since, -1)} again [${c.domainLogSince(mark, -1)}]`;
+  });
+  linked(c, r, `${name}: context`, () =>
+    r.blob(
+      `${name}: context`,
+      Buffer.from(
+        `${c.domainContext(-1, 0, -1)}\n--\n${c.domainContext(-1, 2, -1)}\n--\n${c.domainContext(-1, 0, 2)}`,
+      ),
+    ),
+  );
+  linked(c, r, `${name}: keys`, () =>
+    r.blob(
+      `${name}: keys`,
+      Buffer.from(
+        [
+          address(c.domainKeyHeaderBytes(-1)),
+          address(c.domainKeyLogBytes(child, 2, 0, -1, 3, 0)),
+          address(c.domainKeyLogBytes(child, 0, 1, 7, 2, 1)),
+          address(c.domainKeyLogBytes(0, 0, 0, -1, 0, 0)),
+          `fork ${c.domainKeyFork(child)} ${c.domainKeyFork(0)} ${c.domainKeyFork(child + 1)}`,
+          `revision ${c.domainRevision()}`,
+        ].join("\n--\n"),
+      ),
+    ),
+  );
+}
+
+/**
  * Each SWF's ABCs added into a child of the root, as linkSwfs adds them,
  * each verified (or what `each` does) after it is added; the domain made
  * again every 40 SWFs.
@@ -1791,7 +1846,7 @@ function verifySwfs(
   base: Base,
   swfs: [string, [string, Uint8Array][]][],
   irs: number,
-  each: (c: Compiler, r: Results, name: string, count: number) => void = verifyLast,
+  each: (c: Compiler, r: Results, name: string, count: number, child: number) => void = verifyLast,
 ): void {
   const linking = new Linking(c, r);
   for (const [k, [swf, list]] of swfs.entries()) {
@@ -1807,7 +1862,7 @@ function verifySwfs(
     });
     for (const [name, bytes] of list) {
       if (linking.link(name, bytes, child)) {
-        each(c, r, name, irs);
+        each(c, r, name, irs, child);
       }
     }
 
@@ -2411,6 +2466,40 @@ const SUITES: Suite[] = [
         mutatedCode(3000).map(([name, bytes]) => [name, [[name, bytes]]]),
         2048,
         moduleLast,
+      ),
+  },
+  {
+    name: "keys-tests",
+    build: "testing",
+    needs: [...LINK_EXPORTS, ...KEY_EXPORTS],
+    run: (c, r) =>
+      verifySwfs(
+        c,
+        r,
+        PLAYER,
+        linkSeeds().map(([name, bytes]) => [name, [[name, bytes]]]),
+        1,
+        keysLast,
+      ),
+  },
+  {
+    name: "keys-swfs",
+    build: "testing",
+    needs: [...LINK_EXPORTS, ...KEY_EXPORTS],
+    run: (c, r) => verifySwfs(c, r, PLAYER, bySwf(swfAbcs()), 1, keysLast),
+  },
+  {
+    name: "keys-mutated",
+    build: "testing",
+    needs: [...LINK_EXPORTS, ...KEY_EXPORTS],
+    run: (c, r) =>
+      verifySwfs(
+        c,
+        r,
+        PLAYER,
+        mutatedCode(2000).map(([name, bytes]) => [name, [[name, bytes]]]),
+        1,
+        keysLast,
       ),
   },
   {
