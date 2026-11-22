@@ -974,6 +974,13 @@ emitters' code, by file, ReleaseSafe and ReleaseSmall: module 44.5 and
 instructions inlined) 26.5 and 16.2, stack-names 8.5 and 3.1, refs 8.4
 and 5.6, structure 6.4 and 3.3, values 6.1 and 3.8; the rest is inlined.
 
+**Release mode, decided.** The user's decision after stage 5: the
+release ships in ReleaseSafe. About 180 KB gzipped is fine, so section
+7's bound of twice AssemblyScript's size and its 1.15 bound on compile
+time are relaxed by that decision. Tuning compile time, such as writing
+`Output` directly rather than through `std.Io.Writer`, is work for after
+the swap. ReleaseSmall with safety set per function is not pursued.
+
 Compile time, the median of 11 interleaved runs, each module a part at a
 time as the host writes it, Zig's against AssemblyScript's: the
 libraries 1.30, as3pb 1.18, a large application's 29 ABCs 1.22 in
