@@ -343,6 +343,16 @@ export class BitmapStore {
   private opaqueVersion = -1;
   disposed = false;
   /**
+   * Texels a pixel the GPU copy keeps the store's draws at: more than 1
+   * only under the renderer's display-resolution option (RenderViewOptions'
+   * `bitmapResolution`), for a store whose every change so far was a draw
+   * of display objects on the GPU or a fill. Scripts see the store at its
+   * size: the first read brings it back at 1 texel a pixel (`hiresRefused`).
+   */
+  hires = 1;
+  /** Whether the store was read, written on the CPU or lost at display resolution, and stays at Flash's. */
+  hiresRefused = false;
+  /**
    * The Bitmaps showing the store, told of each change so the renderer
    * looks at them; held weakly, so a Bitmap taken off the display list
    * and dropped is collected though the BitmapData lives on.

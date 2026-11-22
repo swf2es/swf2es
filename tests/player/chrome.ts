@@ -50,6 +50,8 @@ export interface PlayerJob {
   draw?: boolean;
   /** getTimer and timers by the wall clock, as a benchmark times itself, not by the frames. */
   realTime?: boolean;
+  /** The renderer's BitmapData.draw resolution (RenderViewOptions' `bitmapResolution`). */
+  bitmapResolution?: "stage" | "display";
 }
 
 /** How to run jobs: a time each job's scripts may take, a listener for each result, and more directories to serve. */
@@ -375,6 +377,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
               apiVersion: job.apiVersion,
               draw: job.draw,
               realTime: job.realTime,
+              bitmapResolution: job.bitmapResolution,
             })})`,
           );
           // The timeout stops a script that runs on, not one awaiting what never comes.

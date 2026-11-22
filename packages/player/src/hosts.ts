@@ -361,6 +361,11 @@ export interface Drawer {
     height: number,
     samples: number,
   ): boolean;
+  /**
+   * Whether `drawInto` draws into `store` at the display's resolution
+   * rather than Flash's (RenderViewOptions' `bitmapResolution`); absent, never.
+   */
+  drawsAtDisplay?(store: BitmapStore): boolean;
 }
 
 /**

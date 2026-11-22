@@ -11,6 +11,7 @@ import {
   type TextInput,
 } from "@swf2es/player";
 import type { RenderView } from "@swf2es/player/scene";
+import { configuration } from "./config.js";
 import {
   type Placement,
   place,
@@ -171,6 +172,7 @@ export class Playback {
       resolution: 1,
       background: player.background,
       transparent: !!stage3D || look().wmode === "transparent",
+      bitmapResolution: configuration().bitmapResolution,
     });
 
     return new Playback(box, player, scripting, view, look, report, stage3D);

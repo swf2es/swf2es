@@ -554,6 +554,8 @@ interface RunSwfOptions {
   draw?: boolean;
   /** getTimer and timers by the wall clock rather than the frames (scriptingFor). */
   realTime?: boolean;
+  /** The renderer's BitmapData.draw resolution (RenderViewOptions' `bitmapResolution`). */
+  bitmapResolution?: "stage" | "display";
 }
 
 async function runSwf(
@@ -574,6 +576,7 @@ async function runSwf(
     apiVersion = "latest",
     draw = false,
     realTime = false,
+    bitmapResolution = "stage",
   }: RunSwfOptions,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -604,7 +607,16 @@ async function runSwf(
     const n = draw ? 1 : (GRID[quality] ?? 4);
     const shownAt = shown ? zoom : 1;
     player.quality = ["LOW", "MEDIUM", "HIGH", "BEST"][quality] ?? "HIGH";
-    const surface = await surfaceFor(player, n * zoom, shownAt, zoom, antialias);
+    const surface = await surfaceFor(
+      player,
+      n * zoom,
+      shownAt,
+      zoom,
+      antialias,
+      true,
+      undefined,
+      bitmapResolution,
+    );
     gl = rendererName(surface.gl);
 
     const samples = document.createElement("canvas");
@@ -715,9 +727,11 @@ async function surfaceFor(
   antialias: boolean,
   preserve = true,
   canvas?: HTMLCanvasElement,
+  bitmapResolution: "stage" | "display" = "stage",
 ): Promise<RenderView> {
   const view = new RenderView({
     canvas,
+    bitmapResolution,
     width: player.width,
     height: player.height,
     resolution,

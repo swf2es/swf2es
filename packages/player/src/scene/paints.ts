@@ -39,6 +39,8 @@ interface Kept {
   copy: StoreCopy | null;
   /** Whether it is kept however long it goes undrawn, as it holds what was drawn alone. */
   pinned: boolean;
+  /** Texels a pixel of the store: more than 1 for a store drawn at display resolution (BitmapStore.hires). */
+  scale: number;
 }
 
 /** What a store's GPU copy asks of the renderer, on textures by id; each null or false where it cannot. */
@@ -62,22 +64,34 @@ class StoreCopy implements GpuCopy {
   ) {}
 
   read(): Uint32Array {
-    const bytes = this.paints.readStore(this.handle, this.store.width, this.store.height);
+    const { width, height } = this.store;
+    const scale = this.paints.scaleOf(this.store);
+    const bytes = this.paints.readStore(this.handle, width * scale, height * scale);
     // Gone with a lost context: what the CPU held before the draws.
     if (!bytes) {
       return this.store.lostOnGpu(this);
     }
 
     this.paints.readBack(this.store);
-    return argbOf(bytes);
+    return scale > 1 ? boxDown(argbOf(bytes), width, height, scale) : argbOf(bytes);
   }
 
   copy(source: BitmapStore, rect: PixelRect, dx: number, dy: number): boolean {
+    // A copy into a store at display resolution is a write of whole pixels: read back first.
+    if (this.paints.scaleOf(this.store) > 1) {
+      return false;
+    }
+
     return this.paints.copyStore(source, rect, this.handle, dx, dy);
   }
 
   fill(rect: PixelRect, pixel: number): boolean {
-    return this.paints.fillStore(this.handle, rect, pixel);
+    const k = this.paints.scaleOf(this.store);
+    const texels =
+      k > 1
+        ? { x: rect.x * k, y: rect.y * k, width: rect.width * k, height: rect.height * k }
+        : rect;
+    return this.paints.fillStore(this.handle, texels, pixel);
   }
 
   destroy(): void {
@@ -132,8 +146,15 @@ export class Paints {
    * store still of the one colour it was made (`solidPixel`) is made by
    * clearing the texture to it, with no pixels made, converted or uploaded.
    */
-  storeTexture(store: BitmapStore, idle?: number): TextureHandle {
+  storeTexture(store: BitmapStore, idle?: number, shown = false): TextureHandle {
     const kept = this.stores.get(store);
+    if (kept && kept.scale > 1 && !shown && this.textures.alive(kept.handle)) {
+      // Sampled by anything but a Bitmap on the stage (a fill, a mesh, a filter's map, a draw into
+      // another store): its pixels read back at the store's size, and uploaded so.
+      void store.readable;
+      kept.version = -1;
+    }
+
     if (kept && this.textures.alive(kept.handle)) {
       const id = kept.handle.id;
       // What was drawn, filled or copied into the texture is newest there: shown as it is.
@@ -146,6 +167,11 @@ export class Paints {
         // Counted current only once set: pixels that could not be made are asked for again.
         this.textures.set(id, store.width, store.height, this.bytesOf(store, id), idle);
         kept.version = store.version;
+        if (kept.scale > 1) {
+          kept.scale = 1;
+          refuseHires(store);
+        }
+
         store.uploaded();
       } else if (idle !== undefined) {
         this.textures.idleWithin(id, idle);
@@ -167,6 +193,11 @@ export class Paints {
       this.collected.unregister(kept);
     }
 
+    // What a lost context took of a store at display resolution is not drawn again so.
+    if (store.hires > 1) {
+      refuseHires(store);
+    }
+
     const solid = store.holdsAlpha ? null : store.solidPixel;
     const handle =
       solid === null
@@ -174,7 +205,43 @@ export class Paints {
         : this.textures.addFilled(store.width, store.height, solid, idle);
     // The texture holds the pixels now: a library bitmap's go till they are read, made again then.
     store.uploaded();
-    this.stores.set(store, { handle, version: store.version, copy: null, pinned: false });
+    this.stores.set(store, { handle, version: store.version, copy: null, pinned: false, scale: 1 });
+    return handle;
+  }
+
+  /** Texels a pixel of `store`'s texture: 1 but for a store drawn at display resolution. */
+  scaleOf(store: BitmapStore): number {
+    const kept = this.stores.get(store);
+    return kept && this.textures.alive(kept.handle) ? kept.scale : 1;
+  }
+
+  /**
+   * `store`'s texture at `scale` texels a pixel, for draws at display
+   * resolution: made anew, cleared to the one colour the store still is,
+   * in place of one at another scale.
+   */
+  hiresTexture(store: BitmapStore, scale: number, solid: number): TextureHandle {
+    const kept = this.stores.get(store);
+    if (kept && kept.scale === scale && this.textures.alive(kept.handle)) {
+      return kept.handle;
+    }
+
+    if (kept) {
+      if (kept.copy) {
+        store.copies.delete(kept.copy);
+        if (store.gpu === kept.copy) {
+          store.gpu = null;
+        }
+      }
+
+      this.collected.unregister(kept);
+      if (this.textures.alive(kept.handle)) {
+        this.textures.remove(kept.handle.id);
+      }
+    }
+
+    const handle = this.textures.addFilled(store.width * scale, store.height * scale, solid);
+    this.stores.set(store, { handle, version: store.version, copy: null, pinned: false, scale });
     return handle;
   }
 
@@ -208,6 +275,7 @@ export class Paints {
    * texture goes idle as any other.
    */
   readBack(store: BitmapStore): void {
+    refuseHires(store);
     const kept = this.stores.get(store);
     if (kept?.pinned) {
       kept.pinned = false;
@@ -378,4 +446,50 @@ export function paintSampler(part: PartPaint, smoothing: boolean): number {
   }
 
   return paint.spread === 1 ? MIRROR : paint.spread === 2 ? REPEAT : CLAMP;
+}
+
+/** `store` kept at Flash's resolution from now on: read, written on the CPU or lost at the display's. */
+function refuseHires(store: BitmapStore): void {
+  store.hires = 1;
+  store.hiresRefused = true;
+}
+
+/**
+ * Premultiplied ARGB `scale` times `width` by `height` averaged down to
+ * `width` by `height`, each channel the rounded mean of its square: a
+ * store drawn at display resolution as scripts read it.
+ */
+function boxDown(texels: Uint32Array, width: number, height: number, scale: number): Uint32Array {
+  const out = new Uint32Array(width * height);
+  const line = width * scale;
+  const n = scale * scale;
+  const half = n >> 1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let a = 0;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (let j = 0; j < scale; j++) {
+        const row = (y * scale + j) * line + x * scale;
+        for (let i = 0; i < scale; i++) {
+          const p = texels[row + i];
+          a += p >>> 24;
+          r += (p >>> 16) & 0xff;
+          g += (p >>> 8) & 0xff;
+          b += p & 0xff;
+        }
+      }
+
+      out[y * width + x] =
+        ((((a + half) / n) << 24) |
+          (((r + half) / n) << 16) |
+          (((g + half) / n) << 8) |
+          ((b + half) / n)) >>>
+        0;
+    }
+  }
+
+  return out;
 }

@@ -145,6 +145,14 @@ export interface Configuration {
    * itself. The page may show the meter through `performanceMeter` either way.
    */
   performanceMeter?: boolean;
+  /**
+   * The resolution BitmapData.draw of vector art keeps a bitmap at: "stage",
+   * Flash's, a texel a pixel (the default), or "display", the canvas'
+   * pixels a stage pixel, while scripts only draw into it, fill it and show
+   * it, so that art drawn into a bitmap and scaled up stays sharp (an
+   * experiment; RenderViewOptions' `bitmapResolution`).
+   */
+  bitmapResolution?: "stage" | "display";
   /** The page's build, a short commit or a version, which the context menu's About item names. */
   build?: string;
   /**

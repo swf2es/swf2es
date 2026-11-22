@@ -116,7 +116,24 @@ export interface RenderViewOptions {
    * list, as a test may make) is walked whole.
    */
   checked?: boolean;
+  /**
+   * The resolution BitmapData.draw of display objects keeps a store at:
+   * "stage", Flash's, a texel a pixel (the default); or "display", as many
+   * as the canvas shows a stage pixel at, whole and at most
+   * DISPLAY_TEXELS, while the store is only drawn into on the GPU, filled,
+   * and shown by Bitmaps on the stage, so that vector art drawn into a
+   * bitmap the stage's size looks as sharp as the vectors. Scripts see the
+   * store at its size: what reads its pixels or writes them on the CPU
+   * brings it back at a texel a pixel, averaged down, and it stays so.
+   */
+  bitmapResolution?: "stage" | "display";
 }
+
+/** The most texels a side of a pixel a store drawn at display resolution keeps. */
+const DISPLAY_TEXELS = 4;
+/** The most texels a store at display resolution keeps, and its draw's layer samples. */
+const DISPLAY_STORE_TEXELS = 1 << 24;
+const DISPLAY_LAYER_TEXELS = 1 << 25;
 
 /** What an object's span is as its walk begins (RenderView.spanBegun). */
 const STANDING = 1;
@@ -261,6 +278,8 @@ export class RenderView implements Drawer {
    * the frame's walk would.
    */
   private snapshotting = false;
+  /** RenderViewOptions' `bitmapResolution`. */
+  private readonly bitmapResolution: "stage" | "display";
   /** Target pixels a pixel of what filters run on, where not the scale: in a 3D object's bitmap. */
   private filterUnits: number | null = null;
   private drawMatrix: Matrix = IDENTITY;
@@ -320,6 +339,7 @@ export class RenderView implements Drawer {
     this.width = options.width;
     this.height = options.height;
     this.resolution = options.resolution ?? 1;
+    this.bitmapResolution = options.bitmapResolution ?? "stage";
     this.background = options.background ?? 0xffffff;
     this.transparent = options.transparent ?? false;
     this.ownCanvas = !options.canvas;
@@ -1216,24 +1236,50 @@ export class RenderView implements Drawer {
 
     const store = isOther && o instanceof BitmapObject && !hidden ? o.store : null;
     if (store && !store.disposed && store.width > 0 && store.height > 0) {
-      const quad = this.parts.quad(store.width, store.height);
-      const texture = this.paints.storeTexture(store);
-      const moved = wholePixels(
-        this.places,
-        at + 6,
-        this.target.scale / this.target.pixel,
-        this.moved,
-      );
-      if (moved) {
-        row = this.rows.addPlaced(this.moved, 0, color);
-      } else if (row < 0) {
-        row = this.rows.addPlaced(this.places, at + 6, color);
-      }
+      // A Bitmap on the stage shows a store drawn at display resolution as it is; anything else
+      // reads it back at its size first (Paints.storeTexture).
+      const texture = this.paints.storeTexture(store, undefined, this.drawRoot === null);
+      const texels = this.paints.scaleOf(store);
+      if (texels > 1) {
+        // A quad of its texels, each 1/texels of a pixel, smoothed as the screen's pixels are
+        // about its texels.
+        const quad = this.parts.quad(store.width * texels, store.height * texels);
+        const placed = this.moved;
+        for (let k = 0; k < 4; k++) {
+          placed[k] = this.places[at + 6 + k] / texels;
+        }
 
-      this.geometries.use(quad.id);
-      this.textures.use(texture.id);
-      const smooth = !moved && (o as BitmapObject).smoothing && this.smoothing;
-      this.scene.draw(quad.id, row, NORMAL, texture.id, (smooth ? SMOOTH : 0) | CLAMP);
+        placed[4] = this.places[at + 10];
+        placed[5] = this.places[at + 11];
+        this.geometries.use(quad.id);
+        this.textures.use(texture.id);
+        const shownRow = this.rows.addPlaced(placed, 0, color);
+        this.scene.draw(
+          quad.id,
+          shownRow,
+          NORMAL,
+          texture.id,
+          (this.smoothing ? SMOOTH : 0) | CLAMP,
+        );
+      } else {
+        const quad = this.parts.quad(store.width, store.height);
+        const moved = wholePixels(
+          this.places,
+          at + 6,
+          this.target.scale / this.target.pixel,
+          this.moved,
+        );
+        if (moved) {
+          row = this.rows.addPlaced(this.moved, 0, color);
+        } else if (row < 0) {
+          row = this.rows.addPlaced(this.places, at + 6, color);
+        }
+
+        this.geometries.use(quad.id);
+        this.textures.use(texture.id);
+        const smooth = !moved && (o as BitmapObject).smoothing && this.smoothing;
+        this.scene.draw(quad.id, row, NORMAL, texture.id, (smooth ? SMOOTH : 0) | CLAMP);
+      }
     }
 
     if (isContainer && !passed) {
@@ -1923,6 +1969,11 @@ export class RenderView implements Drawer {
       return false;
     }
 
+    const zoom = this.displayTexels(store);
+    if (zoom > 1) {
+      return this.drawIntoAtDisplay(store, o, m, x, y, width, height, samples, zoom);
+    }
+
     const handle = this.paints.storeTexture(store);
     const drawn = this.drawAlone(o, m, width, height, samples, (n) =>
       this.backend.drawIntoTexture(
@@ -1952,9 +2003,124 @@ export class RenderView implements Drawer {
   }
 
   /**
+   * Whether `store` is drawn into at display resolution (`bitmapResolution`),
+   * as the draw renderer's `drawInto` would draw it: BitmapData.draw then
+   * takes an identity colour transform as none, so that it comes here.
+   */
+  drawsAtDisplay(store: BitmapStore): boolean {
+    return this.displayTexels(store) > 1;
+  }
+
+  /**
+   * Texels a side of a pixel `store` is drawn at: more than 1 only under
+   * the display-resolution option, for a store at it already or one never
+   * read nor written but by a fill as it was made, as many as the canvas
+   * shows a stage pixel at, rounded to whole texels, which a texture and
+   * the memory allowed hold.
+   */
+  private displayTexels(store: BitmapStore): number {
+    if (this.bitmapResolution !== "display" || store.hiresRefused || store.holdsAlpha) {
+      return 1;
+    }
+
+    if (store.hires > 1) {
+      if (this.paints.scaleOf(store) === store.hires) {
+        return store.hires;
+      }
+
+      // Its texture gone with a lost context: the store is as the CPU last held it.
+      store.hires = 1;
+      store.hiresRefused = true;
+      return 1;
+    }
+
+    if (store.solidPixel === null || store.newerOnGpu) {
+      return 1;
+    }
+
+    const shown = this.screenScale ?? this.scale * this.resolution;
+    let k = Math.min(DISPLAY_TEXELS, Math.ceil(shown - 0.2));
+    while (
+      k > 1 &&
+      (Math.max(store.width, store.height) * k > this.textureLimit ||
+        store.width * store.height * k * k > DISPLAY_STORE_TEXELS)
+    ) {
+      k--;
+    }
+
+    return k;
+  }
+
+  /**
+   * `drawInto` at `zoom` texels a pixel: the store's texture made at that
+   * many (Paints.hiresTexture) as it is first drawn into, and `o` drawn as
+   * on a stage shown at that scale, its hairlines a texel wide. Should the
+   * walk read the store back, as when `o` shows the store itself, nothing
+   * is drawn and the draw goes the CPU's way at the store's size.
+   */
+  private drawIntoAtDisplay(
+    store: BitmapStore,
+    o: DisplayObject,
+    m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    samples: number,
+    zoom: number,
+  ): boolean {
+    const solid = store.solidPixel;
+    if (store.hires <= 1 && solid === null) {
+      return false;
+    }
+
+    const handle =
+      store.hires > 1
+        ? this.paints.storeTexture(store, undefined, true)
+        : this.paints.hiresTexture(store, zoom, solid ?? 0);
+    store.hires = zoom;
+    const drawn = this.drawAlone(
+      o,
+      m,
+      width * zoom,
+      height * zoom,
+      samples,
+      (n) =>
+        store.hires === zoom &&
+        this.paints.scaleOf(store) === zoom &&
+        this.backend.drawIntoTexture(
+          this.commands,
+          this.scene,
+          this.rows,
+          this.geometries,
+          this.textures,
+          this.filters,
+          this.keeps,
+          this.target,
+          width * zoom,
+          height * zoom,
+          n,
+          handle.id,
+          x * zoom,
+          y * zoom,
+          !store.transparent,
+        ),
+      zoom,
+    );
+    if (!drawn) {
+      return false;
+    }
+
+    this.paints.drawn(store);
+    return true;
+  }
+
+  /**
    * `o` walked and planned alone, through `m` into a `width` by `height`
    * bitmap at `samples` a side, as few as a texture holds, then `draw`n
-   * with the samples taken; null for a size no texture holds.
+   * with the samples taken; null for a size no texture holds. At `zoom`
+   * texels a pixel, `width` and `height` in texels, as on a stage shown
+   * that much larger.
    */
   private drawAlone<T>(
     o: DisplayObject,
@@ -1963,10 +2129,17 @@ export class RenderView implements Drawer {
     height: number,
     samples: number,
     draw: (samples: number) => T,
+    zoom = 1,
   ): T | null {
     // As many samples as a texture holds, halved as BitmapData.draw's are.
     let n = Math.max(1, samples);
     while (n > 1 && Math.max(width, height) * n > this.textureLimit) {
+      n /= 2;
+    }
+
+    // At display resolution, the samples' layer kept within memory too: its texels are near the
+    // screen's pixels already.
+    while (zoom > 1 && n > 1 && width * height * n * n > DISPLAY_LAYER_TEXELS) {
       n /= 2;
     }
 
@@ -1981,15 +2154,15 @@ export class RenderView implements Drawer {
     this.target = {
       width: width * n,
       height: height * n,
-      scale: n,
+      scale: n * zoom,
       x: 0,
       y: 0,
       resolution: 1,
       pixel: n,
     };
-    this.scale = n;
+    this.scale = n * zoom;
     this.resolution = 1;
-    this.screenScale = 1;
+    this.screenScale = zoom;
     this.drawRoot = o;
     this.snapshotting = true;
     this.drawMatrix = o.scroll ? shifted(m, o.scroll) : m;
