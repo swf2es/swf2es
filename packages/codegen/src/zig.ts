@@ -96,6 +96,7 @@ export const SIGNATURES: { readonly [name in Exclude<keyof CodegenExports, Runti
 
 /** Additional exports for the host's recovery journal. */
 export interface RecoveryExports extends CodegenExports {
+  lastAddLinked(): boolean;
   journalBytes(mark: number): number;
   replayEntry(kind: number, index: number, a: number, b: number): boolean;
   abandonRebuild(): void;
@@ -104,6 +105,7 @@ export interface RecoveryExports extends CodegenExports {
 
 const ZIG_SIGNATURES: Record<string, Signature> = {
   ...SIGNATURES,
+  lastAddLinked: ["", "bool"],
   journalBytes: ["i32", "address"],
   replayEntry: ["i32 i32 i32 i32", "bool"],
   abandonRebuild: ["", "void"],
@@ -169,6 +171,7 @@ const READS_LAST_CALL = new Set([
   "actionsHeldCount",
   "actionsRelease",
   "abandonRebuild",
+  "lastAddLinked",
 ]);
 
 /**

@@ -619,7 +619,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
     if (done && saved) {
       checkpoint = saved;
-      journal.length = 0;
+      journal.clear();
+      for (const domain of journalDomains.values()) {
+        domain.entries = undefined;
+      }
       replayable = true;
     }
 
@@ -734,13 +737,34 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     | { kind: "restore"; index: number; bytes: Uint8Array }
     | { kind: "found"; definition: FoundDefinition }
     | { kind: "log"; index: number; operation: number; a: number; b: number };
-  const journal: Entry[] = [];
+  interface JournalDomain {
+    id: number;
+    parent?: JournalDomain;
+    children?: Set<JournalDomain>;
+    entries?: Entry[];
+  }
+  const journalDomains = new Map<number, JournalDomain>();
+  const journal = new Set<Entry>();
   const abcDomains: number[] = [];
   let replayable = true;
-  const journaled = (entry: Entry) => {
-    if (zig) {
-      journal.push(entry);
+  const journaled = (entry: Entry, owner = 0) => {
+    if (!zig) {
+      return;
     }
+
+    const id = owner | 0;
+    if (id !== 0) {
+      const domain = journalDomains.get(id);
+      if (!domain) {
+        // The native call ignored a domain that was dropped or never created.
+        return;
+      }
+
+      domain.entries ??= [];
+      domain.entries.push(entry);
+    }
+
+    journal.add(entry);
   };
   // The target is absolute so dropping a child preserves work its compiles did on its ancestors.
   const journalLog = (mark: number) => {
@@ -754,13 +778,16 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     }
     const words = new Uint32Array(wasm.memory.buffer, at, count);
     for (let i = 0; i < count; i += 4) {
-      journal.push({
-        kind: "log",
-        operation: words[i],
-        index: words[i + 1],
-        a: words[i + 2],
-        b: words[i + 3],
-      });
+      journaled(
+        {
+          kind: "log",
+          operation: words[i],
+          index: words[i + 1],
+          a: words[i + 2],
+          b: words[i + 3],
+        },
+        abcDomains[words[i + 1]],
+      );
     }
     return true;
   };
@@ -792,36 +819,33 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     replayable = journalLog(mark);
     return result;
   }
-  const forgetDropped = () => {
-    const states = new Map<number, boolean>();
-    const dropped = (domain: number) => {
-      let gone = states.get(domain);
-      if (gone === undefined) {
-        gone = wasm.domainState(domain) === 2;
-        states.set(domain, gone);
-      }
-      return gone;
-    };
-    let kept = 0;
-    for (const entry of journal) {
-      if (entry.kind === "add" && dropped(entry.appDomain)) {
-        if (entry.index < 0) {
-          continue;
-        }
-
-        entry.abc = EMPTY_ABC;
-      }
-      if ((entry.kind === "log" || entry.kind === "restore") && dropped(abcDomains[entry.index])) {
-        continue;
-      }
-      if (entry.kind === "found" && dropped(entry.definition.domain)) {
-        continue;
-      }
-
-      journal[kept++] = entry;
+  const forgetDropped = (appDomain: number) => {
+    const root = journalDomains.get(appDomain | 0);
+    if (!root) {
+      return;
     }
 
-    journal.length = kept;
+    root.parent?.children?.delete(root);
+    const pending = [root];
+    for (const domain of pending) {
+      if (domain.children) {
+        for (const child of domain.children) {
+          pending.push(child);
+        }
+      }
+
+      if (domain.entries) {
+        for (const entry of domain.entries) {
+          if (entry.kind === "add" && entry.index >= 0) {
+            entry.abc = EMPTY_ABC;
+          } else {
+            journal.delete(entry);
+          }
+        }
+      }
+
+      journalDomains.delete(domain.id);
+    }
   };
   const replayInto = (into: typeof wasm) => {
     if (checkpoint) {
@@ -928,9 +952,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       added = 0;
       epoch++;
       revisionEpoch++;
+      journalDomains.clear();
       chains.clear();
       apiVersion = version;
-      journal.length = 0;
+      journal.clear();
       abcDomains.length = 0;
       replayable = true;
       checkpoint = null;
@@ -945,18 +970,21 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         throw new Error(`application domain ${appDomain}: never made, or dropped`);
       }
 
-      if (zig) {
+      if (zig && (error === 0 || (wasm as RecoveryExports).lastAddLinked())) {
         if (error === 0) {
           abcDomains.push(appDomain);
         }
-        journal.push({
-          kind: "add",
-          abc: bytes,
-          builtin,
+        journaled(
+          {
+            kind: "add",
+            abc: bytes,
+            builtin,
+            appDomain,
+            index: error === 0 ? added : -1,
+            error,
+          },
           appDomain,
-          index: error === 0 ? added : -1,
-          error,
-        });
+        );
       }
       if (error === 0) {
         added++;
@@ -970,7 +998,17 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         throw new Error(`application domain ${parent}: never made, or dropped`);
       }
 
-      journaled({ kind: "child", parent });
+      if (zig) {
+        const owner = journalDomains.get(parent | 0);
+        const child = { id: domain, parent: owner };
+        if (owner) {
+          owner.children ??= new Set();
+          owner.children.add(child);
+        }
+
+        journalDomains.set(domain, child);
+        journaled({ kind: "child", parent });
+      }
       return domain;
     },
     dropDomain(appDomain, of = epoch) {
@@ -978,7 +1016,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         collected(wasm.domainDrop(appDomain));
         journaled({ kind: "drop", appDomain });
         if (zig) {
-          forgetDropped();
+          forgetDropped(appDomain);
         }
         chains.forget((d) => wasm.domainState(d) === 2);
       }
@@ -1036,7 +1074,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
             throw new Error(`ABC ${index}: not of an evicted domain, or rejected (${error})`);
           }
           if (zig) {
-            journal.push({ kind: "restore", index, bytes: owned });
+            journaled({ kind: "restore", index, bytes: owned }, abcDomains[index]);
           }
         }
 
@@ -1058,7 +1096,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     found({ domain, nsKind, uri, name, abc, asType }) {
       collected(wasm.domainFound(domain, nsKind, uri, name, abc, asType));
       if (zig) {
-        journal.push({ kind: "found", definition: { domain, nsKind, uri, name, abc, asType } });
+        journaled(
+          { kind: "found", definition: { domain, nsKind, uri, name, abc, asType } },
+          domain,
+        );
       }
     },
     compile(hashes = [], index = -1) {

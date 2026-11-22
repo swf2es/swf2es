@@ -362,6 +362,7 @@ pub const Rebuild = struct {
     entry: u32 = 0,
     next: u32 = 0,
     verifier: ?code.Verifier = null,
+    verifier_arena: memory.Arena,
     done: bool = false,
     failed: bool = false,
 
@@ -382,7 +383,7 @@ pub const Rebuild = struct {
             try fresh.domainEvicted.push(gpa, dom.domainEvicted.get(d));
         }
 
-        return .{ .dom = dom, .fresh = fresh, .arena = arena, .parsed_in_fresh = parsed_in_fresh };
+        return .{ .dom = dom, .fresh = fresh, .arena = arena, .parsed_in_fresh = parsed_in_fresh, .verifier_arena = .init(arena.source) };
     }
 
     /// Go on until this call has made about `budget` bytes of garbage, as
@@ -423,6 +424,7 @@ pub const Rebuild = struct {
 
                 spent += verifier.spent * code.VERIFY_COST;
                 self.verifier = null;
+                self.verifier_arena.reset();
                 continue;
             }
 
@@ -446,13 +448,14 @@ pub const Rebuild = struct {
             }
 
             if (kind == domain_.LOG_Verify) {
-                self.verifier = try code.Verifier.init(fresh, fresh.gpa, abc);
+                self.verifier = try code.Verifier.init(fresh, self.verifier_arena.allocator(), abc);
                 if (!try self.verifier.?.run(@max((budget - spent) / code.VERIFY_COST, 1))) {
                     return false;
                 }
 
                 spent += self.verifier.?.spent * code.VERIFY_COST;
                 self.verifier = null;
+                self.verifier_arena.reset();
                 continue;
             }
 

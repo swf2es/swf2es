@@ -59,6 +59,7 @@ const exports = [_][]const u8{
     "domainLogMark",
     "domainLogSince",
     "domainReplay",
+    "lastAddLinked",
     "journalBytes",
     "replayEntry",
     "abandonRebuild",

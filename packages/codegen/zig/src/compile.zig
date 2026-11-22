@@ -116,17 +116,25 @@ pub fn changed(comptime change: anytype, args: anytype) Allocator.Error!@typeInf
     return domain_.changed(try domain(), arena(), change, args);
 }
 
+pub var last_add_linked: bool = false;
+
 /// Add an ABC to the domain, loaded into application domain `appDomain`
 /// (0, the root, or one domainChild made); 0, or the VerifyError it was
 /// rejected with; -1 for an application domain never made or dropped.
 pub fn domainAdd(bytes: []const u8, builtin: bool, appDomain: i32) Allocator.Error!i32 {
     abandon();
-    if (!isLive(try domain(), appDomain)) {
+    const dom = try domain();
+    last_add_linked = false;
+    if (!isLive(dom, appDomain)) {
         return -1;
     }
 
     forgetVerified();
-    return changed(domain_.addAbc, .{ arena(), bytes, builtin, @as(u32, @intCast(appDomain)) });
+    const loads = dom.loads;
+    const result = try changed(domain_.addAbc, .{ arena(), bytes, builtin, @as(u32, @intCast(appDomain)) });
+    // attach advances loads even when linking rejects the ABC after interning names.
+    last_add_linked = dom.loads != loads;
+    return result;
 }
 
 /// A new application domain, a child of `parent`'s: its number, or -1 if `parent` was never made or was dropped.
@@ -1187,6 +1195,7 @@ fn freeRebuild(r: *Rebuilding) void {
 }
 
 fn destroyRebuild(r: *Rebuilding) void {
+    r.rebuild.verifier_arena.deinit();
     const pages = memory.pages();
     if (r.previous_limit) |limit| pages.limit = limit;
     pages.allocator().destroy(r);

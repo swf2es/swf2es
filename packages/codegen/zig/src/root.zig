@@ -311,6 +311,10 @@ pub export fn domainLogSince(mark: i32, index: i32) usize {
     return handOut(avm2.domainLogSince(gpa(), mark, index) catch |err| return fail(err));
 }
 
+pub export fn lastAddLinked() bool {
+    return avm2.last_add_linked;
+}
+
 pub export fn journalBytes(mark: u32) usize {
     const bytes = avm2.journalBytes(gpa(), mark) catch |err| return fail(err);
     return if (bytes) |b| handOut(b) else handOutNone();

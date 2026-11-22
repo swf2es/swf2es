@@ -283,6 +283,61 @@ test("recovery reads a finding's inherited fields once and preserves the finding
   assert.equal(reads, 1);
 });
 
+test("recovery omits parse rejections and repeats link rejections", async (t) => {
+  const compiler = await createCodegen(await zigTestingModule(false));
+  const abc = linkAbcs();
+  compiler.reset();
+  assert.equal(compiler.add(abc.builtin, true), 0);
+  assert.equal(compiler.add(abc.failing), 1103);
+  assert.notEqual(compiler.add(new Uint8Array(8192)), 0);
+
+  const replayed: number[] = [];
+  const prototype = WebAssembly.Instance.prototype;
+  const getter = Object.getOwnPropertyDescriptor(prototype, "exports")?.get;
+  assert.ok(getter);
+  t.mock.getter(prototype, "exports", function (this: WebAssembly.Instance) {
+    const raw = getter.call(this);
+    return {
+      ...raw,
+      domainAdd(...args: number[]) {
+        replayed.push(args[1]);
+        return raw.domainAdd(...args);
+      },
+    };
+  });
+  assert.equal(compiler.add(new TextEncoder().encode("\0panic")), 1107);
+  assert.deepEqual(replayed, [abc.builtin.length, abc.failing.length]);
+});
+
+test("dropping sibling domains does not query domains from earlier drops", async (t) => {
+  let stateReads = 0;
+  const module = await zigTestingModule(false);
+  t.mock.method(WebAssembly, "instantiate", async (module: WebAssembly.Module, imports: object) => {
+    const instance = new WebAssembly.Instance(module, imports);
+    const raw = instance.exports;
+    return {
+      exports: {
+        ...raw,
+        domainState(id: number) {
+          stateReads++;
+          return (raw.domainState as (id: number) => number)(id);
+        },
+      },
+    };
+  });
+
+  const compiler = await createCodegen(module);
+  compiler.reset();
+  const abc = script([0x24, 7, 0x48]);
+  for (let n = 0; n < 32; n++) {
+    const child = compiler.childDomain(0);
+    assert.equal(compiler.add(abc, false, child), 0);
+    compiler.dropDomain(child);
+  }
+
+  assert.ok(stateReads <= 32, `${stateReads} domainState calls for 32 drops`);
+});
+
 test("a missing journal entry cannot silently roll back the compiler after a later panic", async (t) => {
   const module = await zigTestingModule(false);
   let failJournal = true;

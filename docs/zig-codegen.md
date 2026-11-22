@@ -986,7 +986,9 @@ Stage 6 (the exports and lifetimes), as built:
   module and its verified bodies.
 - *Rebuilds parse the live ABCs again* into the new domain's arena, as
   the old one's arena goes with it. AssemblyScript's hands the new domain
-  its Abc objects. `wantsRebuild` counts that re-parse for an in-place
+  its Abc objects. A stepped rebuild keeps its current verifier's queue and
+  results in a separate arena and releases them when that verifier finishes.
+  `wantsRebuild` counts that re-parse for an in-place
   rebuild, which is Zig's own decision. The weights `domainUsage` reports
   stay AssemblyScript's, and are compared. An arena per parsed ABC, handed
   to the new domain, was tried (branch `zig/stage-6-abc-arenas`). It takes
@@ -1001,16 +1003,21 @@ Stage 6 (the exports and lifetimes), as built:
   the destination arena. Recovery loads the checkpoint and replays only
   the later changes. It owns the bytes it needs from callers and records
   each compile's changes against the ABC it affected, including ancestors.
-  Dropping a child discards its later journaled bytes and keeps its ABC
-  indices. ABCs that were live at the last checkpoint stay in that
-  checkpoint until the next successful rebuild or reset.
+  The journal keeps inputs that reached the linker, including link rejections
+  that already interned names. Dropping a child visits its subtree's journal
+  entries and keeps placeholders for its ABC indices. ABCs that were live at
+  the last checkpoint stay there until the next successful rebuild or reset.
+  Each recovery invalidates outstanding cache reads with a new revision token.
+  If a compile stops with a partial verifier log, further calls can still use
+  the instance. A later panic can recover once a rebuild checkpoints it or a
+  reset starts a fresh domain.
 - *Writes outside put.* A stepped verifier truncates its log entry in a
   later call than the one that added it, and a push in the same call may
   write over that row: a rollback writes it back (`Domain.truncated`).
 - *Peak memory* on `codegen-session.ts`, 300 loads, seed 1, three
   interleaved runs per compiler. The largest single Wasm instance reached
-  24.1 MiB with Zig and 29.8 MiB with AssemblyScript. Median elapsed times
-  were 5.91 s and 5.68 s, with five and six rebuilds respectively. At
+  23.8 MiB with Zig and 29.8 MiB with AssemblyScript. Median elapsed times
+  were 6.14 s and 5.91 s, with five and six rebuilds respectively. At
   25-load intervals Zig's recovery payload peaked at 2.4 MiB outside
   Wasm, counting owned ABC bytes, serialized checkpoint state and four
   32-bit words per recorded compile entry. JavaScript object overhead and
