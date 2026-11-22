@@ -3,15 +3,16 @@
  * the same object asc's glue gives for codegen.wasm, export for export, so
  * that createCodegen runs over either.
  *
- * Zig's module takes bytes, not managed objects: a call's arrays and
- * strings are staged in room the module's `input` gives, which starts the
- * call, and each is passed as its address and length; what a call hands
+ * Zig's module takes bytes, not managed objects: every call starts with
+ * the module's `input`, which gives room for its arrays and strings, staged
+ * there and each passed as its address and length; what a call hands
  * out is an address, `outputLength` bytes, valid until the next call
  * starts. A call that ran out of memory hands out nothing and says so in
  * `codegenError`, and is thrown here, as asc's trap would be. A panic, a
  * failed safety check of the ReleaseSafe build, is the module's one import,
- * env.abort: thrown as a CodegenPanic, after which the instance is dead and
- * every call throws one, for the wrapper to start another.
+ * env.abort, and any other trap are thrown as a CodegenPanic, after which
+ * the instance is dead and every call throws one, for the wrapper to start
+ * another.
  *
  * An export the module does not have yet, as the port goes on stage by
  * stage, throws when called.
@@ -133,6 +134,9 @@ function parameters(spec: string): Parameter[] {
 
 const align8 = (n: number) => (n + 7) & ~7;
 
+/** The exports that read the last call, whose result they report, rather than start one. */
+const READS_LAST_CALL = new Set(["outputLength", "codegenError"]);
+
 /**
  * The exports of a Zig build of the compiler, instantiated from `module`,
  * as asc's glue would give them: `signatures` names them, and the test
@@ -147,7 +151,7 @@ export async function bind<T>(
   const instance = await WebAssembly.instantiate(module, {
     env: {
       abort(message: number, length: number) {
-        panic = raw ? fromUtf8(new Uint8Array(raw.memory.buffer, message, length)) : "panic";
+        panic = raw ? fromUtf8(new Uint8Array(raw.memory.buffer, message >>> 0, length)) : "panic";
         throw new CodegenPanic(`codegen-zig.wasm: ${panic}`);
       },
     },
@@ -159,8 +163,24 @@ export async function bind<T>(
       throw new CodegenPanic(`codegen-zig.wasm panicked earlier (${panic}): make another instance`);
     }
   };
+  // Addresses are u32, which wasm hands JavaScript as i32: negative past 2 GiB.
   const handed = (address: number) =>
-    fromUtf8(new Uint8Array(exports.memory.buffer, address, exports.outputLength()));
+    fromUtf8(new Uint8Array(exports.memory.buffer, address >>> 0, exports.outputLength()));
+  // Any trap but a panic, too: a stack overflow, the engine's call stack
+  // exhausted. It leaves the instance as a panic does, its shadow stack's
+  // pointer where the trap left it and its call half done.
+  const guarded = <R>(run: () => R): R => {
+    try {
+      return run();
+    } catch (error) {
+      if (!(error instanceof CodegenPanic)) {
+        panic = `trap: ${error instanceof Error ? error.message : String(error)}`;
+        throw new CodegenPanic(`codegen-zig.wasm: ${panic}`);
+      }
+
+      throw error;
+    }
+  };
 
   const bound: Record<string, unknown> = {
     get memory() {
@@ -182,58 +202,65 @@ export async function bind<T>(
     }
 
     const params = parameters(spec);
-    const staged = params.some((p) => p.kind === "u8s" || p.kind === "i32s" || p.kind === "str");
+    // These read the last call, and start none (see root.zig).
+    const starts = !READS_LAST_CALL.has(name);
     bound[name] = (...args: unknown[]) => {
       alive();
-      const values = params.map((p, i) => (args[i] === undefined ? p.fallback : args[i]));
-      const flat: number[] = [];
-      if (staged) {
-        const parts = values.map((value, i) => {
-          switch (params[i].kind) {
-            case "u8s":
-              return value as Uint8Array;
-            case "i32s": {
-              const items = value as Int32Array;
-              return new Uint8Array(items.buffer, items.byteOffset, items.byteLength);
-            }
-            case "str":
-              return toUtf8(value as string);
-            default:
-              return null;
-          }
-        });
-        let size = 0;
-        for (const part of parts) {
-          size = part ? align8(size) + part.length : size;
+      // A default where the argument is left out, as asc's glue passes arguments.length.
+      const values = params.map((p, i) => (i < args.length ? args[i] : p.fallback));
+      const parts = values.map((value, i) => {
+        const kind = params[i].kind;
+        if (kind === "i32" || kind === "bool") {
+          return null;
         }
 
-        const base = exports.input(size);
-        if (base === 0) {
-          throw new Error(`codegen-zig.wasm: ${name} ran out of memory`);
+        if (value === null || value === undefined) {
+          throw new TypeError(`${name}: argument ${i} must not be null`);
         }
 
-        // Read after input, which may have grown memory.
-        const memory = new Uint8Array(exports.memory.buffer);
-        let at = 0;
-        for (const [i, part] of parts.entries()) {
-          if (part === null) {
-            flat.push(Number(values[i]));
-            continue;
-          }
+        if (kind === "str") {
+          return toUtf8(value as string);
+        }
 
-          at = align8(at);
-          memory.set(part, base + at);
-          flat.push(base + at, params[i].kind === "i32s" ? part.length / 4 : part.length);
-          at += part.length;
-        }
-      } else {
-        for (const value of values) {
-          flat.push(Number(value));
-        }
+        const items = value as Uint8Array | Int32Array;
+        const bytes = new Uint8Array(items.buffer, items.byteOffset, items.byteLength);
+        // A view of the module's own memory, which input may give back or grow away.
+        return items.buffer === exports.memory.buffer ? bytes.slice() : bytes;
+      });
+      let size = 0;
+      for (const part of parts) {
+        size = part ? align8(size) + part.length : size;
       }
 
-      const value = call(...flat);
-      if (exports.codegenError() !== 0) {
+      const flat: number[] = [];
+      const value = guarded(() => {
+        if (starts) {
+          const base = exports.input(size) >>> 0;
+          if (base === 0) {
+            throw new Error(`codegen-zig.wasm: ${name} ran out of memory`);
+          }
+
+          // Read after input, which may have grown memory.
+          const memory = new Uint8Array(exports.memory.buffer);
+          let at = 0;
+          for (const [i, part] of parts.entries()) {
+            if (part === null) {
+              flat.push(Number(values[i]));
+              continue;
+            }
+
+            at = align8(at);
+            memory.set(part, base + at);
+            flat.push(base + at, params[i].kind === "i32s" ? part.length / 4 : part.length);
+            at += part.length;
+          }
+        } else {
+          flat.push(...values.map(Number));
+        }
+
+        return call(...flat);
+      });
+      if (starts && exports.codegenError() !== 0) {
         throw new Error(`codegen-zig.wasm: ${name} ran out of memory`);
       }
 
@@ -244,8 +271,10 @@ export async function bind<T>(
           return value !== 0;
         case "str":
           return handed(value);
+        case "address":
+          return value >>> 0;
         case "f64x2":
-          return new Float64Array(exports.memory.buffer, value, 2).slice();
+          return new Float64Array(exports.memory.buffer, value >>> 0, 2).slice();
         default:
           return value;
       }

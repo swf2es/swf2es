@@ -27,6 +27,9 @@ const testing_exports = exports ++ [_][]const u8{
     "memoryChunksUsed",
     "memoryReached",
     "testingPanic",
+    "testingOverflow",
+    "stackPaint",
+    "stackDeepest",
 };
 
 /// The shadow stack, first in memory so that overflowing it traps rather
@@ -67,6 +70,7 @@ pub fn build(b: *std.Build) void {
 fn options(b: *std.Build, poison: bool) *std.Build.Module {
     const values = b.addOptions();
     values.addOption(bool, "poison", poison);
+    values.addOption(u32, "stack_size", stack_size);
     return values.createModule();
 }
 

@@ -4,14 +4,14 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { instantiate as instantiateAs } from "../../../packages/codegen/dist/codegen.js";
 import { CodegenPanic, fromUtf8, instantiate, toUtf8 } from "../../../packages/codegen/dist/zig.js";
 import { bindTesting, zigTestingModule } from "./zig-testing.ts";
 
+// From dist/ by name, not by the package's export, which SWF2ES_COMPILER=zig redirects (tests/compiler.ts).
 const compile = async (name: string) =>
   WebAssembly.compile(
-    await readFile(fileURLToPath(import.meta.resolve(`@swf2es/codegen/${name}`))),
+    await readFile(new URL(`../../../packages/codegen/dist/${name}`, import.meta.url)),
   );
 const zig = await instantiate(await compile("codegen-zig.wasm"));
 const as = await instantiateAs(await compile("codegen.wasm"), { env: {} });
@@ -80,4 +80,25 @@ test("a panic is thrown as a CodegenPanic, and the instance is dead after it", a
   );
   assert.equal(testing.panicked(), "a panic for the tests");
   assert.throws(() => testing.compilerVersion(), CodegenPanic);
+});
+
+test("any other trap, as a stack overflow, kills the instance as a panic does", async () => {
+  const testing = await bindTesting(await zigTestingModule(false));
+  // How deep the stack has reached since it was painted, for the fuzzers to size it by.
+  testing.stackPaint();
+  assert.ok(testing.stackDeepest() > 0 && testing.stackDeepest() < 4096);
+  assert.throws(() => testing.testingOverflow(0), CodegenPanic);
+  assert.match(testing.panicked() ?? "", /^trap: /);
+  assert.throws(() => testing.compilerVersion(), CodegenPanic);
+});
+
+test("a view of the module's own memory goes in whole, though input gives that memory back", async () => {
+  const testing = await bindTesting(await zigTestingModule(false));
+  const view = new Uint8Array(testing.memory.buffer, 64, 4);
+  view.set([16, 0, 46, 0]);
+  assert.equal(testing.abcVersion(view), (46 << 16) | 16);
+});
+
+test("arrays and strings must be given, as asc's glue requires; a default only where left out", () => {
+  assert.throws(() => zig.abcVersion(undefined as unknown as Uint8Array), TypeError);
 });

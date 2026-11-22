@@ -10,6 +10,9 @@ const TESTING_SIGNATURES: Record<string, Signature> = {
   memoryChunksUsed: ["", "i32"],
   memoryReached: ["", "i32"],
   testingPanic: ["", "void"],
+  testingOverflow: ["i32", "i32"],
+  stackPaint: ["", "void"],
+  stackDeepest: ["", "i32"],
 };
 
 /** The test build, or the one that fills freed memory with 0xAA, compiled. */

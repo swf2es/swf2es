@@ -2,15 +2,18 @@
 // ABI that packages/codegen/src/zig.ts lifts to the signatures of asc's
 // glue (docs/zig-codegen.md, section 3).
 //
-// A call that takes arrays or strings is staged: the host asks input() for
-// room, which starts the call, writes them there, and passes each as its
-// address and length. Any other call starts itself. Starting a call resets
-// the call's arena, so what a call hands out (an address, outputLength()
-// bytes) stays where it is until the next one starts. Inside, everything
-// returns errors; here they become codegenError()'s code, set by the call
-// that failed, which then hands out nothing: running out of memory never
-// traps. Compiling is a pure function of the calls: no import but
-// env.abort, no clock, no randomness.
+// Every call starts with input(), which the host calls before each export
+// with room for the call's arrays and strings (0 bytes when it has none),
+// and no export starts a call itself: one place resets the call's arena
+// and the last call's failure, so no export can forget to, and none can
+// free what input() staged. The host writes the arrays and strings there
+// and passes each as its address and length. What a call hands out (an
+// address, outputLength() bytes) stays where it is until the next call's
+// input(). outputLength() and codegenError() read the last call and start
+// none. Inside, everything returns errors; here they become
+// codegenError()'s code, set by the call that failed, which then hands out
+// nothing: running out of memory never traps. Compiling is a pure function
+// of the calls: no import but env.abort, no clock, no randomness.
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
@@ -27,27 +30,18 @@ const out_of_memory = 1;
 var handed_length: u32 = 0;
 var failure: u32 = 0;
 
-/// The call's allocator, all the last call held given back.
-fn begin() Allocator {
-    memory.arenas();
-    failure = 0;
-    handed_length = 0;
-    memory.call.reset();
+/// The call's allocator, which input() reset.
+pub fn gpa() Allocator {
     return memory.call.allocator();
 }
 
-/// The allocator of a call input() started.
-fn staged() Allocator {
-    return memory.call.allocator();
-}
-
-fn handOut(bytes: []const u8) usize {
+pub fn handOut(bytes: []const u8) usize {
     handed_length = @intCast(bytes.len);
     return @intFromPtr(bytes.ptr);
 }
 
 /// Nothing handed out, and why.
-fn fail(err: Allocator.Error) usize {
+pub fn fail(err: Allocator.Error) usize {
     switch (err) {
         error.OutOfMemory => failure = out_of_memory,
     }
@@ -56,11 +50,14 @@ fn fail(err: Allocator.Error) usize {
     return 0;
 }
 
-/// Room for `size` bytes of the next call's arrays and strings, 8-aligned,
-/// which starts that call; 0 if memory cannot grow.
+/// Start a call: all the last call held given back, and room for `size`
+/// bytes of its arrays and strings, 8-aligned; 0 if memory cannot grow.
 export fn input(size: u32) usize {
-    const gpa = begin();
-    const room = gpa.alignedAlloc(u8, .@"8", @max(size, 8)) catch |err| return fail(err);
+    memory.arenas();
+    failure = 0;
+    handed_length = 0;
+    memory.call.reset();
+    const room = gpa().alignedAlloc(u8, .@"8", @max(size, 8)) catch |err| return fail(err);
     return @intFromPtr(room.ptr);
 }
 
@@ -75,13 +72,11 @@ export fn codegenError() u32 {
 }
 
 export fn compilerVersion() usize {
-    _ = begin();
     return handOut(version);
 }
 
 /// The version at the start of an ABC block, major << 16 | minor; -1 if it is too short.
 export fn abcVersion(abc: [*]const u8, length: u32) i32 {
-    _ = staged();
     if (length < 4) {
         return -1;
     }
@@ -100,6 +95,7 @@ fn stage(bytes: []const u8) [*]const u8 {
 }
 
 test "a call hands out what stays until the next one starts" {
+    _ = input(0);
     const at: [*]const u8 = @ptrFromInt(compilerVersion());
     try std.testing.expectEqualStrings(version, at[0..outputLength()]);
     try std.testing.expectEqual(0, codegenError());
@@ -112,8 +108,11 @@ test "abcVersion reads the minor and major versions, little-endian, as assembly/
     try std.testing.expectEqual(-1, abcVersion(stage(&.{}), 0));
 }
 
-test "input starts a call: the last one's arena is given back" {
+test "input starts a call: the last one's arena and failure are given back" {
+    try std.testing.expectEqual(0, input(0xffff_ffff));
+    try std.testing.expectEqual(1, codegenError());
     _ = input(3 * memory.chunk_size);
+    try std.testing.expectEqual(0, codegenError());
     const used = memory.pages().used;
     _ = input(10);
     try std.testing.expect(memory.pages().used < used);
