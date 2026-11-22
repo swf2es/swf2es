@@ -9,6 +9,8 @@ import { bind, SIGNATURES, type Signature } from "../../../packages/codegen/dist
 const TESTING_SIGNATURES: Record<string, Signature> = {
   memoryChunksUsed: ["", "i32"],
   memoryReached: ["", "i32"],
+  memoryTopRuns: ["", "i32"],
+  memoryReserve: ["i32", "void"],
   testingPanic: ["", "void"],
   testingOverflow: ["i32", "i32"],
   stackPaint: ["", "void"],
@@ -46,6 +48,7 @@ export async function bindTesting(module: WebAssembly.Module): Promise<any> {
   const bound: any = await bind(module, { ...SIGNATURES, ...TESTING_SIGNATURES }, [
     "memoryChunksUsed",
     "memoryReached",
+    "memoryTopRuns",
     "stackDeepest",
   ]);
   // testing/abc.ts's reader kinds, which asc exports as globals.

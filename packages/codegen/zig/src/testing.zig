@@ -27,6 +27,16 @@ export fn memoryChunksUsed() u32 {
     return memory.pages().used;
 }
 
+/// How many runs the call's arena took from the top, and so on.
+export fn memoryTopRuns() u32 {
+    return memory.top_runs;
+}
+
+/// The reserve of free chunks a run from the top leaves below it, set for measuring.
+export fn memoryReserve(chunks: u32) void {
+    memory.reserve = chunks;
+}
+
 /// How far memory reaches past the static data, in bytes: only grows.
 export fn memoryReached() u32 {
     return memory.pages().reached();

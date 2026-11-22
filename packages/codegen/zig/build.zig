@@ -51,6 +51,8 @@ const exports = [_][]const u8{
 const testing_exports = exports ++ [_][]const u8{
     "memoryChunksUsed",
     "memoryReached",
+    "memoryTopRuns",
+    "memoryReserve",
     "testingPanic",
     "testingOverflow",
     "stackPaint",

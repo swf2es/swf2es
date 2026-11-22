@@ -212,7 +212,8 @@ pub const Pages = struct {
     }
 
     /// A run of `count` chunks: the first that fits, or, `top`, past every
-    /// chunk in use, so that it can grow in place.
+    /// chunk in use and `reserve` chunks more, so that it can grow in
+    /// place while what other arenas take meanwhile fits below it.
     pub fn take(self: *Pages, count: u32, top: bool) ?u32 {
         const start = found: {
             if (!top) {
@@ -222,9 +223,14 @@ pub const Pages = struct {
             }
 
             const free = self.freeAtEnd();
-            const start = self.chunks - free;
-            if (count > free and !self.grow(count - free)) {
+            const gap = if (top) @min(reserve, self.limit -| (self.chunks - free + count)) else 0;
+            const start = self.chunks - free + gap;
+            if (gap + count > free and !self.grow(gap + count - free)) {
                 return null;
+            }
+
+            if (top) {
+                top_runs +%= 1;
             }
 
             break :found start;
@@ -323,6 +329,12 @@ pub const Pages = struct {
         self.release(self.chunkOf(memory.ptr), chunksFor(memory.len).?);
     }
 };
+
+/// How many free chunks a run taken from the top leaves below it, for the
+/// runs domains take during a call (docs/zig-codegen.md, section 2).
+pub var reserve: u32 = 0;
+/// How many runs were taken from the top, for measuring the reserve.
+pub var top_runs: u32 = 0;
 
 /// A bump arena over runs taken from `source`, each run's first bytes its
 /// header. The last allocation grows and shrinks in place, past its run's
