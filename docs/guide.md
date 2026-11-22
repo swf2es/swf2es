@@ -160,11 +160,12 @@ keeps such a bitmap at the screen's resolution instead, up to 4 screen
 pixels a stage pixel, while scripts only draw display objects into it,
 fill it and show it, and draws it again when the window's scale changes:
 it then looks as the vectors would. It departs from Flash only on the
-screen: whatever reads the bitmap's pixels gets the pixels Flash would
-have made, the draws done again at the bitmap's own size, and the bitmap
-stays at that size from then on. It costs texture memory, the square of
-the scale times the bitmap's (about 33 MB for a stage-sized bitmap shown
-at 3840 by 2160, 4 MB without), at most 256 MB for all of them by default
+screen: each draw goes into a copy at the bitmap's own size too, as it
+would with the option off, and whatever reads the bitmap's pixels gets
+that copy's, the pixels Flash would have made; the bitmap stays at that
+size from then on. It costs texture memory, the square of the scale times
+the bitmap's and the copy's (about 37 MB for a stage-sized bitmap shown at
+3840 by 2160, 4 MB without), at most 256 MB for all of them by default
 (`bitmapResolutionBudget` on the renderer), and the GPU time of drawing
 that many more pixels when the SWF draws into it. It is off by default,
 `"stage"`; [Bitmaps](architecture/bitmaps.md) has the details.

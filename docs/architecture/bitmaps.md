@@ -236,32 +236,36 @@ at its scale), the quad goes onto whole pixels and is read unsmoothed, which
 gives the pixels a stage drawing the same art would. Elsewhere it is smoothed,
 whatever the Bitmap's `smoothing`.
 
-Scripts never see the difference. While a store is at display resolution,
-the renderer records its colour and every fill and draw since, each draw with
-`pickWork.changes` once drawn: `DisplayObject.invalidate` stamps each change
-of an object with that count (`changedAt`), so a draw would draw the same
-again while nothing in its object's subtree is stamped later, none of the
-stores its fills sample changed version, and nothing in it hangs on what lies
-outside the subtree or changes unseen (a mask, 3D, a shader, a video). The
-first operation that reads the store's pixels or writes them on the CPU
-(getPixel, getPixels, copyPixels in or out, a draw with a colour transform or
-blend, setPixel, scroll, applyFilter, encode, hit tests and the rest) goes
-through `BitmapStore.readable`, which reads the GPU copy back. For a store at
-display resolution, that read replays the record on a store of its own at
-the store's size, made of the same colour: the fills as fills, and each draw
-through `drawDisplayObject` with the matrix, colour transform and clip the
-script gave it, as it went with the option off. It reads that back: the
-pixels the store would have held with the option off. Where the record cannot be replayed (an
-object changed, a draw inside a walk, more than 256 steps without a fill of
-the whole store, which starts it again), the texture is averaged down by
-area instead, which matches but for lines thinner than a pixel, lighter there
-than Flash's pixel-wide ones. Either way the store then stays at a texel a
-pixel. The display keeps its sharper texture till the store next changes. A
-store's texture sampled by anything but a Bitmap on the stage (a bitmap fill,
-drawTriangles, a displacement map, a BitmapData.draw of something showing it)
-is read back so first; a draw from a script brings back the stores its
-subtree samples before it walks (`settle`), so that only fills sampled during
-the stage's own walk are averaged down.
+Scripts never see the difference. Each store at display resolution keeps a
+store of its own at its size, a shadow, made of the same colour, and every
+fill and draw goes into the shadow too, first, by `drawDisplayObject` with
+the matrix, colour transform and clip the script gave it: as the store
+itself would have gone with the option off, at the same moment. (First,
+because the renderer reuses the fill geometry an earlier draw built: a draw
+at the store's size after one at display resolution came out a level apart
+here and there.) The first operation that reads the store's pixels or writes
+them on the CPU (getPixel, getPixels, copyPixels in or out, a draw with a
+colour transform or blend, setPixel, scroll, applyFilter, encode, hit tests
+and the rest) goes through `BitmapStore.readable`, which reads the GPU copy
+back; for a store at display resolution that is the shadow's pixels, which
+are the option-off ones exactly, and the store stays at a texel a pixel from
+then on, its shadow let go of. The display keeps the sharper texture till
+the store next changes. (Were a shadow ever missing, the texture would be
+averaged down by area instead, `areaDown`.) A store's texture sampled by anything but a Bitmap on the stage (a
+bitmap fill, drawTriangles, a displacement map, a BitmapData.draw of
+something showing it) is brought back so first; a draw from a script does it
+before it walks for the stores its subtree samples (`settle`).
+
+The renderer also records the store's colour and every fill and draw since,
+each draw with `pickWork.changes` once drawn: `DisplayObject.invalidate`
+stamps each change of an object with that count (`changedAt`), so a draw
+would draw the same again while nothing in its object's subtree is stamped
+later, none of the stores its fills sample changed version, and nothing in
+it hangs on what lies outside the subtree or changes unseen (a mask, 3D, a
+shader, a video). Only the texture is drawn again from it, so a stamp missed
+could only show stale art, never give scripts other pixels. A fill of the
+whole store starts the record again; past 256 steps without one it is let
+go of, and the store keeps its scale.
 
 A store is first drawn at the screen's pixels a stage pixel, as no Bitmap
 may show it yet. Each frame a Bitmap on the stage shows it, the walk notes
@@ -275,19 +279,21 @@ it into a new texture, which takes the old one's place only once all of it
 drew, so its texels land on the screen's pixels again; one whose record no
 longer does keeps its scale and is shown resampled. A fill of a whole store
 of one colour leaves it of one colour (`BitmapStore.fillPixel`), so a store
-cleared before its first draw is promoted too, and once at display
-resolution such a fill starts its record again: a store cleared and drawn
+cleared before its first draw is promoted too; a store cleared and drawn
 into on every frame keeps a record of one frame's draws.
 
 What it costs: a store's texture takes zoom² times the memory, at most 64 MB
-(16M texels), and the stores at display resolution 256 MB together by default
+(16M texels), and its shadow as much again as the store at a texel a pixel;
+the stores at display resolution take 256 MB together by default
 (`bitmapResolutionBudget`; less where `navigator.deviceMemory` says 4 GB or
 less, 32 MB a GB, and 128 MB on a touch-only device), past which new stores
 stay at a texel a pixel. A draw renders zoom² times the pixels, in more tiles
-for a large store, and the record holds the objects drawn till the store is
-read, disposed or collected. Each promotion, draw and replay is done by the GPU
-path a draw takes anyway: nothing is read back while scripts only draw, fill
-and show.
+for a large store, plus the shadow's draw at the store's size, and the record
+holds the objects drawn till the store is read, disposed or collected. A
+draw with no colour transform goes on the GPU both times; one with the
+layer's own identity transform, as content often passes, draws the shadow
+through the snapshot it takes with the option off, read back. Nothing else
+is read back while scripts only draw, fill and show.
 
 ## A SWF's bitmaps
 
