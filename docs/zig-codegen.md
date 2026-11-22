@@ -401,6 +401,13 @@ two compilers' dump text on every ABC it has.
 | 7 | Swap (section 9) | | |
 | 8 | M2 (section 2) | | the domains fuzz against M1; `codegen-session.ts`; `leak.ts` |
 
+AVM1 arrives as the slice left it, after its idiomatic pass (tagged
+unions, the comptime table of actions, iterators), since the slice was
+held to parity through that pass; its files are split as AssemblyScript's
+now are. Stages 2 to 5 are translated file by file, function by function,
+so that their dumps map one to one and a difference points at the line
+that made it; their idiomatic pass waits until after the swap.
+
 Stages 2 to 5 depend on each other for checking, not for writing: the
 files, functions and tables keep their names, so their translation can
 go on at once in separate worktrees, and parity is then reached in
