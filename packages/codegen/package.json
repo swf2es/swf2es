@@ -26,7 +26,8 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./codegen.wasm": "./dist/codegen.wasm"
+    "./codegen.wasm": "./dist/codegen.wasm",
+    "./codegen-zig.wasm": "./dist/codegen-zig.wasm"
   },
   "files": [
     "dist",
@@ -41,8 +42,9 @@
     "assemblyscript": "^0.28.20"
   },
   "scripts": {
-    "build:wasm": "asc --config asconfig.json --target release && node stamp.ts dist/codegen.wasm && asc --config asconfig.testing.json --target release",
-    "build:wasm:debug": "asc --config asconfig.json --target debug && node stamp.ts dist/codegen.wasm && asc --config asconfig.testing.json --target debug",
+    "build:wasm": "asc --config asconfig.json --target release && node stamp.ts dist/codegen.wasm && asc --config asconfig.testing.json --target release && node zig/build.ts",
+    "build:wasm:debug": "asc --config asconfig.json --target debug && node stamp.ts dist/codegen.wasm && asc --config asconfig.testing.json --target debug && node zig/build.ts",
+    "build:zig": "node zig/build.ts --update",
     "build:wasm:checked": "asc --config asconfig.testing.json --target checked"
   }
 }

@@ -1,0 +1,95 @@
+// The compiler in Zig (docs/zig-codegen.md), built by build.ts with the
+// pinned Zig into zig-out/bin/:
+//
+//   - codegen-zig.wasm, the compiler, ReleaseSafe: every index, cast and
+//     overflow checked, a failed check a panic (src/panic.zig);
+//   - testing-zig.wasm, the test build: the same with the tests' exports
+//     (src/testing.zig), as assembly/testing.ts is to assembly/index.ts;
+//   - testing-zig-poison.wasm, the test build filling every freed run and
+//     rolled-back allocation with 0xAA, which must give the same output.
+//
+// `zig build test` runs every file's inline tests natively, once as each
+// build allocates; `zig build names` writes codegen-zig-names.wasm, the
+// compiler with the name section, so that a trap's stack names functions.
+const std = @import("std");
+
+/// What the compiler exports beside its memory; it imports only env.abort.
+const exports = [_][]const u8{
+    "input",
+    "outputLength",
+    "codegenError",
+    "compilerVersion",
+    "abcVersion",
+};
+
+/// What the test build exports beside them.
+const testing_exports = exports ++ [_][]const u8{
+    "memoryChunksUsed",
+    "memoryReached",
+    "testingPanic",
+};
+
+/// The shadow stack, first in memory so that overflowing it traps rather
+/// than writes into the static data or the heap.
+const stack_size = 1 << 20;
+
+pub fn build(b: *std.Build) void {
+    const target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+        .cpu_model = .{ .explicit = &std.Target.wasm.cpu.generic },
+        // As asc builds codegen.wasm: float-to-int conversions saturate rather than trap.
+        .cpu_features_add = std.Target.wasm.featureSet(&.{ .bulk_memory, .nontrapping_fptoint, .sign_ext, .mutable_globals }),
+    });
+
+    b.installArtifact(module(b, target, "codegen-zig", "src/root.zig", &exports, false, true));
+    b.installArtifact(module(b, target, "testing-zig", "src/testing.zig", &testing_exports, false, true));
+    b.installArtifact(module(b, target, "testing-zig-poison", "src/testing.zig", &testing_exports, true, true));
+
+    const names = b.addInstallArtifact(module(b, target, "codegen-zig-names", "src/root.zig", &exports, false, false), .{});
+    b.step("names", "Build the compiler with the name section").dependOn(&names.step);
+
+    const test_step = b.step("test", "Run the inline tests natively, as each build allocates");
+    for ([_]bool{ false, true }) |poison| {
+        const tests = b.addTest(.{
+            .name = if (poison) "tests-poison" else "tests",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/testing.zig"),
+                .target = b.graph.host,
+                .optimize = .ReleaseSafe,
+                .imports = &.{.{ .name = "options", .module = options(b, poison) }},
+            }),
+        });
+        test_step.dependOn(&b.addRunArtifact(tests).step);
+    }
+}
+
+fn options(b: *std.Build, poison: bool) *std.Build.Module {
+    const values = b.addOptions();
+    values.addOption(bool, "poison", poison);
+    return values.createModule();
+}
+
+fn module(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    name: []const u8,
+    root: []const u8,
+    names: []const []const u8,
+    poison: bool,
+    strip: bool,
+) *std.Build.Step.Compile {
+    const root_module = b.createModule(.{
+        .root_source_file = b.path(root),
+        .target = target,
+        .optimize = .ReleaseSafe,
+        .single_threaded = true,
+        .strip = strip,
+        .imports = &.{.{ .name = "options", .module = options(b, poison) }},
+    });
+    root_module.export_symbol_names = names;
+    const wasm = b.addExecutable(.{ .name = name, .root_module = root_module });
+    wasm.entry = .disabled;
+    wasm.stack_size = stack_size;
+    return wasm;
+}

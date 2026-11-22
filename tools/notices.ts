@@ -66,7 +66,7 @@ export const BUNDLED_PACKAGES = [
 ];
 
 /** Code from elsewhere, by what its files' headers say, or what bundled it. */
-export type Origin = "avmplus" | "ruffle" | "w3c" | "assemblyscript" | "native" | "rspack";
+export type Origin = "avmplus" | "ruffle" | "w3c" | "assemblyscript" | "zig" | "native" | "rspack";
 
 interface Notice {
   title: string;
@@ -172,6 +172,40 @@ ${read("packages/codegen/node_modules/assemblyscript/NOTICE")}`,
   };
 }
 
+/** The standard library Zig compiles into the compiler in Zig, while it is ported (docs/zig-codegen.md). */
+function zig(): Notice {
+  return {
+    title: "Zig",
+    spdx: ["MIT"],
+    text: `dist/codegen-zig.wasm, the compiler in Zig, is compiled by Zig 0.17.0,
+https://ziglang.org, and holds the parts of its standard library the
+compiler uses, under the MIT License:
+
+The MIT License (Expat)
+
+Copyright (c) Zig contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+`,
+  };
+}
+
 /** @swf2es/native's own notices, its build's, for a package that holds its modules. */
 function native(what: string): Notice {
   const spdx = JSON.parse(read("packages/native/package.json")).license as string;
@@ -216,6 +250,7 @@ dist/codegen.wasm's decoder follows Ruffle's: swf/src/avm1/read.rs and
 core/src/avm1/activation.rs, Copyright (c) 2018-2022 Ruffle LLC and Ruffle
 contributors.`),
         assemblyScript(),
+        zig(),
       ];
     case "format":
       return [
@@ -343,6 +378,7 @@ export function origins(name: string): Origin[] {
     Ruffle: "ruffle",
     "SVG's feTurbulence": "w3c",
     AssemblyScript: "assemblyscript",
+    Zig: "zig",
     "@swf2es/native": "native",
     Rspack: "rspack",
   };
