@@ -1430,7 +1430,7 @@ function modulePlans(c: Compiler, r: Results, seed: number, count: number): void
  * dropped and evicted, indices negative and huge, parts asked for with
  * none pending.
  */
-function exportCalls(c: Compiler, r: Results, seed: number, steps: number): void {
+function exportCalls(c: Compiler, r: Results, seed: number, steps: number, rebuilds = false): void {
   const { below } = random(Math.imul(seed, 2246822519) >>> 0 || 1);
   const abcs = structuredAbcs(400, seed + 1000);
   const digest = (b: Uint8Array | string) => {
@@ -1450,7 +1450,12 @@ function exportCalls(c: Compiler, r: Results, seed: number, steps: number): void
   const domain = () => [0, below(domains + 2) - 1, domains - 1, -3, 1 << 20][below(5)];
   for (let k = 0; k < steps; k++) {
     r.case(`call ${seed}/${k}`, () => {
-      switch (below(16)) {
+      const kind = below(rebuilds ? 20 : 16);
+      if (kind >= 16) {
+        return rebuildCall(c, kind - 16, below, copy);
+      }
+
+      switch (kind) {
         case 0:
           if (below(40) === 0) {
             c.domainReset(below(2) ? API_VERSION : 50);
@@ -1530,6 +1535,65 @@ function exportCalls(c: Compiler, r: Results, seed: number, steps: number): void
       }
     });
   }
+}
+
+/**
+ * A rebuild of the domain, whole or a part at a time with a small budget,
+ * compacted, revived a part at a time, or saved and loaded into the same
+ * instance and rebuilt from that: what each answers, and the revision.
+ */
+function rebuildCall(
+  c: Compiler,
+  kind: number,
+  below: (n: number) => number,
+  copy: (address: number) => string,
+): string {
+  const steps = () => {
+    const answers: number[] = [];
+    for (let n = 0; n < 10000; n++) {
+      const step = c.domainRebuildStep();
+      answers.push(step);
+      if (step !== 0) {
+        break;
+      }
+    }
+
+    return `${answers.length} ${answers[answers.length - 1]}`;
+  };
+  c.domainPartBudget([1, 100, 5000, 0][below(4)]);
+  let line: string;
+  switch (kind) {
+    case 0: {
+      const stepped = below(2) === 0;
+      line = `rebuild ${stepped} ${c.domainRebuild(stepped)}${stepped ? ` ${steps()}` : ""}`;
+      break;
+    }
+    case 1:
+      line = `compact ${c.domainCompact(true)} ${steps()}`;
+      break;
+    case 2: {
+      const d = below(8);
+      line = `revive ${d} ${c.domainRevive(d, true)} ${steps()}`;
+      break;
+    }
+    default: {
+      const saved = copy(c.domainSaveBytes());
+      const words = handed(c, c.domainSaveBytes()).slice();
+      line = `save ${saved} load ${c.domainLoad(words)}`;
+      const loads: number[] = [];
+      for (let i = 0; i < 64; i++) {
+        const at = c.domainSavedAbcBytes(i);
+        if (at !== 0) {
+          loads.push(c.domainLoadAbc(i, handed(c, at).slice()));
+        }
+      }
+
+      line += ` abcs ${loads.join(",")} rebuild ${c.domainLoadRebuild()} ${steps()}`;
+    }
+  }
+
+  c.domainPartBudget(0);
+  return `${line} revision ${c.domainRevision()} usage ${c.domainUsage().split(" ").slice(0, 2).join(" ")}`;
 }
 
 /** A deep case, alone in a fresh instance: AssemblyScript's may trap on it. */
@@ -2501,6 +2565,31 @@ const SUITES: Suite[] = [
         1,
         keysLast,
       ),
+  },
+  {
+    name: "lifetimes-random",
+    build: "testing",
+    needs: [
+      ...LINK_EXPORTS,
+      ...MODULE_EXPORTS,
+      ...KEY_EXPORTS,
+      "domainEvict",
+      "domainRevive",
+      "domainParent",
+      "domainRebuild",
+      "domainRebuildStep",
+      "domainCompact",
+      "domainSaveBytes",
+      "domainSavedAbcBytes",
+      "domainLoad",
+      "domainLoadAbc",
+      "domainLoadRebuild",
+    ],
+    run: async (_, r, fresh) => {
+      for (const seed of [5, 6]) {
+        exportCalls(await fresh(), r, seed, 6000, true);
+      }
+    },
   },
   {
     name: "modules-plans",
