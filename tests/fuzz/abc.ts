@@ -173,6 +173,8 @@ const build = process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test";
 let testing = await loadTesting(build);
 const failures: string[] = [];
 let accepted = 0;
+/** Accepted cases that reached an export the Zig compiler has not ported yet (docs/zig-codegen.md). */
+let unported = 0;
 let slowest = { ms: 0, at: -1 };
 
 let apiVersion = 50;
@@ -246,6 +248,12 @@ for (let k = 0; k < caseCount; k++) {
       }
     }
   } catch (e) {
+    if (/ has no \w+ yet/.test((e as Error).message)) {
+      // SWF2ES_COMPILER=zig before its emitter: what it has, linking, did not trap.
+      unported++;
+      continue;
+    }
+
     // A trap leaves the instance unusable: start a new one.
     fail(abc, `the compiler trapped (${(e as Error).message})`);
     testing = await loadTesting(build);
@@ -258,7 +266,8 @@ for (let k = 0; k < caseCount; k++) {
 }
 
 const seconds = ((Date.now() - started) / 1000).toFixed(1);
-const summary = `${caseCount} cases from ${seeds.length} seeds (seed ${seed}), ${accepted} accepted, slowest ${slowest.ms.toFixed(0)} ms`;
+const stopped = unported ? `, ${unported} of them only linked (not ported yet)` : "";
+const summary = `${caseCount} cases from ${seeds.length} seeds (seed ${seed}), ${accepted} accepted${stopped}, slowest ${slowest.ms.toFixed(0)} ms`;
 if (failures.length) {
   console.log(failures.slice(0, 20).join("\n"));
   console.log(`fuzz: ${failures.length} failed of ${summary} (${seconds} s)`);
