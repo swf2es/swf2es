@@ -814,6 +814,54 @@ ReleaseSafe, the parser now reached through `domainAdd`; the test build
   emitter is not ported yet; `tests/fuzz/domains.ts` compiles modules
   from its first step and waits for stages 5 and 6.
 
+Stage 4 (the verifier and the IR: `avm2/ir/ir.ts`, `abc/code`,
+`targets`, `verify`, `typing`, `properties`). As built:
+
+- *The decoder* lives in the call's arena, made by the first verify of a
+  call and held by the domain for the call (`Domain.decoder`, dropped as
+  each Change begins); AssemblyScript keeps one decoder across calls,
+  which garbage collection between calls makes cheap. Its scratch is
+  zeroed when made, where AssemblyScript's keeps stale values from the
+  bodies before; nothing read them, as the parity suites show.
+- *No recursion on input depth.* `target` and `throwsAt` call each other
+  in AssemblyScript through loop headers, as deep as a body's handlers
+  go; here they are one loop over a stack of frames (`targets.run`),
+  which keeps AssemblyScript's order and its one shared buffer of saved
+  values, nested headers overwriting it as the recursion's do. The IR
+  dump's type names (`Vector.<...>`) count their levels.
+- *Writes the rollback undoes.* Every row the verifier writes in place
+  goes through `put`: the ABC marked verified, a function's flag, scope
+  chain and list of chains, contested functions' merged chains, classes'
+  captured scopes. A function's list of chains is replaced by a longer
+  copy rather than grown, so that the old list is untouched for a
+  rollback. Scope chains are made in the call's arena and copied into the
+  domain's only when kept. The log entry a verification adds is
+  truncated when it found nothing new, rows the call itself added.
+- *Parity.* `codeDump` on every ABC there is and the link seeds (7,600
+  cases), and on 10,000 mutated ones, most with bytes set in their code
+  (20,000); each ABC verified after it links (the error of every body,
+  its IR checked, and the IR of up to 64 bodies spread over it): the
+  libraries (315), the tests' and the link cases' (448), the corpus's AS3
+  SWFs and two private ones (80,153), 6,000 ABCs with their code mutated
+  (29,078), and, where a host keeps them, the oracle's 9,884 (112,914).
+  All the same, the poison build's included, with no unspecified read.
+  Under `SWF2ES_COMPILER=zig` the `code`, `verify`, `typed` and `ir`
+  tests pass 92 of 99; the rest compile modules. The ABC fuzz verifies
+  and checks the IR of each ABC it accepts.
+- *Size.* The verifier is not reached from a release export before stage
+  5, so `codegen-zig.wasm` is unchanged (210,080 bytes, 73,864 gzipped);
+  the test build grew from 328,159 to 448,069 bytes (112,586 to 152,340
+  gzipped), about 40 KB gzipped for 3,800 lines of AssemblyScript
+  (built by hand at the other levels: ReleaseSmall 28 KB of 103, Fast 39
+  KB of 147). At that
+  rate stage 5's 9,200 lines would add some 95 KB, and the whole compiler
+  come to about 210 KB gzipped, past section 7's bound of twice
+  AssemblyScript's (about 189): the stage 3 review's projection of 134 to
+  168 KB does not hold for ReleaseSafe as translated so far,
+  and section 7's levers (Output written directly, tables in the
+  emitters, Small for cold files) are to be measured on the first emitter
+  files of stage 5.
+
 For stage 5: `Output.init` reserves 64 KB up front, so each `Output` is
 a whole run in the call arena; an emitter made per method or per block
 should reuse one, as AssemblyScript's reuse their buffers.
