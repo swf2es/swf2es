@@ -420,8 +420,15 @@ Recommended:
   the Chrome tests' pages. `createCodegen` itself reads no environment;
   it tells the two by their exports. `SWF2ES_CODEGEN` keeps its meaning,
   a directory holding another copy of the release build for the A/B
-  benchmarks; the benchmarks and the browser build's own tests
-  (`tests/web/cdn.ts`) do not follow `SWF2ES_COMPILER`.
+  benchmarks. Not covered by the switch: the benchmarks; the bundled
+  browser build and what serves it (`tests/web/cdn.ts`, the site's
+  tests, the desktop app); and node Workers started without the parent's
+  `--import` preload (those started with its `execArgv`, as by default,
+  are covered). The tests/web and tests/context3d pages are, through
+  `tests/player/serve.ts`. The whole-suite runs on Zig before the swap
+  (`pnpm test`, `pnpm corpus`, `pnpm tamarin:swf2es`) cover everything
+  by copying `codegen-zig.wasm` over `dist/codegen.wasm` after `pnpm
+  build`, so that no loader can miss it.
 - Until stage 6 the Zig module is not a compiler: the switch is only
   good for the stages it has, and the harness skips the rest.
 - Not recommended: one `Codegen` over both, Zig's AVM1 with
@@ -644,7 +651,9 @@ revivals, findings, and for each compile the log entries it fixed
 (`domainLogMark` and `domainLogSince`, as `compileModuleLogged` takes
 them). A fresh instance replays it, adds then `domainReplay` for the
 compiles, and is the same domain by determinism; the load that panicked
-is left out. Dropping a domain drops its entries, and an evicted one's
+is left out. If the replay itself panics or traps, there is no second
+attempt: the compiler is dead for the page, and every call throws, as
+asc's compiler after a trap. Dropping a domain drops its entries, and an evicted one's
 ABCs are given back by the host on revival, as now. What holding the
 live ABCs' arrays costs a host that would let them go is measured in
 stage 6. The wrapper already swaps instances for #1185's moves, so
