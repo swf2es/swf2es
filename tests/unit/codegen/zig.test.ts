@@ -60,7 +60,7 @@ test("the compilers agree on what Zig's has ported", () => {
 });
 
 test("an export Zig's compiler has not ported yet throws when it is called", () => {
-  assert.throws(() => zig.domainModule("", -1), /codegen-zig.wasm has no domainModule yet/);
+  assert.throws(() => zig.domainContext(-1), /codegen-zig.wasm has no domainContext yet/);
 });
 
 test("a call that runs out of memory hands out nothing and says so, and does not trap", async () => {
