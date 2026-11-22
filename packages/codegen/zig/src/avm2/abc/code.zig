@@ -1226,10 +1226,15 @@ fn settleContests(domain: *Domain, index: u32) Error!bool {
             continue;
         }
 
-        const merged = try Scope.merged(domain.gpa, scopes.?.items);
+        // Made in the call's arena, and kept in the domain's only where it changed.
+        const merged = try Scope.merged(domain.scratch, scopes.?.items);
         const before = traits.functionMerged.get(g);
         if (before == null or !before.?.equals(merged)) {
-            try domain.put(traits.functionMerged.at(g), merged);
+            const keep = try domain.gpa.create(Scope);
+            keep.* = merged.*;
+            keep.types = try domain.gpa.dupe(i32, merged.types);
+            keep.withs = try domain.gpa.dupe(u8, merged.withs);
+            try domain.put(traits.functionMerged.at(g), keep);
             changed = true;
         }
     }
