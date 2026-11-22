@@ -198,8 +198,9 @@ node packages/codegen/zig/build.ts [--update | --verify]   # the compiler in Zig
                               # differ (CI's zig job)
 node tests/parity/run.ts [suite...]   # the compiler in Zig's results against AssemblyScript's,
                               # byte for byte, and its 0xAA build's against its own (CI's zig job)
-SWF2ES_CODEGEN=zig ...        # the CLI, the codegen unit tests and the Chrome tests' pages on the
-                              # compiler in Zig, as far as it is ported
+SWF2ES_COMPILER=zig ...       # the CLI and the tests (tests/compiler.ts: unit tests, conformance,
+                              # determinism, fuzzers, Chrome pages) on the compiler in Zig, as far as
+                              # it is ported; as, the default; any other value is refused
 pnpm --filter @swf2es/native build:wasm   # rebuild packages/native's wasm (compress, mp3, and render:
                               # bitmap, tessellate, lines) with the pinned Zig, after the zig tests;
                               # pnpm build only checks their inputs' digests
