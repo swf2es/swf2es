@@ -278,6 +278,9 @@ function inputDigest(binary: Binary): string {
   const digest = createHash("sha256").update(ZIG_VERSION);
   // A binary's own Zig, and C and libc headers where it has them.
   const own = files(join(here, "src", binary.path), /\.(zig|c|cpp)$/);
+  if (binary.path === "atf" || binary.path === "regexp") {
+    own.push(join(here, "src/arena.zig"));
+  }
   if (existsSync(join(here, "src", binary.path, "include"))) {
     own.push(...files(join(here, "src", binary.path, "include"), /\.h$/));
   }

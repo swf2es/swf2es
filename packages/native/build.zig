@@ -293,6 +293,7 @@ fn atf(b: *std.Build, target: std.Build.ResolvedTarget) void {
         .single_threaded = true,
         .strip = true,
     });
+    root.addAnonymousImport("arena", .{ .root_source_file = b.path("src/arena.zig") });
     root.export_symbol_names = &exports;
     // The module's own libc headers, then the package's, which they take
     // with #include_next, then jxrlib's.
@@ -342,6 +343,7 @@ fn regexp(b: *std.Build, target: std.Build.ResolvedTarget, include: std.Build.La
         .single_threaded = true,
         .strip = true,
     });
+    root.addAnonymousImport("arena", .{ .root_source_file = b.path("src/arena.zig") });
     root.export_symbol_names = &.{ "input", "compilePattern", "names", "match", "result" };
     const pcre = b.path("../../oracle/avmplus/pcre");
     root.addIncludePath(pcre);

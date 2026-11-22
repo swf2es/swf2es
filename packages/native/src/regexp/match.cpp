@@ -2,24 +2,36 @@
 #include "avmplus.h"
 #include "pcre.h"
 
+extern "C" void resetHeap();
 extern "C" const pcre_callout_t pcre_callout = nullptr;
 static pcre *pattern;
 static char *text;
 static int offsets[99];
 
-extern "C" char *input(int size) {
-    pcre_free(text);
+extern "C" char *input(int size, int newPattern) {
+    if (newPattern) resetHeap();
+    else pcre_free(text);
     text = (char *)pcre_malloc((size_t)size + 1);
     text[size] = '\0';
     return text;
 }
 
 extern "C" int compilePattern(int flags) {
-    pcre_free(pattern);
     const char *error;
     int offset;
     pattern = pcre_compile(text, PCRE_UTF8 | flags, &error, &offset, nullptr);
-    return pattern != nullptr;
+    if (!pattern) return 0;
+
+    // With default character tables PCRE returns one relocatable block.
+    // Keep only that block between calls, so the subject can reuse the source's pages.
+    size_t size;
+    pcre_fullinfo(pattern, nullptr, PCRE_INFO_SIZE, &size);
+    resetHeap();
+    pcre *saved = (pcre *)pcre_malloc(size);
+    memmove(saved, pattern, size);
+    pattern = saved;
+    text = nullptr;
+    return 1;
 }
 
 extern "C" const unsigned char *names(int *count, int *stride) {
