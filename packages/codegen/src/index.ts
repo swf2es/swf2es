@@ -1,14 +1,17 @@
 /**
  * Compiles ABC and AVM1 bytecode to ES modules.
  *
- * The compiler itself is AssemblyScript (assembly/), built to codegen.wasm.
- * This wrapper instantiates it and gives its exports their types. The same wasm runs as the browser JIT
+ * The compiler itself is AssemblyScript (assembly/), built to codegen.wasm,
+ * or, while it is ported (docs/zig-codegen.md), Zig (zig/), built to
+ * codegen-zig.wasm, which zig.ts gives the same exports as asc's glue.
+ * This wrapper instantiates either and gives its exports their types. The same wasm runs as the browser JIT
  * (a module per ABC as its SWF loads) and as the ahead-of-time compiler,
  * so both produce identical output. See docs/architecture/overview.md.
  */
 import { AIR_API_VERSION, API_VERSION, checkApiVersion, isAirApiVersion } from "@swf2es/format";
 import { instantiate } from "./codegen.js";
 import { KeyChains, type KeyContext } from "./keys.js";
+import { instantiate as instantiateZig } from "./zig.js";
 
 export { KeyChains, type KeyContext, type KeyLog } from "./keys.js";
 export { hex, sha256Here } from "./sha256.js";
@@ -366,10 +369,18 @@ export interface Codegen {
 /**
  * Instantiate the compiler from a compiled codegen.wasm module. Loading the
  * bytes is left to the caller (fetch in browsers, fs in node), which keeps
- * this package free of I/O. The file ships as `@swf2es/codegen/codegen.wasm`.
+ * this package free of I/O. The file ships as `@swf2es/codegen/codegen.wasm`,
+ * and the compiler in Zig, while it is ported, as
+ * `@swf2es/codegen/codegen-zig.wasm`, told apart by what it exports.
  */
 export async function createCodegen(module: WebAssembly.Module): Promise<Codegen> {
-  let wasm = await instantiate(module, { env: {} });
+  const exported = WebAssembly.Module.exports(module).map((e) => e.name);
+  // Zig's compiler stages a call's arrays at its `input`, where asc's glue
+  // lowers them itself. One whose port has not reached an export throws
+  // when it is called.
+  const zig = exported.includes("input");
+  const make: typeof instantiate = zig ? instantiateZig : instantiate;
+  let wasm = await make(module, { env: {} });
   const version = wasm.compilerVersion();
   if (version !== COMPILER_VERSION) {
     throw new Error(
@@ -380,7 +391,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // Of the same version, but built before its modules were handed out in
   // place: its *Bytes exports return copies, which this wrapper cannot read.
   // Asked of the module, as the bindings define every export they know of.
-  if (!WebAssembly.Module.exports(module).some((e) => e.name === "outputLength")) {
+  if (!zig && !exported.includes("outputLength")) {
     throw new Error(
       "codegen.wasm has no outputLength export, which the wrapper expects: it is older than the wrapper",
     );
@@ -389,7 +400,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // Or before it wrote a module a part at a time, or rebuilt its domain a
   // part at a time and in another instance.
   for (const name of ["domainModuleMoreBytes", "domainRebuildStep", "domainSaveBytes"]) {
-    if (!WebAssembly.Module.exports(module).some((e) => e.name === name)) {
+    if (!zig && !exported.includes(name)) {
       throw new Error(
         `codegen.wasm has no ${name} export, which the wrapper expects: it is older than the wrapper`,
       );
@@ -556,7 +567,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   const prepare = () => {
     if (spare === null && !making) {
       making = true;
-      instantiate(module, { env: {} }).then(
+      make(module, { env: {} }).then(
         (made) => {
           spare = made;
           making = false;

@@ -21,6 +21,27 @@ test("codegen.wasm imports nothing but abort", () => {
   );
 });
 
+const zigModule = await WebAssembly.compile(
+  await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen-zig.wasm"))),
+);
+
+test("codegen-zig.wasm, the compiler in Zig, imports nothing but abort too", () => {
+  assert.deepEqual(
+    WebAssembly.Module.imports(zigModule).map((i) => `${i.module}.${i.name}`),
+    ["env.abort"],
+  );
+});
+
+test("createCodegen tells the compilers apart, whose identities differ so caches never mix", async () => {
+  const as = await createCodegen(module);
+  const zig = await createCodegen(zigModule);
+  assert.match(zig.identity ?? "", /^[0-9a-f]{64}$/);
+  assert.notEqual(zig.identity, as.identity);
+  assert.deepEqual(zig.abcVersion(Uint8Array.of(16, 0, 46, 0)), { major: 46, minor: 16 });
+  // Until the port reaches them, Zig's compiler lacks the domain's exports.
+  assert.throws(() => zig.reset(), /codegen-zig.wasm has no domainReset yet/);
+});
+
 test("wrapper and wasm agree on the compiler version", async () => {
   await createCodegen(module); // throws on a mismatch
 });
