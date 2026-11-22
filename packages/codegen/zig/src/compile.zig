@@ -3,21 +3,40 @@
 // to. Stage 3 has the domain: its ABCs linked, its application domains'
 // lifetimes, and what the runtime reports it found.
 //
-// The domain and everything of it is in `domain_arena`, which a reset
-// gives back whole. Each call that changes the domain does so all or
-// nothing (Domain.Change): one that runs out of memory leaves it as it was.
+// The domain and everything of it is in its arena, which a reset gives
+// back whole once the new domain is made in the other. Each call that
+// changes the domain does so all or nothing (Domain.Change): one that runs
+// out of memory leaves it as it was.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("memory.zig");
-const PADDING = @import("avm2/abc/reader.zig").PADDING;
 const domain_ = @import("avm2/link/domain.zig");
 const Domain = domain_.Domain;
 const lifetime = @import("avm2/link/lifetime.zig");
 
-var domain_arena: memory.Arena = undefined;
+/// Two arenas, the domain's and the one a reset makes the next in.
+var arenas: [2]memory.Arena = undefined;
+var which: u1 = 0;
 var current: ?*Domain = null;
-/// The API version the next domain is made with, until a reset sets another.
+/// The API version the domain is made with, until a reset sets another.
 var api_version: u8 = domain_.API_LatestFP;
+
+/// The domain's arena.
+fn arena() *memory.Arena {
+    return &arenas[which];
+}
+
+/// A new domain at `apiVersion` in arena `slot`, made anew; the other is untouched.
+fn make(slot: u1, apiVersion: u8) Allocator.Error!*Domain {
+    memory.arenas();
+    arenas[slot] = .init(memory.pages().allocator());
+    errdefer arenas[slot].deinit();
+    const gpa = arenas[slot].allocator();
+    const dom = try gpa.create(Domain);
+    dom.* = try .init(gpa, memory.call.allocator());
+    dom.apiVersion = apiVersion;
+    return dom;
+}
 
 /// The domain, made the first time it is asked for, as AssemblyScript's is
 /// when the module starts.
@@ -26,21 +45,14 @@ pub fn domain() Allocator.Error!*Domain {
         return dom;
     }
 
-    memory.arenas();
-    domain_arena = .init(memory.pages().allocator());
-    errdefer domain_arena.deinit();
-    const gpa = domain_arena.allocator();
-    const dom = try gpa.create(Domain);
-    dom.* = try .init(gpa, memory.call.allocator());
-    dom.apiVersion = api_version;
-    current = dom;
-    return dom;
+    current = try make(which, api_version);
+    return current.?;
 }
 
 /// The domain given back, as when the module starts, for the tests.
 pub fn release() void {
     if (current != null) {
-        domain_arena.deinit();
+        arena().deinit();
         current = null;
     }
 
@@ -48,20 +60,25 @@ pub fn release() void {
 }
 
 /// Start a new domain whose user ABCs have API version `apiVersion`, whose
-/// series, Flash Player's or AIR's, is the domain's.
+/// series, Flash Player's or AIR's, is the domain's. All or nothing: the
+/// new one is made before the old is given back, which stays where
+/// memory runs out, as AssemblyScript's did when its allocation trapped.
 pub fn domainReset(apiVersion: i32) Allocator.Error!void {
+    const version: u8 = @truncate(@as(u32, @bitCast(apiVersion)));
+    const next: u1 = if (current == null) which else ~which;
+    const dom = try make(next, version);
     if (current != null) {
-        domain_arena.deinit();
-        current = null;
+        arena().deinit();
     }
 
-    api_version = @truncate(@as(u32, @bitCast(apiVersion)));
-    _ = try domain();
+    which = next;
+    current = dom;
+    api_version = version;
 }
 
 /// The domain changed by `change`, given its arguments, all or nothing.
 pub fn changed(comptime change: anytype, args: anytype) Allocator.Error!@typeInfo(@typeInfo(@TypeOf(change)).@"fn".return_type.?).error_union.payload {
-    return domain_.changed(try domain(), &domain_arena, change, args);
+    return domain_.changed(try domain(), arena(), change, args);
 }
 
 /// Add an ABC to the domain, loaded into application domain `appDomain`
@@ -72,7 +89,7 @@ pub fn domainAdd(bytes: []const u8, builtin: bool, appDomain: i32) Allocator.Err
         return -1;
     }
 
-    return changed(domain_.addAbc, .{ &domain_arena, bytes, builtin, @as(u32, @intCast(appDomain)) });
+    return changed(domain_.addAbc, .{ arena(), bytes, builtin, @as(u32, @intCast(appDomain)) });
 }
 
 /// A new application domain, a child of `parent`'s: its number, or -1 if `parent` was never made or was dropped.
@@ -124,13 +141,7 @@ pub fn domainRestore(index: i32, bytes: []const u8) Allocator.Error!i32 {
         return -1;
     }
 
-    return changed(restoreAbc, .{ @as(u32, @intCast(index)), bytes });
-}
-
-fn restoreAbc(dom: *Domain, index: u32, bytes: []const u8) Allocator.Error!i32 {
-    const buffer = try memory.allocZeroed(dom.gpa, u8, @as(u32, @intCast(bytes.len)) + PADDING);
-    @memcpy(buffer[0..bytes.len], bytes);
-    return lifetime.restore(dom, index, buffer, @intCast(bytes.len));
+    return changed(lifetime.restore, .{ arena(), @as(u32, @intCast(index)), bytes });
 }
 
 /// Make evicted application domain `appDomain` live again, with its evicted

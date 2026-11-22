@@ -10,6 +10,7 @@ const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
 const Abc = @import("../abc/abc.zig").Abc;
 const readAbc = @import("../abc/parse.zig").readAbc;
+const PADDING = @import("../abc/reader.zig").PADDING;
 const domain_ = @import("domain.zig");
 const Domain = domain_.Domain;
 const DOMAIN_Dropped = domain_.DOMAIN_Dropped;
@@ -84,8 +85,9 @@ fn leave(dom: *Domain, domain: u32, state: u8) void {
 /// Give ABC `index`, of an evicted application domain, its bytes again,
 /// if a rebuild has let go of them, for revive to link it: 0, the
 /// VerifyError they were rejected with, or -1 if they are not the ABC's.
-/// `buffer` holds the ABC and PADDING, in the domain's arena.
-pub fn restore(dom: *Domain, index: u32, buffer: []const u8, length: u32) Allocator.Error!i32 {
+/// Only bytes it adopts stay in `arena`, the domain's: a host gives an
+/// evicted domain's ABCs back at each revival, held ones included.
+pub fn restore(dom: *Domain, arena: *memory.Arena, index: u32, bytes: []const u8) Allocator.Error!i32 {
     if (index >= dom.abcs.len or dom.domainState.get(dom.abcDomain.get(index)) != DOMAIN_Evicted) {
         return -1;
     }
@@ -94,11 +96,19 @@ pub fn restore(dom: *Domain, index: u32, buffer: []const u8, length: u32) Alloca
         return 0;
     }
 
+    const mark = arena.mark();
+    const length: u32 = @intCast(bytes.len);
+    const buffer = try memory.allocZeroed(dom.gpa, u8, length + PADDING);
+    @memcpy(buffer[0..bytes.len], bytes);
     const abc = try readAbc(dom.gpa, dom.scratch, buffer, length, false);
-    if (abc.@"error" != 0) {
-        return abc.@"error";
+    const err = abc.@"error";
+    if (err != 0) {
+        // The error read first: the ABC is in what is given back.
+        arena.restore(mark);
+        return err;
     }
 
+    // Rows of an ABC let go of, which only a rebuild's vacate added, never one from before it: raw writes.
     dom.abcs.set(index, abc);
     dom.abcBase.set(index, buffer.ptr);
     dom.abcBuffer.set(index, buffer);
