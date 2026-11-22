@@ -1,5 +1,6 @@
 // Browser pointer input enters here; Flash chooses targets from its display
 // list, while the canvas only supplies the pointer's position and buttons.
+import type { As3 } from "../as3/types.js";
 import { toStage } from "../display/bounds.js";
 import {
   ButtonObject,
@@ -20,6 +21,9 @@ import type { KeyboardInput } from "./keyboard.js";
 export interface PointerState {
   x: number;
   y: number;
+  /** Relative mouse motion in screen coordinates while Stage.mouseLock is set. */
+  movementX?: number;
+  movementY?: number;
   button?: number;
   buttons?: number;
   altKey?: boolean;
@@ -275,6 +279,11 @@ export class PointerInput implements Pointer {
       buttonDown,
       delta,
     );
+    if (type === "mouseMove" && s.fullScreen.mouseLock) {
+      const mouse = event as As3<"flash.events::MouseEvent">;
+      s.rt.setProp(mouse, "movementX", p.movementX ?? 0);
+      s.rt.setProp(mouse, "movementY", p.movementY ?? 0);
+    }
     dispatchEvent(s, target.object, event);
   }
 
@@ -284,7 +293,22 @@ export class PointerInput implements Pointer {
    * gets several a frame, of which only the last one shows.
    */
   post(p: PointerState): void {
+    // The last absolute position wins, but a locked mouse travels the sum of its moves.
+    if (this.moved && (p.movementX !== undefined || p.movementY !== undefined)) {
+      p = {
+        ...p,
+        movementX: (this.moved.movementX ?? 0) + (p.movementX ?? 0),
+        movementY: (this.moved.movementY ?? 0) + (p.movementY ?? 0),
+      };
+    }
     this.moved = p;
+  }
+
+  /** A queued sample and the last point picked belong to the old coordinate system. */
+  mouseLockChanged(): void {
+    this.moved = null;
+    this.last = null;
+    this.picked = -1;
   }
 
   /** Handle the move posted, if any. */
@@ -310,6 +334,13 @@ export class PointerInput implements Pointer {
       this.moved = null;
     } else {
       this.flush();
+    }
+
+    if (this.scripting.fullScreen.mouseLock) {
+      if (type !== "leave") {
+        this.lockedInput(type, p);
+      }
+      return;
     }
 
     if (type === "leave") {
@@ -362,6 +393,31 @@ export class PointerInput implements Pointer {
     } finally {
       // A press broadcast to AVM1 movies and never handed on, a handler having thrown.
       s.avm1Input?.forgetPress();
+    }
+  }
+
+  /** A locked mouse dispatches to Stage. AIR reports the delta on stage.mouseX/Y and
+   * the event's movementX/Y, but zero for its local and stage coordinates. */
+  private lockedInput(type: "move" | "down" | "up", p: PointerState): void {
+    const s = this.scripting;
+    const dx = p.movementX ?? 0;
+    const dy = p.movementY ?? 0;
+    if (type === "move" && !dx && !dy) {
+      return;
+    }
+
+    this.handled++;
+    this.last = null;
+    this.found = this.stage;
+    s.mouseStageX = dx;
+    s.mouseStageY = dy;
+    const point = { ...p, x: 0, y: 0 };
+    if (type === "move") {
+      this.send("mouseMove", this.stage, point, !!((p.buttons ?? 0) & 1));
+    } else if (p.button === 1 || p.button === 2) {
+      this.otherButton(type, p.button, this.stage, point);
+    } else if ((p.button ?? 0) === 0) {
+      s.clipboard.gesture(() => this.button(type, this.stage, point));
     }
   }
 
@@ -452,8 +508,18 @@ export class PointerInput implements Pointer {
    * the page scroll without.
    */
   wheel(p: PointerState, delta: number): boolean {
-    this.handle("move", p);
     const s = this.scripting;
+    if (s.fullScreen.mouseLock) {
+      this.flush();
+      s.mouseStageX = s.mouseStageY = 0;
+      if (delta !== 0) {
+        this.handled++;
+        this.send("mouseWheel", this.stage, { ...p, x: 0, y: 0 }, this.held, true, null, delta);
+      }
+      return !!this.stage.object && heard(this.stage.object, "mouseWheel");
+    }
+
+    this.handle("move", p);
     const found = pointerTarget(
       this.stage,
       p.x,
@@ -506,6 +572,9 @@ export class PointerInput implements Pointer {
    * the player does not copy.
    */
   frameEnded(): void {
+    if (this.scripting.fullScreen.mouseLock) {
+      return;
+    }
     const p = this.last;
     const unchanged = this.pickedNow();
     if (p && !this.gone && unchanged && pickChecks.on) {

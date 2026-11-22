@@ -28,7 +28,21 @@ export class FullScreen {
   /** The last source rect set that has an area, which the host draws by. */
   private drawn: SourceRect | null = null;
   /** Stage.mouseLock, which only full screen holds. */
-  mouseLock = false;
+  private locked = false;
+  onMouseLock: ((locked: boolean) => void) | null = null;
+
+  get mouseLock(): boolean {
+    return this.locked;
+  }
+
+  set mouseLock(locked: boolean) {
+    if (locked !== this.locked) {
+      this.s.pointer?.mouseLockChanged();
+      this.locked = locked;
+      this.onMouseLock?.(locked);
+    }
+  }
+
   /**
    * How many times a script has taken the stage into or out of full
    * screen: a key in whose events it did is the SWF's own key for it,
