@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/runtime",
-  "version": "0.1.36",
+  "version": "0.1.37",
   "description": "AVM2 and AVM1 language runtime used by generated code",
   "keywords": [
     "actionscript",
