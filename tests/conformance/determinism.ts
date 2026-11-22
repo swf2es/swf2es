@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import { containerEngine, runOracle } from "../../oracle/oracle.ts";
 // The built package, as the player loads it: node runs its .js, not its sources.
 import { createCodegen } from "../../packages/codegen/dist/index.js";
+import { CODEGEN_WASM } from "../compiler.ts";
 import { type Build, loadTesting } from "../unit/codegen/testing-module.ts";
 import { avm1Determinism } from "./determinism-avm1.ts";
 
@@ -271,7 +272,7 @@ async function checkAt(): Promise<void> {
   // The release build has the same source for this behind its own entry; the
   // package's API must give the same bytes.
   {
-    const wasm = new URL("../../packages/codegen/dist/codegen.wasm", import.meta.url);
+    const wasm = new URL(`../../packages/codegen/dist/${CODEGEN_WASM}`, import.meta.url);
     const codegen = await createCodegen(await WebAssembly.compile(readFileSync(wasm)));
     for (const chain of chains) {
       const results: string[] = [];

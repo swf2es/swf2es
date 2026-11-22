@@ -21,6 +21,7 @@ import { createCodegen } from "../../packages/codegen/dist/index.js";
 import { isAs3, readActions, readSwf } from "../../packages/format/dist/index.js";
 import { Avm1Assembler, constant, register, Simple } from "../avm1-assembler.ts";
 import { backwardActions, unitActions } from "../avm1-backward.ts";
+import { CODEGEN_WASM } from "../compiler.ts";
 import { testingInstances } from "../unit/codegen/testing-module.ts";
 
 interface Avm1Swf {
@@ -320,7 +321,7 @@ export async function avm1Determinism(): Promise<{
   );
   await oneInstance("in the checked build", await testingInstances("dist-test-checked"), swfs);
 
-  const wasm = new URL("../../packages/codegen/dist/codegen.wasm", import.meta.url);
+  const wasm = new URL(`../../packages/codegen/dist/${CODEGEN_WASM}`, import.meta.url);
   const codegen = await createCodegen(await WebAssembly.compile(readFileSync(wasm)));
   for (const swf of swfs) {
     const blocks = [...swf.offsets].map((offset, k) => ({ offset, length: swf.lengths[k] }));

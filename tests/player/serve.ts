@@ -12,6 +12,7 @@ import { createServer, type Server } from "node:http";
 import { stripTypeScriptTypes } from "node:module";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CODEGEN_WASM } from "../compiler.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -154,9 +155,9 @@ export async function serve(
       path = path.slice(WORKER.length);
     }
 
-    // The compiler in Zig in its place while it is ported (docs/zig-codegen.md).
-    if (path === "/codegen/codegen.wasm" && process.env.SWF2ES_CODEGEN === "zig") {
-      path = "/codegen/codegen-zig.wasm";
+    // The compiler SWF2ES_COMPILER picks (tests/compiler.ts) in its place.
+    if (path === "/codegen/codegen.wasm") {
+      path = `/codegen/${CODEGEN_WASM}`;
     }
 
     for (const [prefix, dir] of served) {

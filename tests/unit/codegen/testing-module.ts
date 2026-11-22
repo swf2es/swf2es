@@ -6,6 +6,7 @@
 // it a little further.
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { COMPILER } from "../../compiler.ts";
 import { bindTesting, zigTestingModule } from "./zig-testing.ts";
 
 /** The release build, or the one that checks every array access (pnpm test:checked). */
@@ -34,9 +35,9 @@ export async function loadTesting(build: Build): Promise<any> {
 /** New instances of `build`, each with a memory of its own, its module compiled once. */
 // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
 export async function testingInstances(build: Build): Promise<() => Promise<any>> {
-  // SWF2ES_CODEGEN=zig loads the compiler in Zig's test build (docs/zig-codegen.md),
+  // SWF2ES_COMPILER=zig loads the compiler in Zig's test build (docs/zig-codegen.md),
   // and in place of the checked build the one that fills freed memory with 0xAA.
-  if (process.env.SWF2ES_CODEGEN === "zig") {
+  if (COMPILER === "zig") {
     const module = await zigTestingModule(build === "dist-test-checked");
     return () => instance(bindTesting, module);
   }

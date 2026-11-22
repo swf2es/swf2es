@@ -32,11 +32,16 @@ export function readLibraries(paths: string[]): Promise<{ name: string; abc: Uin
 }
 
 /**
- * The release codegen.wasm, compiled; with SWF2ES_CODEGEN=zig, the compiler
+ * The release codegen.wasm, compiled; with SWF2ES_COMPILER=zig, the compiler
  * in Zig while it is ported (docs/zig-codegen.md in the repository).
  */
 export async function codegenModule(): Promise<WebAssembly.Module> {
-  const file = process.env.SWF2ES_CODEGEN === "zig" ? "codegen-zig.wasm" : "codegen.wasm";
+  const compiler = process.env.SWF2ES_COMPILER ?? "as";
+  if (compiler !== "as" && compiler !== "zig") {
+    fail(`SWF2ES_COMPILER is ${compiler}: as or zig`);
+  }
+
+  const file = compiler === "zig" ? "codegen-zig.wasm" : "codegen.wasm";
   const path = fileURLToPath(import.meta.resolve(`@swf2es/codegen/${file}`));
   return WebAssembly.compile(await readFile(path));
 }
