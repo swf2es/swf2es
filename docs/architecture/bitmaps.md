@@ -263,11 +263,21 @@ is read back so first; a draw from a script brings back the stores its
 subtree samples before it walks (`settle`), so that only fills sampled during
 the stage's own walk are averaged down.
 
-When the screen's scale moves by more than 2 % and holds for eight rendered
-frames (a window resized or maximised, or moved to a screen of another
-density), a store whose record still replays is drawn again at the new scale
-into a new texture, which takes the old one's place only once all of it drew;
-one whose record no longer does keeps its scale and is shown resampled.
+A store is first drawn at the screen's pixels a stage pixel, as no Bitmap
+may show it yet. Each frame a Bitmap on the stage shows it, the walk notes
+the screen pixels a pixel of the store takes there (`DisplayBitmaps.shown`):
+a bitmap sized to a map's size is often shown a little larger or smaller
+than a pixel a stage pixel. When that scale, capped as above, strays from
+the texture's by more than 0.2 % and holds for eight rendered frames (a
+window resized or maximised, moved to a screen of another density, or a
+Bitmap shown larger), a store whose record still replays is drawn again at
+it into a new texture, which takes the old one's place only once all of it
+drew, so its texels land on the screen's pixels again; one whose record no
+longer does keeps its scale and is shown resampled. A fill of a whole store
+of one colour leaves it of one colour (`BitmapStore.fillPixel`), so a store
+cleared before its first draw is promoted too, and once at display
+resolution such a fill starts its record again: a store cleared and drawn
+into on every frame keeps a record of one frame's draws.
 
 What it costs: a store's texture takes zoom² times the memory, at most 64 MB
 (16M texels), and the stores at display resolution 256 MB together by default

@@ -1,7 +1,7 @@
 // Vector art drawn into a BitmapData the stage's size and shown through an
 // unsmoothed Bitmap scaled to the art's size, as content flattens a map's
 // still layers: on the left the bitmap, on the right the same art drawn as
-// vectors. The bitmap takes the stage's width and a height in proportion,
+// vectors. The bitmap takes about the half's width and a height in proportion,
 // each layer drawn through a matrix that fits it, its own colour transform
 // and a clip of the bitmap's size. Thirty frames on a grid of its pixels is
 // traced, which reads it back, and a marker filled: what scripts see of it
@@ -44,7 +44,9 @@ package
 			right.addChild(art(0));
 			right.addChild(art(1));
 
-			var w:int = stage.stageWidth / 2;
+			// A little smaller than the half it shows in, so it is shown a little larger than a pixel a
+			// stage pixel, as a bitmap sized to a map's size often is.
+			var w:int = stage.stageWidth / 2 * 0.9;
 			var h:int = w * ART_HEIGHT / ART_WIDTH;
 			_data = new BitmapData(w, h, true, 0);
 			const layers:Array = [ground, details];

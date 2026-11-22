@@ -174,6 +174,14 @@ const stage = grids.get("stage") ?? [];
 const display = grids.get("display") ?? [];
 assert.ok(stage.length > 0 && stage.length === display.length, "no pixels read back");
 const differing = stage.filter((p, i) => p !== display[i]).length;
+for (const [i, p] of stage.entries()) {
+  if (p !== display[i]) {
+    console.log(
+      `read back pixel ${i}: ${p.toString(16)} at Flash's resolution, ${display[i].toString(16)}`,
+    );
+  }
+}
+
 console.log(`${stage.length} pixels read back: ${differing} differ; frames in ${write}`);
 
 const [at27, at18, read] = measured.get("display") ?? [];

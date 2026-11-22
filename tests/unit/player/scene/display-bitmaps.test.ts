@@ -55,7 +55,6 @@ function keeper(shown: number, budget: number) {
   const host = {
     textureLimit: () => 16384,
     shownScale: () => shown,
-    walking: () => false,
     drawer: null as never,
     draw: () => true,
   };
@@ -72,8 +71,10 @@ test("a store of one colour is drawn at the screen's scale, as a texture, its ca
   const large = new BitmapStore(2000, 2000, true, 0);
   assert.equal(keeper(4, 1 << 30).zoomFor(large), Math.sqrt((1 << 24) / (2000 * 2000)));
   // Past the budget, at a texel a pixel.
-  assert.equal(keeper(2, 4 * 400 * 200 - 1).zoomFor(store), null);
-  assert.equal(keeper(2, 4 * 400 * 200).zoomFor(store), 2);
+  // The texture and the store at its size, which scripts read.
+  const bytes = 4 * (400 * 200 + 200 * 100);
+  assert.equal(keeper(2, bytes - 1).zoomFor(store), null);
+  assert.equal(keeper(2, bytes).zoomFor(store), 2);
 });
 
 test("a store read, written, or holding pixels is not promoted", () => {

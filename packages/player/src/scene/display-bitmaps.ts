@@ -7,13 +7,15 @@
 // each draw rendered into it as the stage would render the art, and shown
 // by a Bitmap on the stage texel for pixel.
 //
-// Scripts see the store as Flash keeps it, at its size. Whatever reads its
-// pixels or writes them on the CPU, or samples it otherwise than a Bitmap on
-// the stage, brings it back at a texel a pixel, and it stays so: drawn again
-// there from the draws and fills it went through, which give Flash's pixels
-// where nothing they drew has changed since (DisplayObject's `changedAt`),
-// else the texture averaged down. The same record draws it again at a new
-// scale when the window's changes and stays so for a few frames.
+// Scripts see the store as Flash keeps it, at its size: beside the texture
+// each store keeps a store of its own at its size, a shadow, into which
+// every draw and fill goes too, as it would with the option off. Whatever
+// reads the store's pixels or writes them on the CPU, or samples it
+// otherwise than a Bitmap on the stage, takes the shadow's pixels, and the
+// store stays at Flash's resolution from then on. A record of the draws and
+// fills draws the texture again at a new scale when the one it is shown at
+// changes and holds for a few frames, where nothing the draws drew has
+// changed since (DisplayObject's `changedAt`).
 
 import type { TextureHandle } from "@swf2es/render";
 import { BitmapStore } from "../bitmap/bitmap.js";
@@ -40,8 +42,11 @@ const LEAST_ZOOM = 1.1;
 const STORE_TEXELS = 1 << 24;
 /** The most texels a draw's samples take at once: a tile's side is this's root over the samples. */
 const TILE_TEXELS = 1 << 24;
-/** How far the screen's scale may stray from a store's before it is drawn again at it. */
-const RESCALE = 0.02;
+/**
+ * How far the scale a store is shown at may stray from its texture's before it is drawn again at
+ * it: little, as a texel that lands on a pixel of the screen is read as it is, else resampled.
+ */
+const RESCALE = 0.002;
 /** The most draws and fills a store's record keeps (Held's `steps`). */
 const MOST_STEPS = 256;
 /** Rendered frames a new scale must hold before stores are drawn again at it: a resize's drag passes. */
@@ -52,8 +57,6 @@ export interface DisplayHost {
   textureLimit(): number;
   /** Screen pixels a stage pixel now. */
   shownScale(): number;
-  /** Whether a walk is under way, which a draw of its own would break into. */
-  walking(): boolean;
   /** The view as BitmapData.draw takes it, to draw a store again at a texel a pixel. */
   drawer: Drawer;
   /**
@@ -90,8 +93,6 @@ interface DrawStep {
   sampled: [BitmapStore, number][];
   /** Whether it can be drawn again at all: nothing it draws hangs on what lies outside it. */
   again: boolean;
-  /** BitmapData.draw's own matrix, colour transform and clip, which a store drawn again at its size takes. */
-  call: DrawCall | null;
 }
 
 interface FillStep {
@@ -103,9 +104,16 @@ interface FillStep {
 interface Held {
   store: WeakRef<BitmapStore>;
   bytes: number;
+  /**
+   * The store at its size, drawn into and filled as the store would be with the option off:
+   * its pixels, which scripts read; null once taken, or where a draw could not go into it.
+   */
+  shadow: BitmapStore | null;
   /** The colour it was made of, and its draws and fills since, in order; null once it is read back. */
   steps: (DrawStep | FillStep)[] | null;
   solid: number;
+  /** Texels a pixel a Bitmap on the stage last showed it at, which its texture would match; 0 for none yet. */
+  shownZoom: number;
   /** A scale it is to be drawn again at, and for how many frames that has held. */
   wanted: number;
   steady: number;
@@ -167,7 +175,8 @@ export class DisplayBitmaps {
     }
 
     this.prune();
-    const bytes = 4 * texelsOf(store.width, zoom) * texelsOf(store.height, zoom);
+    const bytes =
+      4 * (texelsOf(store.width, zoom) * texelsOf(store.height, zoom) + store.width * store.height);
     return this.bytes + bytes <= this.budget ? zoom : null;
   }
 
@@ -214,11 +223,15 @@ export class DisplayBitmaps {
       handle = this.paints.scratch(across, down, solid);
       this.paints.adopt(store, handle, zoom);
       store.atDisplay = true;
+      const shadow = BitmapStore.filled(store.width, store.height, store.transparent, solid);
+      shadow.displayRefused = true;
       held = {
         store: new WeakRef(store),
-        bytes: 4 * across * down,
+        bytes: 4 * (across * down + store.width * store.height),
+        shadow,
         steps: [],
         solid,
+        shownZoom: 0,
         wanted: 0,
         steady: 0,
         fixed: false,
@@ -239,9 +252,18 @@ export class DisplayBitmaps {
       samples,
       epoch: 0,
       sampled,
-      again: call !== null && drawsAgain(o, Number.POSITIVE_INFINITY, sampled),
-      call,
+      again: drawsAgain(o, Number.POSITIVE_INFINITY, sampled),
     };
+    // The shadow drawn into first, as the store would be at Flash's resolution, by BitmapData.draw's
+    // own way: before the draw at display resolution, which leaves geometry built at its scale
+    // that a draw after would take, a level apart here and there.
+    if (held.shadow && call) {
+      const { matrix, color, clip } = call;
+      drawDisplayObject(this.host.drawer, held.shadow, o, matrix, color, "normal", clip, samples);
+    } else {
+      this.dropShadow(held);
+    }
+
     if (!this.render(store, step, zoom, handle.id)) {
       return false;
     }
@@ -303,6 +325,7 @@ export class DisplayBitmaps {
     }
 
     const held = this.byStore.get(store);
+    held?.shadow?.fillPixel(rect, pixel);
     if (held?.steps) {
       // A fill of the whole store starts it again: what was drawn before is gone.
       if (
@@ -322,49 +345,33 @@ export class DisplayBitmaps {
   }
 
   /**
-   * `store`'s pixels as Flash's draws would have made them, at its size:
-   * its fills and draws done again there on a store of its own, as they
-   * would have gone with the option off, which gives them where none of the
-   * objects drawn changed since; null where one did, or a walk is under
-   * way, and the texture is to be averaged down instead.
+   * `store`'s pixels as scripts are to read them, at its size: its shadow's,
+   * which went through its fills and draws as the store would have with the
+   * option off; null where it has none, and the texture is to be averaged
+   * down instead. The store keeps neither from then on.
    */
   demoted(store: BitmapStore): Uint32Array | null {
     const held = this.byStore.get(store);
-    const steps = held?.steps;
-    if (held) {
-      held.steps = null;
-    }
-
-    if (!held || !steps || this.host.walking() || !stillDraws(steps)) {
+    if (!held) {
       return null;
     }
 
-    const again = BitmapStore.filled(store.width, store.height, store.transparent, held.solid);
-    again.displayRefused = true;
-    try {
-      for (const step of steps) {
-        if (!("object" in step)) {
-          again.fillPixel(step.rect, step.pixel);
-        } else if (step.call) {
-          const { matrix, color, clip } = step.call;
-          drawDisplayObject(
-            this.host.drawer,
-            again,
-            step.object,
-            matrix,
-            color,
-            "normal",
-            clip,
-            step.samples,
-          );
-        }
-      }
-
-      return again.readable;
-    } catch {
+    held.steps = null;
+    const shadow = held.shadow;
+    if (!shadow) {
       return null;
-    } finally {
-      again.dispose();
+    }
+
+    const pixels = shadow.readable;
+    this.dropShadow(held);
+    return pixels;
+  }
+
+  /** `held`'s shadow let go of, its texture with it. */
+  private dropShadow(held: Held): void {
+    if (held.shadow) {
+      held.shadow.dispose();
+      held.shadow = null;
     }
   }
 
@@ -404,7 +411,7 @@ export class DisplayBitmaps {
         continue;
       }
 
-      const wanted = this.fit(store, shown) ?? 1;
+      const wanted = this.fit(store, held.shownZoom || shown) ?? 1;
       if (Math.abs(wanted / zoom - 1) <= RESCALE) {
         held.steady = 0;
         continue;
@@ -424,6 +431,18 @@ export class DisplayBitmaps {
     }
   }
 
+  /**
+   * A Bitmap on the stage showed `store` at `zoom` screen pixels a pixel:
+   * the scale its texture is drawn again at, so that its texels land on
+   * the screen's pixels.
+   */
+  shown(store: BitmapStore, zoom: number): void {
+    const held = this.byStore.get(store);
+    if (held && Number.isFinite(zoom) && zoom > 0) {
+      held.shownZoom = zoom;
+    }
+  }
+
   /** `store` drawn again at `zoom` from what made it, where it can be and the budget holds it. */
   private rescale(store: BitmapStore, held: Held, zoom: number): void {
     const steps = held.steps;
@@ -434,7 +453,7 @@ export class DisplayBitmaps {
 
     const across = texelsOf(store.width, zoom);
     const down = texelsOf(store.height, zoom);
-    const bytes = 4 * across * down;
+    const bytes = 4 * (across * down + store.width * store.height);
     if (this.bytes - held.bytes + bytes > this.budget) {
       return;
     }
@@ -474,6 +493,7 @@ export class DisplayBitmaps {
         this.held[kept++] = held;
       } else {
         this.bytes -= held.bytes;
+        this.dropShadow(held);
         if (store) {
           this.byStore.delete(store);
         }

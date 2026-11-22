@@ -298,8 +298,6 @@ export class RenderView implements Drawer {
   private snapshotting = false;
   /** The stores kept at display resolution, under RenderViewOptions' `bitmapResolution`; null without. */
   private readonly displayBitmaps: DisplayBitmaps | null;
-  /** How many walks are under way, which a draw of a store's own may not break into. */
-  private walking = 0;
   /** Target pixels a pixel of what filters run on, where not the scale: in a 3D object's bitmap. */
   private filterUnits: number | null = null;
   private drawMatrix: Matrix = IDENTITY;
@@ -366,7 +364,6 @@ export class RenderView implements Drawer {
             {
               textureLimit: () => this.textureLimit,
               shownScale: () => this.screenScale ?? this.scale * this.resolution,
-              walking: () => this.walking > 0,
               drawer: this,
               draw: (o, m, x, y, width, height, samples, zoom, id, opaque) =>
                 this.drawTexels(o, m, x, y, width, height, samples, zoom, id, opaque),
@@ -639,11 +636,9 @@ export class RenderView implements Drawer {
 
     allowResets(false);
     this.checking = 0;
-    this.walking++;
     try {
       this.walkFrom(root);
     } finally {
-      this.walking--;
       allowResets(true);
     }
 
@@ -1294,6 +1289,13 @@ export class RenderView implements Drawer {
         placed[4] = this.places[at + 10];
         placed[5] = this.places[at + 11];
         const unit = this.target.scale / this.target.pixel;
+        if (this.drawRoot === null) {
+          // The scale its texels would land on the screen's pixels at, drawn again at it.
+          const p = this.places;
+          const area = Math.abs(p[at + 6] * p[at + 9] - p[at + 7] * p[at + 8]);
+          this.displayBitmaps?.shown(store, Math.sqrt(area) * unit);
+        }
+
         const whole = wholeTexels(placed, unit);
         this.geometries.use(quad.id);
         this.textures.use(texture.id);
@@ -2169,13 +2171,7 @@ export class RenderView implements Drawer {
       }
 
       allowResets(false);
-      this.walking++;
-      try {
-        this.walkFrom(o);
-      } finally {
-        this.walking--;
-      }
-
+      this.walkFrom(o);
       measureLayers(this.scene, this.rows, this.geometries, this.target);
       plan(this.scene, 0, this.commands);
       this.uploadOutlines();

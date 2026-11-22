@@ -685,6 +685,19 @@ export class BitmapStore {
       return;
     }
 
+    // A store of one colour filled whole is of another, its pixels still not made: as a SWF
+    // clears a bitmap before it first draws into it.
+    if (
+      this.solidPixel !== null &&
+      !this.holdsAlpha &&
+      c.width === this.width &&
+      c.height === this.height
+    ) {
+      this.solid = pixel;
+      this.changed();
+      return;
+    }
+
     for (let y = c.y; y < c.y + c.height; y++) {
       this.pixels.fill(pixel, y * this.width + c.x, y * this.width + c.x + c.width);
     }
