@@ -328,6 +328,8 @@ test {
         @import("avm2/abc/verify.zig"),
         @import("avm2/abc/typing.zig"),
         @import("avm2/abc/properties.zig"),
+        @import("avm2/emit/sourcemap.zig"),
+        @import("avm2/emit/stack-names.zig"),
     }) |file| {
         std.testing.refAllDecls(file);
         inline for (comptime std.meta.declarations(file)) |name| {
