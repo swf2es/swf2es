@@ -103,16 +103,20 @@ pub fn build(b: *std.Build) void {
                 .root_source_file = b.path("src/testing.zig"),
                 .target = b.graph.host,
                 .optimize = .ReleaseSafe,
-                .imports = &.{.{ .name = "options", .module = options(b, poison) }},
+                .imports = &.{.{ .name = "options", .module = options(b, poison, true) }},
             }),
         });
         test_step.dependOn(&b.addRunArtifact(tests).step);
     }
 }
 
-fn options(b: *std.Build, poison: bool) *std.Build.Module {
+/// `checks`: the test builds' and the native tests' assertions that the
+/// release build leaves out, such as that a row the domain writes in place
+/// is written inside a Change.
+fn options(b: *std.Build, poison: bool, checks: bool) *std.Build.Module {
     const values = b.addOptions();
     values.addOption(bool, "poison", poison);
+    values.addOption(bool, "checks", checks);
     values.addOption(u32, "stack_size", stack_size);
     return values.createModule();
 }
@@ -132,7 +136,7 @@ fn module(
         .optimize = .ReleaseSafe,
         .single_threaded = true,
         .strip = strip,
-        .imports = &.{.{ .name = "options", .module = options(b, poison) }},
+        .imports = &.{.{ .name = "options", .module = options(b, poison, std.mem.eql(u8, root, "src/testing.zig")) }},
     });
     root_module.export_symbol_names = names;
     const wasm = b.addExecutable(.{ .name = name, .root_module = root_module });

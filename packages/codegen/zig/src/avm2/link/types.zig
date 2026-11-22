@@ -35,6 +35,7 @@ pub fn isBindingName(dom: *const Domain, index: u32, multiname: u32) bool {
 /// `type`, BIND_None, or BIND_Ambiguous if it binds differently in two of
 /// its namespaces. The type's own members are searched before its base's.
 pub fn getBinding(dom: *Domain, index: u32, type_: i32, mn: u32) Allocator.Error!u32 {
+    dom.changing();
     if (type_ < 0) {
         return BIND_None;
     }
@@ -63,12 +64,16 @@ pub fn getBinding(dom: *Domain, index: u32, type_: i32, mn: u32) Allocator.Error
     }
 
     const b = lookupBinding(dom, index, type_, mn);
+    // The rows first, then the id that names them, so that the table never
+    // holds an id past the rows, as AssemblyScript's order would where
+    // memory runs out between the two.
     const gpa = dom.gpa;
-    try memo.insert(gpa, hash, dom.memoType.len);
+    const id = dom.memoType.len;
     try dom.memoType.push(gpa, type_);
     try dom.memoAbc.push(gpa, index);
     try dom.memoName.push(gpa, mn);
     try dom.memoBinding.push(gpa, b);
+    try memo.insert(gpa, hash, id);
     return b;
 }
 

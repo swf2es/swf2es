@@ -12,6 +12,7 @@
 // arena's mark, its writes to rows from before the call undone (`put`).
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const options = @import("options");
 const memory = @import("../../memory.zig");
 const Rows = memory.Rows;
 const output = @import("../../output.zig");
@@ -124,6 +125,8 @@ pub const Change = struct {
 
     /// `change` must stay where it is until done or rolled back: the domain points at its journal.
     pub fn begin(change: *Change, dom: *Domain, arena: *memory.Arena) void {
+        // One Change at a time: a nested one would take the outer's journal.
+        std.debug.assert(dom.undo == null);
         change.* = .{ .saved = dom.*, .mark = arena.mark() };
         change.saved.undo = null;
         dom.undo = &change.undo;
@@ -395,11 +398,20 @@ pub const Domain = struct {
 
     /// `ptr`, a row of the domain's, set to `value`, its old value kept for a rollback.
     pub fn put(self: *Domain, ptr: anytype, value: @TypeOf(ptr.*)) Allocator.Error!void {
+        self.changing();
         if (self.undo) |undo| {
             try undo.record(self.scratch, ptr);
         }
 
         ptr.* = value;
+    }
+
+    /// In the test builds, that a Change is open: what writes the domain
+    /// outside one would not be undone where memory runs out.
+    pub fn changing(self: *const Domain) void {
+        if (options.checks) {
+            std.debug.assert(self.undo != null);
+        }
     }
 
     /// Forget getBinding's answers. The table keeps its room: a lookup
@@ -543,29 +555,42 @@ pub const Domain = struct {
 
     /// As Verifier::checkTypeName: the type multiname `mn` of ABC `index` names,
     /// void included, and Vector.<T>, or * for another parameterized type;
-    /// below TYPE_Any on failure, with typeError set.
-    pub fn checkTypeName(self: *Domain, index: u32, mn: u32) Allocator.Error!i32 {
+    /// below TYPE_Any on failure, with typeError set. AssemblyScript
+    /// recurses into a TypeName's parameter; this walks the chain down,
+    /// keeping each level's class, and makes the types back up.
+    pub fn checkTypeName(self: *Domain, index: u32, multiname: u32) Allocator.Error!i32 {
         const pool = &self.abcs.get(index).pool;
-        const isTypeName = pool.mnKind[mn] == C.CONSTANT_TypeName;
-        const c = typenames.resolveType(self, index, if (isTypeName) pool.mnA[mn] else mn);
-        if (c < 0 and c != -C.kIllegalVoidError) {
-            self.typeError = -c;
-            return -2;
+        var classes_: std.ArrayList(i32) = .empty;
+        var mn = multiname;
+        const innermost: i32 = while (true) {
+            const isTypeName = pool.mnKind[mn] == C.CONSTANT_TypeName;
+            const c = typenames.resolveType(self, index, if (isTypeName) pool.mnA[mn] else mn);
+            if (c < 0 and c != -C.kIllegalVoidError) {
+                self.typeError = -c;
+                return -2;
+            }
+
+            if (!isTypeName) {
+                break if (c < 0) self.voidType else self.classTraits.get(@intCast(c));
+            }
+
+            try classes_.append(self.scratch, c);
+            mn = pool.mnB[mn];
+            if (mn == 0) {
+                break TYPE_Any;
+            }
+        };
+
+        var param = innermost;
+        var level = classes_.items.len;
+        while (level > 0) {
+            level -= 1;
+            const c = classes_.items[level];
+            const t = if (c >= 0) try typenames.parameterized(self, c, param) else -1;
+            param = if (t < 0) TYPE_Any else t;
         }
 
-        const ty = if (c < 0) self.voidType else self.classTraits.get(@intCast(c));
-        if (!isTypeName) {
-            return ty;
-        }
-
-        const paramName = pool.mnB[mn];
-        const param = if (paramName != 0) try self.checkTypeName(index, paramName) else TYPE_Any;
-        if (param < TYPE_Any) {
-            return param;
-        }
-
-        const t = if (c >= 0) try typenames.parameterized(self, c, param) else -1;
-        return if (t < 0) TYPE_Any else t;
+        return param;
     }
 
     /// Whether method m takes any number of extra arguments: into a rest or

@@ -476,25 +476,43 @@ pub const TraitsTable = struct {
         return true;
     }
 
-    /// Every interface t implements, its bases' and the interfaces' own included, once each.
+    /// Every interface t implements, its bases' and the interfaces' own
+    /// included, once each, in the order AssemblyScript's recursive walk
+    /// finds them: each interface listed, then the ones it extends. The
+    /// walk keeps its own stack, as the chain is as deep as the input
+    /// makes it. Quadratic in the interfaces, as AssemblyScript's
+    /// `includes` is.
     pub fn allInterfaces(self: *const TraitsTable, scratch: Allocator, t: u32) Allocator.Error![]u32 {
         var all: std.ArrayList(u32) = .empty;
+        var stack: std.ArrayList(InterfaceFrame) = .empty;
         var c: i32 = @intCast(t);
         while (c >= 0) : (c = self.base.get(@intCast(c))) {
-            try self.addInterfaces(scratch, @intCast(c), &all);
+            // Most bases name none: nothing taken for them, along a chain as long as the input's.
+            if (self.interfaceStart.get(@intCast(c)) != self.interfaceEnd.get(@intCast(c))) {
+                try self.addInterfaces(scratch, @intCast(c), &all, &stack);
+            }
         }
 
         return all.items;
     }
 
-    fn addInterfaces(self: *const TraitsTable, scratch: Allocator, t: u32, all: *std.ArrayList(u32)) Allocator.Error!void {
-        const last = self.interfaceEnd.get(t);
-        var j = self.interfaceStart.get(t);
-        while (j < last) : (j += 1) {
-            const ifc = self.interfaceList.get(j);
+    /// One traits' interfaces, as a frame of the walk: where in its list it is.
+    const InterfaceFrame = struct { next: u32, end: u32 };
+
+    fn addInterfaces(self: *const TraitsTable, scratch: Allocator, t: u32, all: *std.ArrayList(u32), stack: *std.ArrayList(InterfaceFrame)) Allocator.Error!void {
+        try stack.append(scratch, .{ .next = self.interfaceStart.get(t), .end = self.interfaceEnd.get(t) });
+        while (stack.items.len > 0) {
+            const top = &stack.items[stack.items.len - 1];
+            if (top.next == top.end) {
+                _ = stack.pop();
+                continue;
+            }
+
+            const ifc = self.interfaceList.get(top.next);
+            top.next += 1;
             if (std.mem.indexOfScalar(u32, all.items, ifc) == null) {
                 try all.append(scratch, ifc);
-                try self.addInterfaces(scratch, ifc, all);
+                try stack.append(scratch, .{ .next = self.interfaceStart.get(ifc), .end = self.interfaceEnd.get(ifc) });
             }
         }
     }
@@ -513,28 +531,64 @@ pub const TraitsTable = struct {
 
     /// As Traits::resolveSignatures: resolve t's supertypes, then t's slot
     /// types and initial values, its methods' signatures, and check its
-    /// overrides and interfaces; 0, or the VerifyError.
+    /// overrides and interfaces; 0, or the VerifyError. AssemblyScript
+    /// recurses into the base and then each interface; this keeps their
+    /// frames on a stack of its own in the call's arena, so that a chain
+    /// as deep as the input makes it resolves in the same order, the first
+    /// error ending every frame.
     pub fn resolve(self: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
-        if (self.resolved.get(t) != 0) {
-            return 0;
+        dom.changing();
+        const Frame = struct {
+            t: u32,
+            /// 0 before the base, 1 after it, 2 among the interfaces.
+            stage: u8 = 0,
+            interfaces: []u32 = &.{},
+            next: usize = 0,
+        };
+        var stack: std.ArrayList(Frame) = .empty;
+        try stack.append(dom.scratch, .{ .t = t });
+        while (stack.items.len > 0) {
+            const frame = &stack.items[stack.items.len - 1];
+            switch (frame.stage) {
+                0 => {
+                    if (self.resolved.get(frame.t) != 0) {
+                        _ = stack.pop();
+                        continue;
+                    }
+
+                    frame.stage = 1;
+                    const base = self.base.get(frame.t);
+                    if (base >= 0) {
+                        try stack.append(dom.scratch, .{ .t = @intCast(base) });
+                    }
+                },
+                1 => {
+                    frame.interfaces = try self.allInterfaces(dom.scratch, frame.t);
+                    frame.stage = 2;
+                },
+                else => {
+                    if (frame.next < frame.interfaces.len) {
+                        const ifc = frame.interfaces[frame.next];
+                        frame.next += 1;
+                        try stack.append(dom.scratch, .{ .t = ifc });
+                        continue;
+                    }
+
+                    const done = stack.pop().?;
+                    const err = try self.resolveOwn(dom, done.t, done.interfaces);
+                    if (err != 0) {
+                        return err;
+                    }
+                },
+            }
         }
 
+        return 0;
+    }
+
+    /// resolve for traits whose supertypes have resolved: what t itself resolves.
+    fn resolveOwn(self: *TraitsTable, dom: *Domain, t: u32, interfaces: []const u32) Allocator.Error!i32 {
         const base = self.base.get(t);
-        if (base >= 0) {
-            const err = try self.resolve(dom, @intCast(base));
-            if (err != 0) {
-                return err;
-            }
-        }
-
-        const interfaces = try self.allInterfaces(dom.scratch, t);
-        for (interfaces) |ifc| {
-            const err = try self.resolve(dom, ifc);
-            if (err != 0) {
-                return err;
-            }
-        }
-
         const err = try signatures.resolveSlotsAndMethods(self, dom, t);
         if (err != 0) {
             return err;
@@ -594,6 +648,7 @@ pub const TraitsTable = struct {
     /// allowed), parameter types (not), receiver, and check its optional
     /// parameters' default values.
     pub fn sign(self: *TraitsTable, dom: *Domain, m: u32) Allocator.Error!i32 {
+        dom.changing();
         if (self.signed.get(m) != 0) {
             return 0;
         }

@@ -14,54 +14,70 @@ const TYPE_Any = traits_.TYPE_Any;
 
 /// As PoolObject::resolveTypeName for a slot or parameter type: TYPE_Any
 /// for index 0, or the type; below TYPE_Any on failure, with typeError set.
-pub fn resolveTypeId(dom: *Domain, index: u32, mn: u32, allowVoid: bool) Allocator.Error!i32 {
-    if (mn == 0) {
-        return TYPE_Any;
-    }
-
+/// AssemblyScript recurses into a TypeName's parameter; a chain of them
+/// (Vector.<Vector.<...>>) is as deep as the input makes it, so this walks
+/// down it keeping each level's base, then makes the types back up, in
+/// AssemblyScript's order.
+pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) Allocator.Error!i32 {
     const pool = &dom.abcs.get(index).pool;
-    if (mn >= pool.multinameCount()) {
-        dom.typeError = C.kCpoolIndexRangeError;
-        return -2;
-    }
+    var bases: std.ArrayList(i32) = .empty;
+    var mn = multiname;
+    var void_ok = allowVoid;
+    const innermost: i32 = while (true) {
+        if (mn == 0) {
+            break TYPE_Any;
+        }
 
-    if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+        if (mn >= pool.multinameCount()) {
+            dom.typeError = C.kCpoolIndexRangeError;
+            return -2;
+        }
+
+        if (pool.mnKind[mn] != C.CONSTANT_TypeName) {
+            const c = resolveType(dom, index, mn);
+            if (c == -C.kIllegalVoidError) {
+                if (void_ok) {
+                    break dom.voidType;
+                }
+
+                dom.typeError = C.kIllegalVoidError;
+                return -2;
+            }
+
+            if (c < 0) {
+                dom.typeError = -c;
+                return -2;
+            }
+
+            break dom.classTraits.get(@intCast(c));
+        }
+
         const base = resolveType(dom, index, pool.mnA[mn]);
         if (base == -C.kAmbiguousBindingError) {
             dom.typeError = C.kAmbiguousBindingError;
             return -2;
         }
 
-        const param = try resolveTypeId(dom, index, pool.mnB[mn], false);
-        if (param < TYPE_Any) {
-            return param;
-        }
+        try bases.append(dom.scratch, base);
+        mn = pool.mnB[mn];
+        void_ok = false;
+    };
 
+    var param = innermost;
+    var level = bases.items.len;
+    while (level > 0) {
+        level -= 1;
+        const base = bases.items[level];
         const t = if (base >= 0) try parameterized(dom, base, param) else -1;
         if (t < 0) {
             dom.typeError = C.kClassNotFoundError;
             return -2;
         }
 
-        return t;
+        param = t;
     }
 
-    const c = resolveType(dom, index, mn);
-    if (c == -C.kIllegalVoidError) {
-        if (allowVoid) {
-            return dom.voidType;
-        }
-
-        dom.typeError = C.kIllegalVoidError;
-        return -2;
-    }
-
-    if (c < 0) {
-        dom.typeError = -c;
-        return -2;
-    }
-
-    return dom.classTraits.get(@intCast(c));
+    return param;
 }
 
 /// As PoolObject::resolveParameterizedType: Vector.<T>, which avmplus has
@@ -101,22 +117,41 @@ pub fn parameterized(dom: *Domain, base: i32, param: i32) Allocator.Error!i32 {
 /// As PoolObject::resolveTypeName for a base class or interface: the class
 /// id, or minus the error: 1014 if nothing matches, 1008 if two classes do,
 /// 1022 for void.
-pub fn resolveType(dom: *const Domain, index: u32, mn: u32) i32 {
+///
+/// A TypeName's base is never a TypeName (the parser's typeNamesAreAcyclic),
+/// but its parameter may be, as deep as the input makes it: AssemblyScript
+/// recurses down the parameters, each level giving its base unless a
+/// deeper one fails, which this walks in a loop.
+pub fn resolveType(dom: *const Domain, index: u32, multiname: u32) i32 {
+    const pool = &dom.abcs.get(index).pool;
+    if (pool.mnKind[multiname] != C.CONSTANT_TypeName) {
+        return resolvePlain(dom, index, multiname);
+    }
+
+    const outer = resolvePlain(dom, index, pool.mnA[multiname]);
+    var base = outer;
+    var mn = multiname;
+    while (base >= 0 and pool.mnB[mn] != 0) {
+        mn = pool.mnB[mn];
+        if (pool.mnKind[mn] != C.CONSTANT_TypeName) {
+            const t = resolvePlain(dom, index, mn);
+            return if (t < 0) t else outer;
+        }
+
+        base = resolvePlain(dom, index, pool.mnA[mn]);
+        if (base < 0) {
+            return base;
+        }
+    }
+
+    return outer;
+}
+
+/// resolveType of a multiname that is not a TypeName.
+fn resolvePlain(dom: *const Domain, index: u32, mn: u32) i32 {
     const abc = dom.abcs.get(index);
     const pool = &abc.pool;
     const kind = pool.mnKind[mn];
-    if (kind == C.CONSTANT_TypeName) {
-        const base = resolveType(dom, index, pool.mnA[mn]);
-        const param = pool.mnB[mn];
-        if (base >= 0 and param != 0) {
-            const t = resolveType(dom, index, param);
-            if (t < 0) {
-                return t;
-            }
-        }
-
-        return base;
-    }
 
     const strings = dom.abcString.get(index);
     const ids = dom.abcNs.get(index);
