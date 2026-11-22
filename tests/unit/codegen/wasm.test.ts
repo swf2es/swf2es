@@ -40,8 +40,10 @@ test("createCodegen tells the compilers apart, whose identities differ so caches
   assert.match(zig.identity ?? "", /^[0-9a-f]{64}$/);
   assert.notEqual(zig.identity, as.identity);
   assert.deepEqual(zig.abcVersion(Uint8Array.of(16, 0, 46, 0)), { major: 46, minor: 16 });
-  // Until the port reaches them, Zig's compiler lacks the domain's exports.
-  assert.throws(() => zig.reset(), /codegen-zig.wasm has no domainReset yet/);
+  // Until the port reaches them, Zig's compiler lacks the emitter's exports.
+  zig.reset();
+  assert.equal(zig.add(new Uint8Array(0)), 1107);
+  assert.throws(() => zig.revision(), /codegen-zig.wasm has no domainRevision yet/);
 });
 
 test("wrapper and wasm agree on the compiler version", async () => {
