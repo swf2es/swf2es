@@ -173,49 +173,8 @@ pub fn writeF64(w: *std.Io.Writer, d: f64) std.Io.Writer.Error!void {
 pub fn writeDecoded(w: *std.Io.Writer, bytes: []const u8) std.Io.Writer.Error!void {
     var pending: ?u32 = null;
     var at: usize = 0;
-    while (at < bytes.len) {
-        var lead: u32 = bytes[at];
-        at += 1;
-        var units: [2]u32 = undefined;
-        var n: usize = 1;
-        if (lead & 128 == 0) {
-            units[0] = lead;
-        } else {
-            if (at == bytes.len) {
-                break;
-            }
-
-            const second: u32 = bytes[at] & 63;
-            at += 1;
-            if (lead & 224 == 192) {
-                units[0] = ((lead & 31) << 6) | second;
-            } else {
-                if (at == bytes.len) {
-                    break;
-                }
-
-                const third: u32 = bytes[at] & 63;
-                at += 1;
-                if (lead & 240 == 224) {
-                    lead = ((lead & 15) << 12) | (second << 6) | third;
-                } else {
-                    if (at == bytes.len) {
-                        break;
-                    }
-
-                    lead = ((lead & 7) << 18) | (second << 12) | (third << 6) | (bytes[at] & 63);
-                    at += 1;
-                }
-
-                if (lead < 0x10000) {
-                    units[0] = lead;
-                } else {
-                    units = .{ ((lead - 0x10000) >> 10) | 0xd800, ((lead - 0x10000) & 0x3ff) | 0xdc00 };
-                    n = 2;
-                }
-            }
-        }
-
+    var units: [2]u32 = undefined;
+    while (nextUnits(bytes, &at, &units)) |n| {
         for (units[0..n]) |unit| {
             pending = try writePending(w, pending, unit);
         }
@@ -224,6 +183,72 @@ pub fn writeDecoded(w: *std.Io.Writer, bytes: []const u8) std.Io.Writer.Error!vo
     if (pending) |high| {
         try writeCodePoint(w, high);
     }
+}
+
+/// `bytes` decoded as AssemblyScript's String.UTF8.decodeUnsafe decodes
+/// them, its UTF-16 units: for comparing strings as it does.
+pub fn decodeUnits(gpa: Allocator, bytes: []const u8) Allocator.Error![]u16 {
+    var out: std.ArrayList(u16) = .empty;
+    var at: usize = 0;
+    var units: [2]u32 = undefined;
+    while (nextUnits(bytes, &at, &units)) |n| {
+        for (units[0..n]) |unit| {
+            try out.append(gpa, @truncate(unit));
+        }
+    }
+
+    return out.items;
+}
+
+/// The units of the sequence at `at`, as decodeUnsafe reads it, and how
+/// many; null at the end, or where the last sequence is cut short.
+fn nextUnits(bytes: []const u8, at: *usize, units: *[2]u32) ?usize {
+    if (at.* >= bytes.len) {
+        return null;
+    }
+
+    var lead: u32 = bytes[at.*];
+    at.* += 1;
+    if (lead & 128 == 0) {
+        units[0] = lead;
+        return 1;
+    }
+
+    if (at.* == bytes.len) {
+        return null;
+    }
+
+    const second: u32 = bytes[at.*] & 63;
+    at.* += 1;
+    if (lead & 224 == 192) {
+        units[0] = ((lead & 31) << 6) | second;
+        return 1;
+    }
+
+    if (at.* == bytes.len) {
+        return null;
+    }
+
+    const third: u32 = bytes[at.*] & 63;
+    at.* += 1;
+    if (lead & 240 == 224) {
+        lead = ((lead & 15) << 12) | (second << 6) | third;
+    } else {
+        if (at.* == bytes.len) {
+            return null;
+        }
+
+        lead = ((lead & 7) << 18) | (second << 12) | (third << 6) | (bytes[at.*] & 63);
+        at.* += 1;
+    }
+
+    if (lead < 0x10000) {
+        units[0] = lead;
+        return 1;
+    }
+
+    units.* = .{ ((lead - 0x10000) >> 10) | 0xd800, ((lead - 0x10000) & 0x3ff) | 0xdc00 };
+    return 2;
 }
 
 /// Unit `unit` after a high surrogate `pending`, if one waits for its low

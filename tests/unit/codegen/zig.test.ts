@@ -6,6 +6,8 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { instantiate as instantiateAs } from "../../../packages/codegen/dist/codegen.js";
 import { CodegenPanic, fromUtf8, instantiate, toUtf8 } from "../../../packages/codegen/dist/zig.js";
+import { linkAbcs } from "../../parity/link-abc.ts";
+import { richAbc } from "../../parity/rich-abc.ts";
 import { bindTesting, zigTestingModule } from "./zig-testing.ts";
 
 // From dist/ by name, not by the package's export, which SWF2ES_COMPILER=zig redirects (tests/compiler.ts).
@@ -57,7 +59,7 @@ test("the compilers agree on what Zig's has ported", () => {
 });
 
 test("an export Zig's compiler has not ported yet throws when it is called", () => {
-  assert.throws(() => zig.domainReset(0), /codegen-zig.wasm has no domainReset yet/);
+  assert.throws(() => zig.domainModule("", -1), /codegen-zig.wasm has no domainModule yet/);
 });
 
 test("a call that runs out of memory hands out nothing and says so, and does not trap", async () => {
@@ -111,4 +113,27 @@ test("a view of the module's own memory goes in whole, though input gives that m
 
 test("arrays and strings must be given, as asc's glue requires; a default only where left out", () => {
   assert.throws(() => zig.abcVersion(undefined as unknown as Uint8Array), TypeError);
+});
+
+/** Byte array `name` of a Zig source of the test build's. */
+async function zigBytes(file: string, name: string): Promise<number[]> {
+  const source = await readFile(
+    new URL(`../../../packages/codegen/zig/src/testing/${file}`, import.meta.url),
+    "utf8",
+  );
+  const body = source.match(new RegExp(`pub const ${name} = \\[_\\]u8\\{([^}]*)\\};`))?.[1];
+  assert.ok(body, `${name} in ${file}`);
+  return body
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map(Number);
+}
+
+test("the Zig tests' ABCs are the ones tests/parity builds", async () => {
+  assert.deepEqual(await zigBytes("abc.zig", "rich_abc"), [...richAbc(true)]);
+  const { builtin, user, failing } = linkAbcs();
+  assert.deepEqual(await zigBytes("domain.zig", "link_builtin"), [...builtin]);
+  assert.deepEqual(await zigBytes("domain.zig", "link_user"), [...user]);
+  assert.deepEqual(await zigBytes("domain.zig", "link_failing"), [...failing]);
 });

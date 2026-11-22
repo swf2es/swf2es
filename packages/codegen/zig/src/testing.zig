@@ -10,6 +10,9 @@ const root = @import("root.zig");
 const avm1 = @import("testing/avm1.zig");
 const avm1_compile = @import("avm1/compile.zig");
 const abc = @import("testing/abc.zig");
+const avm2 = @import("compile.zig");
+const domain = @import("testing/domain.zig");
+const link = @import("avm2/link/domain.zig");
 
 pub const panic = root.panic;
 
@@ -122,11 +125,56 @@ export fn opcodeTable() usize {
     return root.handOut(abc.opcodeTable(root.gpa()) catch |err| return root.failWriting(err));
 }
 
+// The domain's dumps (assembly/testing/domain.ts).
+
+export fn domainFind(type_: i32, uri: [*]const u8, uri_len: u32, name: [*]const u8, name_len: u32, version: i32, appDomain: i32) usize {
+    return root.handOut(domain.domainFind(root.gpa(), @truncate(@as(u32, @bitCast(type_))), uri[0..uri_len], name[0..name_len], version, appDomain) catch |err| return root.fail(err));
+}
+
+export fn domainSummary() usize {
+    return root.handOut(domain.domainSummary(root.gpa()) catch |err| return root.fail(err));
+}
+
+export fn domainTraits(first: i32) usize {
+    return root.handOut(domain.domainTraits(root.gpa(), first) catch |err| return root.fail(err));
+}
+
+export fn domainResolve(first: i32) i32 {
+    return avm2.changed(domain.domainResolve, .{first}) catch |err| {
+        _ = root.fail(err);
+        return 0;
+    };
+}
+
+export fn domainBuiltins() usize {
+    return root.handOut(domain.domainBuiltins(root.gpa()) catch |err| return root.fail(err));
+}
+
+export fn domainSlotTypes(index: i32, cls: i32) usize {
+    return root.handOut(avm2.changed(domain.domainSlotTypes, .{ root.gpa(), index, cls }) catch |err| return root.fail(err));
+}
+
+export fn domainTraitsCount() i32 {
+    return domain.domainTraitsCount() catch |err| {
+        _ = root.fail(err);
+        return 0;
+    };
+}
+
+/// How many reads past the end of a namespace set the calls since the last
+/// asked made (see domain.zig's `unspecified`), for the parity harness to
+/// take their cases as unspecified.
+export fn unspecifiedReads() u32 {
+    defer link.unspecified = 0;
+    return link.unspecified;
+}
+
 /// What the exports keep and hold let go, and the call's and the global
 /// arena given back, as when the module starts.
 fn letGo() void {
     avm1_compile.forget();
     avm1_compile.releaseAll();
+    avm2.release();
     memory.call.reset();
     memory.global.reset();
 }
@@ -249,6 +297,72 @@ fn throughExports(_: std.mem.Allocator, p: *memory.Pages) !void {
     _ = root.input(0);
     _ = opcodeTable();
     try failed.check();
+
+    // The domain's exports, the link ABCs staged as the wrapper stages them.
+    const staging = struct {
+        fn call(bytes: []const u8) error{OutOfMemory}![*]const u8 {
+            const room = root.input(@intCast(bytes.len));
+            if (room == 0) {
+                return error.OutOfMemory;
+            }
+
+            var at: usize = 0;
+            return @ptrFromInt(put(room, &at, bytes));
+        }
+    };
+    _ = root.input(0);
+    root.domainReset(50);
+    try failed.check();
+    for ([_]struct { []const u8, bool, i32 }{
+        .{ &domain.link_builtin, true, 0 },
+        .{ &domain.link_user, false, 1 },
+        .{ &domain.link_failing, false, 0 },
+    }, 0..) |added, k| {
+        if (k == 1) {
+            _ = root.input(0);
+            _ = root.domainChild(0);
+            try failed.check();
+        }
+
+        _ = root.domainAdd(try staging.call(added[0]), @intCast(added[0].len), added[1], added[2]);
+        try failed.check();
+    }
+
+    const names = try staging.call("A");
+    root.domainFound(1, 0, names, 0, names, 1, 0, true);
+    try failed.check();
+    _ = domainFind(0, names, 0, names, 1, 52, 1);
+    try failed.check();
+    for ([_]*const fn () callconv(.c) usize{ domainSummary, domainBuiltins, root.domainUsage }) |dump| {
+        _ = root.input(0);
+        _ = dump();
+        try failed.check();
+    }
+
+    _ = root.input(0);
+    _ = domainTraits(0);
+    try failed.check();
+    _ = root.input(0);
+    _ = domainSlotTypes(1, 0);
+    try failed.check();
+    _ = root.input(0);
+    _ = domainResolve(0);
+    try failed.check();
+    _ = root.input(0);
+    _ = root.domainLinked(-1);
+    try failed.check();
+    _ = root.input(0);
+    _ = root.domainWantsCompact(0);
+    try failed.check();
+    _ = root.input(0);
+    root.domainEvict(1);
+    _ = root.domainRevive(1, false);
+    _ = root.domainState(1);
+    _ = root.domainParent(1);
+    root.domainDrop(1);
+    try failed.check();
+    _ = root.domainRestore(0, try staging.call(&domain.link_user), domain.link_user.len);
+    try failed.check();
 }
 
 test "the exports, staging to handing out, may run out of memory anywhere and keep nothing" {
@@ -259,4 +373,5 @@ test {
     _ = root;
     _ = avm1;
     _ = abc;
+    _ = domain;
 }

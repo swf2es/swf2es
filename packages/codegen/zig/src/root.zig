@@ -20,6 +20,7 @@ const Allocator = std.mem.Allocator;
 const memory = @import("memory.zig");
 const output = @import("output.zig");
 const avm1 = @import("avm1/compile.zig");
+const avm2 = @import("compile.zig");
 const units = @import("avm1/emit/units.zig");
 
 pub const panic = if (builtin.cpu.arch.isWasm()) @import("panic.zig") else std.debug.FullPanic(std.debug.defaultPanic);
@@ -185,6 +186,69 @@ pub export fn actionsUnitLimits() usize {
     return @intFromPtr(&avm1.unit_limits);
 }
 
+// The AVM2 compiler (compile.zig), as assembly/compile.ts exports it. A
+// call that fails hands out nothing, and its result is not read.
+
+/// `result`, or what a failed call returns: codegenError() says why.
+fn orFailed(comptime T: type, result: Allocator.Error!T) T {
+    return result catch |err| {
+        _ = fail(err);
+        return std.mem.zeroes(T);
+    };
+}
+
+pub export fn domainReset(apiVersion: i32) void {
+    orFailed(void, avm2.domainReset(apiVersion));
+}
+
+pub export fn domainAdd(bytes: [*]const u8, len: u32, is_builtin: bool, appDomain: i32) i32 {
+    return orFailed(i32, avm2.domainAdd(staged(u8, bytes, len), is_builtin, appDomain));
+}
+
+pub export fn domainChild(parent: i32) i32 {
+    return orFailed(i32, avm2.domainChild(parent));
+}
+
+pub export fn domainDrop(appDomain: i32) void {
+    orFailed(void, avm2.domainDrop(appDomain));
+}
+
+pub export fn domainEvict(appDomain: i32) void {
+    orFailed(void, avm2.domainEvict(appDomain));
+}
+
+pub export fn domainState(appDomain: i32) i32 {
+    return orFailed(i32, avm2.domainState(appDomain));
+}
+
+pub export fn domainRestore(index: i32, bytes: [*]const u8, len: u32) i32 {
+    return orFailed(i32, avm2.domainRestore(index, staged(u8, bytes, len)));
+}
+
+pub export fn domainRevive(appDomain: i32, stepped: bool) i32 {
+    return orFailed(i32, avm2.domainRevive(appDomain, stepped));
+}
+
+pub export fn domainFound(appDomain: i32, nsKind: i32, uri: [*]const u8, uri_len: u32, name: [*]const u8, name_len: u32, abc: i32, asType: bool) void {
+    orFailed(void, avm2.domainFound(appDomain, nsKind, staged(u8, uri, uri_len), staged(u8, name, name_len), abc, asType));
+}
+
+pub export fn domainLinked(index: i32) usize {
+    return handOut(avm2.domainLinked(gpa(), index) catch |err| return fail(err));
+}
+
+pub export fn domainWantsCompact(want: i32) bool {
+    return orFailed(bool, avm2.domainWantsCompact(want));
+}
+
+pub export fn domainUsage() usize {
+    return handOut(avm2.domainUsage(gpa()) catch |err| return fail(err));
+}
+
+pub export fn domainParent(appDomain: i32) i32 {
+    return orFailed(i32, avm2.domainParent(appDomain));
+}
+
 /// Bytes staged as the wrapper stages them, for the tests.
 fn stage(bytes: []const u8) [*]const u8 {
     const at: [*]u8 = @ptrFromInt(input(@intCast(bytes.len)));
@@ -244,4 +308,27 @@ test {
     _ = @import("avm2/abc/classes.zig");
     _ = @import("avm2/abc/bodies.zig");
     _ = @import("avm2/abc/parse.zig");
+    // Every declaration of the linker's, and of its tables, analysed:
+    // much of it is called only from stage 4's verifier on.
+    inline for (.{
+        @import("avm2/link/table.zig"),
+        @import("avm2/link/namespaces.zig"),
+        @import("avm2/link/domain.zig"),
+        @import("avm2/link/classes.zig"),
+        @import("avm2/link/typenames.zig"),
+        @import("avm2/link/traits.zig"),
+        @import("avm2/link/bindings.zig"),
+        @import("avm2/link/types.zig"),
+        @import("avm2/link/signatures.zig"),
+        @import("avm2/link/lifetime.zig"),
+    }) |file| {
+        std.testing.refAllDecls(file);
+        inline for (comptime std.meta.declarations(file)) |name| {
+            const field = @field(file, name);
+            if (@TypeOf(field) == type and @typeInfo(field) == .@"struct") {
+                std.testing.refAllDecls(field);
+            }
+        }
+    }
+    _ = avm2;
 }

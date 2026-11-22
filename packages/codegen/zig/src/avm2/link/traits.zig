@@ -1,0 +1,750 @@
+// The traits of a domain's classes, scripts and activations: what each
+// defines by name, its slots and their types, and its methods by dispatch id
+// (assembly/avm2/link/traits.ts).
+//
+// As in avmplus, traits are laid out when their ABC loads
+// (Traits::verifyBindings, from AbcParser::parseTraits; bindings.zig): names
+// bind to slots and dispatch ids, inheriting the base's, and overrides must
+// be of the right kind. What needs types waits until the traits are first
+// used (Traits::resolveSignatures; resolve, and signatures.zig): slot types
+// and initial values, method signatures, final methods, override signatures
+// and implemented interfaces.
+//
+// A type is a traits id, or TYPE_Any for *.
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const memory = @import("../../memory.zig");
+const Rows = memory.Rows;
+const C = @import("../abc/constants.zig");
+const domain_ = @import("domain.zig");
+const Domain = domain_.Domain;
+const signatures = @import("signatures.zig");
+const table = @import("table.zig");
+const IdTable = table.IdTable;
+const hashPair = table.hashPair;
+const typenames = @import("typenames.zig");
+
+pub const TRAITS_Instance: u8 = 1;
+pub const TRAITS_Class: u8 = 2;
+pub const TRAITS_Script: u8 = 3;
+pub const TRAITS_Activation: u8 = 4;
+/// The types of void and null, which avmplus also represents as traits.
+pub const TRAITS_Void: u8 = 5;
+pub const TRAITS_Null: u8 = 6;
+/// A catch block's scope, with the exception in its one slot.
+pub const TRAITS_Catch: u8 = 7;
+
+pub const TYPE_Any: i32 = -1;
+
+// Binding kinds, as avmplus' BindingKind; a binding is id << 3 | kind.
+pub const BIND_None: u32 = 0;
+pub const BKIND_Method: u32 = 1;
+pub const BKIND_Var: u32 = 2;
+pub const BKIND_Const: u32 = 3;
+pub const BKIND_Get: u32 = 5;
+pub const BKIND_Set: u32 = 6;
+pub const BKIND_GetSet: u32 = 7;
+// Types the rules below treat specially, as avmplus' BuiltinType.
+pub const BUILTIN_Any: u8 = 0;
+pub const BUILTIN_Object: u8 = 1;
+pub const BUILTIN_Void: u8 = 2;
+pub const BUILTIN_Boolean: u8 = 3;
+pub const BUILTIN_Int: u8 = 4;
+pub const BUILTIN_Uint: u8 = 5;
+pub const BUILTIN_Number: u8 = 6;
+pub const BUILTIN_String: u8 = 7;
+pub const BUILTIN_Namespace: u8 = 8;
+pub const BUILTIN_Other: u8 = 9;
+pub const BUILTIN_Float: u8 = 10;
+
+/// As isCompatibleOverrideKind: whether `over` may implement a binding of kind `base`.
+pub fn compatibleKind(base: u32, over: u32) bool {
+    if (base == BKIND_Method) {
+        return over == BKIND_Method;
+    }
+
+    const accessors: u32 = (1 << BKIND_Get) | (1 << BKIND_Set) | (1 << BKIND_GetSet);
+    return ((accessors >> @intCast(base)) & 1) == 1 and ((accessors >> @intCast(over)) & 1) == 1;
+}
+
+/// The scope chain a method is created in (avmplus' ScopeTypeChain): the
+/// types of its `size` entries, and whether each is a with scope. An `extra`
+/// type other than TYPE_Any constrains the method's first own scope, as for
+/// class methods, whose `this` must be of their class.
+pub const Scope = struct {
+    size: u32 = 0,
+    types: []i32 = &.{},
+    withs: []u8 = &.{},
+    extra: i32 = TYPE_Any,
+
+    /// Where a contested function's creators' chains differ in length (merged):
+    /// how many entries they share, the index of the one entry after them that
+    /// stands for the rest of whichever chain the function runs in; else -1.
+    pack: i32 = -1,
+
+    /// The scope chains `scopes` merged, for a function created in each: the
+    /// entries of the shortest, each the type all have there; where they
+    /// differ, of no type and a with scope, which binds nothing early, so
+    /// that a name found nowhere before it is looked up along whichever
+    /// chain the function runs in rather than in the global object alone.
+    ///
+    /// Chains of different lengths get one more such entry, the pack: what
+    /// the chain the function runs in has past the shortest is put into it
+    /// at run time (Runtime.packScope) and searched there.
+    pub fn merged(gpa: Allocator, scopes: []const *const Scope) Allocator.Error!*Scope {
+        const first = scopes[0];
+        var size = first.size;
+        var extra = first.extra;
+        var uneven = false;
+        for (scopes[1..]) |s| {
+            uneven = uneven or s.size != first.size;
+            size = @min(size, s.size);
+            if (s.extra != first.extra) {
+                extra = TYPE_Any;
+            }
+        }
+
+        const count = size + @intFromBool(uneven);
+        const result = try gpa.create(Scope);
+        result.* = .{ .size = count, .types = try gpa.alloc(i32, count), .withs = try gpa.alloc(u8, count), .extra = extra };
+        for (0..size) |i| {
+            const ty = first.types[i];
+            var withs = first.withs[i];
+            var differs = false;
+            for (scopes[1..]) |s| {
+                if (s.types[i] != ty) {
+                    differs = true;
+                }
+
+                withs |= s.withs[i];
+            }
+
+            result.types[i] = if (differs) TYPE_Any else ty;
+            result.withs[i] = if (differs) 1 else withs;
+        }
+
+        if (uneven) {
+            result.pack = @intCast(size);
+            result.types[size] = TYPE_Any;
+            result.withs[size] = 1;
+        }
+
+        return result;
+    }
+
+    /// As ScopeTypeChain::equals.
+    pub fn equals(self: *const Scope, other: *const Scope) bool {
+        if (self.size != other.size or self.extra != other.extra or self.pack != other.pack) {
+            return false;
+        }
+
+        for (0..self.size) |i| {
+            if (self.types[i] != other.types[i] or self.withs[i] != other.withs[i]) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+};
+
+/// Every scope chain a function was created in, the first first.
+pub const Scopes = std.ArrayList(*Scope);
+
+pub const TraitsTable = struct {
+    kind: Rows(u8) = .{},
+    abc: Rows(u32) = .{},
+    /// The class, script or body index in its ABC.
+    owner: Rows(u32) = .{},
+    /// The traits whose members these inherit, or -1.
+    base: Rows(i32) = .{},
+    /// Namespace id of the protected namespace, or -1.
+    protectedNs: Rows(i32) = .{},
+    isInterface: Rows(u8) = .{},
+    /// Where these traits' traits_info entries are in their ABC's trait tables.
+    first: Rows(u32) = .{},
+    end: Rows(u32) = .{},
+    /// Including the base's.
+    slotCount: Rows(u32) = .{},
+    methodCount: Rows(u32) = .{},
+    /// These traits' own members are members [memberStart, memberEnd).
+    memberStart: Rows(u32) = .{},
+    memberEnd: Rows(u32) = .{},
+    /// The interfaces a class names, as traits: interfaceList[interfaceStart, interfaceEnd).
+    interfaceStart: Rows(u32) = .{},
+    interfaceEnd: Rows(u32) = .{},
+    interfaceList: Rows(u32) = .{},
+    /// For Vector.<T> with T other than int, uint, Number and *, T; else TYPE_Any.
+    param: Rows(i32) = .{},
+    /// The initializer method (global id), or -1.
+    init: Rows(i32) = .{},
+    /// The scope chain the traits' methods are created in, once known.
+    scope: Rows(?*Scope) = .{},
+
+    memberTraits: Rows(u32) = .{},
+    memberNs: Rows(u32) = .{},
+    memberName: Rows(u32) = .{},
+    memberVersion: Rows(u8) = .{},
+    memberBinding: Rows(u32) = .{},
+    members: IdTable,
+
+    // Filled when resolved: each slot's type and each dispatch id's method,
+    // the base's included, at slotType[slotStart ..] and dispatch[dispatchStart ..].
+    resolved: Rows(u8) = .{},
+    slotStart: Rows(u32) = .{},
+    dispatchStart: Rows(u32) = .{},
+    slotType: Rows(i32) = .{},
+    slotSet: Rows(u8) = .{},
+    dispatch: Rows(i32) = .{},
+
+    // Methods by domain-wide id; ABC a's method m is Domain.methodStart[a] + m.
+    methodTraits: Rows(i32) = .{},
+    methodFinal: Rows(u8) = .{},
+    /// Bound by a method, getter or setter trait, not as an initializer.
+    methodVirtual: Rows(u8) = .{},
+    /// Made by newfunction rather than bound to traits: its receiver is Object.
+    methodFunction: Rows(u8) = .{},
+    /// A function that takes extra arguments without a rest array, as avmplus' _ignoreRest.
+    ignoresRest: Rows(u8) = .{},
+    /// A function's scope chain, captured by newfunction: the first one.
+    functionScope: Rows(?*Scope) = .{},
+    /// Every scope chain a function was created in, the first first (see captureFunction).
+    functionScopes: Rows(?*Scopes) = .{},
+    /// Created in scope chains that differ by methods of their own, which
+    /// avmplus verifies as each first runs: the first to run takes the
+    /// function and the others fail. Verified and compiled in functionMerged.
+    functionContested: Rows(u8) = .{},
+    /// A contested function's scope chain: its creators' where they agree, of any type where not.
+    functionMerged: Rows(?*Scope) = .{},
+    signed: Rows(u8) = .{},
+    returnType: Rows(i32) = .{},
+    receiverType: Rows(i32) = .{},
+    /// Parameter types, at paramType[paramStart ..], and how many are optional.
+    paramStart: Rows(u32) = .{},
+    paramCount: Rows(u32) = .{},
+    optionalCount: Rows(u32) = .{},
+    paramType: Rows(i32) = .{},
+
+    // The member name read by readName.
+    nameNs: u32 = 0,
+    nameNsVersion: u8 = 0,
+    nameVersion: u8 = 0,
+    nameId: u32 = 0,
+
+    pub fn empty(gpa: Allocator) Allocator.Error!TraitsTable {
+        return .{ .members = try .init(gpa) };
+    }
+
+    /// New traits over traits_info entries [first, end) of ABC `abc`.
+    pub fn create(self: *TraitsTable, gpa: Allocator, kind: u8, abc: u32, owner: u32, base: i32, protectedNs: i32, first: u32, end: u32) Allocator.Error!u32 {
+        const t = self.kind.len;
+        try self.kind.push(gpa, kind);
+        try self.abc.push(gpa, abc);
+        try self.owner.push(gpa, owner);
+        try self.base.push(gpa, base);
+        try self.protectedNs.push(gpa, protectedNs);
+        try self.isInterface.push(gpa, 0);
+        try self.first.push(gpa, first);
+        try self.end.push(gpa, end);
+        try self.slotCount.push(gpa, 0);
+        try self.methodCount.push(gpa, 0);
+        try self.memberStart.push(gpa, 0);
+        try self.memberEnd.push(gpa, 0);
+        try self.interfaceStart.push(gpa, 0);
+        try self.interfaceEnd.push(gpa, 0);
+        try self.param.push(gpa, TYPE_Any);
+        try self.init.push(gpa, -1);
+        try self.scope.push(gpa, null);
+        try self.resolved.push(gpa, 0);
+        try self.slotStart.push(gpa, 0);
+        try self.dispatchStart.push(gpa, 0);
+        return t;
+    }
+
+    /// Forget traits from `count` on, left by an ABC that failed to link.
+    pub fn truncate(self: *TraitsTable, count: u32) void {
+        self.kind.truncate(count);
+        self.abc.truncate(count);
+        self.owner.truncate(count);
+        self.base.truncate(count);
+        self.protectedNs.truncate(count);
+        self.isInterface.truncate(count);
+        self.first.truncate(count);
+        self.end.truncate(count);
+        self.slotCount.truncate(count);
+        self.methodCount.truncate(count);
+        self.memberStart.truncate(count);
+        self.memberEnd.truncate(count);
+        self.interfaceStart.truncate(count);
+        self.interfaceEnd.truncate(count);
+        self.param.truncate(count);
+        self.init.truncate(count);
+        self.scope.truncate(count);
+        self.resolved.truncate(count);
+        self.slotStart.truncate(count);
+        self.dispatchStart.truncate(count);
+    }
+
+    /// As MethodInfo::declaringScope: the scope chain method m runs in, or null if not yet known.
+    pub fn scopeOf(self: *const TraitsTable, m: u32) ?*Scope {
+        if (self.methodFunction.get(m) != 0) {
+            const merged = if (self.functionContested.get(m) != 0) self.functionMerged.get(m) else null;
+            return merged orelse self.functionScope.get(m);
+        }
+
+        const t = self.methodTraits.get(m);
+        return if (t < 0) null else self.scope.get(@intCast(t));
+    }
+
+    /// Room for `count` more methods, unbound and unsigned.
+    pub fn addMethods(self: *TraitsTable, gpa: Allocator, count: u32) Allocator.Error!void {
+        for (0..count) |_| {
+            try self.methodTraits.push(gpa, -1);
+            try self.methodFinal.push(gpa, 0);
+            try self.methodVirtual.push(gpa, 0);
+            try self.methodFunction.push(gpa, 0);
+            try self.functionScope.push(gpa, null);
+            try self.functionScopes.push(gpa, null);
+            try self.functionContested.push(gpa, 0);
+            try self.functionMerged.push(gpa, null);
+            try self.ignoresRest.push(gpa, 0);
+            try self.signed.push(gpa, 0);
+            try self.returnType.push(gpa, TYPE_Any);
+            try self.receiverType.push(gpa, TYPE_Any);
+            try self.paramStart.push(gpa, 0);
+            try self.paramCount.push(gpa, 0);
+            try self.optionalCount.push(gpa, 0);
+        }
+    }
+
+    pub fn truncateMethods(self: *TraitsTable, count: u32) void {
+        self.methodTraits.truncate(count);
+        self.methodFinal.truncate(count);
+        self.methodVirtual.truncate(count);
+        self.methodFunction.truncate(count);
+        self.functionScope.truncate(count);
+        self.functionScopes.truncate(count);
+        self.functionContested.truncate(count);
+        self.functionMerged.truncate(count);
+        self.ignoresRest.truncate(count);
+        self.signed.truncate(count);
+        self.returnType.truncate(count);
+        self.receiverType.truncate(count);
+        self.paramStart.truncate(count);
+        self.paramCount.truncate(count);
+        self.optionalCount.truncate(count);
+    }
+
+    /// The binding of `name` in `ns` among t's own members, visible at `version`.
+    pub fn own(self: *const TraitsTable, t: u32, ns: u32, name: u32, version: u8) u32 {
+        const hash = hashPair(hashPair(t, ns), name);
+        const members = &self.members;
+        var slot = members.start(hash);
+        while (true) {
+            const id = members.at(slot);
+            if (id < 0) {
+                return BIND_None;
+            }
+
+            const m: u32 = @intCast(id);
+            // The slot's hash first: most slots a probe passes hold another key.
+            if (members.hashAt(slot) == hash and
+                self.memberTraits.get(m) == t and
+                self.memberNs.get(m) == ns and
+                self.memberName.get(m) == name and
+                self.memberVersion.get(m) <= version and
+                // Members of traits that failed to link may remain in the table.
+                m >= self.memberStart.get(t) and
+                m < self.memberEnd.get(t))
+            {
+                return self.memberBinding.get(m);
+            }
+
+            slot = members.next(slot);
+        }
+    }
+
+    /// As TraitsBindings::findBinding: t's own members, then its base's.
+    pub fn find(self: *const TraitsTable, type_: i32, ns: u32, name: u32, version: u8) u32 {
+        var t = type_;
+        while (t >= 0) : (t = self.base.get(@intCast(t))) {
+            const b = self.own(@intCast(t), ns, name, version);
+            if (b != BIND_None) {
+                return b;
+            }
+        }
+
+        return BIND_None;
+    }
+
+    /// As TraitsBindings::findBinding by name alone: the first member named
+    /// `name` in any namespace of t or its bases.
+    pub fn findName(self: *const TraitsTable, type_: i32, name: u32) u32 {
+        var t = type_;
+        while (t >= 0) : (t = self.base.get(@intCast(t))) {
+            const last = self.memberEnd.get(@intCast(t));
+            var m = self.memberStart.get(@intCast(t));
+            while (m < last) : (m += 1) {
+                if (self.memberName.get(m) == name) {
+                    return self.memberBinding.get(m);
+                }
+            }
+        }
+
+        return BIND_None;
+    }
+
+    /// Bind a member of t, replacing one with the same name, namespace and version.
+    pub fn add(self: *TraitsTable, gpa: Allocator, t: u32, ns: u32, name: u32, version: u8, binding: u32) Allocator.Error!void {
+        const hash = hashPair(hashPair(t, ns), name);
+        const start = self.memberStart.get(t);
+        var slot = self.members.start(hash);
+        while (self.members.at(slot) >= 0) : (slot = self.members.next(slot)) {
+            const m: u32 = @intCast(self.members.at(slot));
+            if (m >= start and
+                self.memberTraits.get(m) == t and
+                self.memberNs.get(m) == ns and
+                self.memberName.get(m) == name and
+                self.memberVersion.get(m) == version)
+            {
+                // A member of t, which its own link adds: never one from before the call.
+                self.memberBinding.set(m, binding);
+                return;
+            }
+        }
+
+        const id = self.memberTraits.len;
+        try self.memberTraits.push(gpa, t);
+        try self.memberNs.push(gpa, ns);
+        try self.memberName.push(gpa, name);
+        try self.memberVersion.push(gpa, version);
+        try self.memberBinding.push(gpa, binding);
+        try self.members.insert(gpa, hash, id);
+        self.memberEnd.set(t, id + 1);
+    }
+
+    /// Read the name of trait `i` of ABC `index` into nameNs and nameId: its
+    /// first namespace, whose own version is nameNsVersion, and nameVersion,
+    /// the earliest version of its namespaces in the domain's series.
+    pub fn readName(self: *TraitsTable, dom: *const Domain, index: u32, i: u32) void {
+        const abc = dom.abcs.get(index);
+        const pool = &abc.pool;
+        const versions = dom.abcNsVersion.get(index);
+        var mn = abc.traitName.get(i);
+        if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+            mn = pool.mnA[mn];
+        }
+
+        var ns = pool.mnA[mn];
+        var version = versions[ns];
+        if (pool.mnKind[mn] == C.CONSTANT_Multiname) {
+            const set = ns;
+            const last = pool.nsSetStart[set + 1];
+            ns = domain_.firstMember(pool, set);
+            version = domain_.API_Internal;
+            var m = pool.nsSetStart[set];
+            while (m < last) : (m += 1) {
+                const v = versions[pool.nsSetMembers[m]];
+                if (v < version) {
+                    version = v;
+                }
+            }
+        }
+
+        self.nameNs = dom.abcNs.get(index)[ns];
+        self.nameNsVersion = versions[ns];
+        self.nameVersion = version;
+        self.nameId = dom.abcString.get(index)[pool.mnB[mn]];
+    }
+
+    /// As Traits::allowEarlyBinding: slot ids from the ABC count only if no
+    /// base with slots comes from another ABC, so early slot access cannot
+    /// reach another ABC's private members.
+    pub fn allowEarlyBinding(self: *const TraitsTable, t: u32) bool {
+        const abc = self.abc.get(t);
+        var b = self.base.get(t);
+        while (b >= 0) : (b = self.base.get(@intCast(b))) {
+            if (self.slotCount.get(@intCast(b)) == 0) {
+                break;
+            }
+
+            if (self.abc.get(@intCast(b)) != abc) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// Every interface t implements, its bases' and the interfaces' own included, once each.
+    pub fn allInterfaces(self: *const TraitsTable, scratch: Allocator, t: u32) Allocator.Error![]u32 {
+        var all: std.ArrayList(u32) = .empty;
+        var c: i32 = @intCast(t);
+        while (c >= 0) : (c = self.base.get(@intCast(c))) {
+            try self.addInterfaces(scratch, @intCast(c), &all);
+        }
+
+        return all.items;
+    }
+
+    fn addInterfaces(self: *const TraitsTable, scratch: Allocator, t: u32, all: *std.ArrayList(u32)) Allocator.Error!void {
+        const last = self.interfaceEnd.get(t);
+        var j = self.interfaceStart.get(t);
+        while (j < last) : (j += 1) {
+            const ifc = self.interfaceList.get(j);
+            if (std.mem.indexOfScalar(u32, all.items, ifc) == null) {
+                try all.append(scratch, ifc);
+                try self.addInterfaces(scratch, ifc, all);
+            }
+        }
+    }
+
+    /// As Traits::subtypeof: t is s, extends it, or implements it.
+    pub fn subtypeOf(self: *const TraitsTable, scratch: Allocator, t: u32, s: u32) Allocator.Error!bool {
+        var c: i32 = @intCast(t);
+        while (c >= 0) : (c = self.base.get(@intCast(c))) {
+            if (@as(u32, @intCast(c)) == s) {
+                return true;
+            }
+        }
+
+        return std.mem.indexOfScalar(u32, try self.allInterfaces(scratch, t), s) != null;
+    }
+
+    /// As Traits::resolveSignatures: resolve t's supertypes, then t's slot
+    /// types and initial values, its methods' signatures, and check its
+    /// overrides and interfaces; 0, or the VerifyError.
+    pub fn resolve(self: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
+        if (self.resolved.get(t) != 0) {
+            return 0;
+        }
+
+        const base = self.base.get(t);
+        if (base >= 0) {
+            const err = try self.resolve(dom, @intCast(base));
+            if (err != 0) {
+                return err;
+            }
+        }
+
+        const interfaces = try self.allInterfaces(dom.scratch, t);
+        for (interfaces) |ifc| {
+            const err = try self.resolve(dom, ifc);
+            if (err != 0) {
+                return err;
+            }
+        }
+
+        const err = try signatures.resolveSlotsAndMethods(self, dom, t);
+        if (err != 0) {
+            return err;
+        }
+
+        const initError = signatures.checkInitialValues(self, dom, t);
+        if (initError != 0) {
+            return initError;
+        }
+
+        // Every method's signature, then the initializer's.
+        const dispatch = self.dispatchStart.get(t);
+        for (0..self.methodCount.get(t)) |d| {
+            const m = self.dispatch.get(dispatch + @as(u32, @intCast(d)));
+            if (m >= 0) {
+                const signError = try self.sign(dom, @intCast(m));
+                if (signError != 0) {
+                    return signError;
+                }
+            }
+        }
+
+        const initializer = self.init.get(t);
+        if (initializer >= 0) {
+            const signError = try self.sign(dom, @intCast(initializer));
+            if (signError != 0) {
+                return signError;
+            }
+        }
+
+        var legal = true;
+        if (base >= 0) {
+            const baseDispatch = self.dispatchStart.get(@intCast(base));
+            for (0..self.methodCount.get(@intCast(base))) |d| {
+                const virt = self.dispatch.get(baseDispatch + @as(u32, @intCast(d)));
+                const over = self.dispatch.get(dispatch + @as(u32, @intCast(d)));
+                if (virt >= 0 and virt != over) {
+                    legal = legal and try signatures.checkOverride(self, dom, t, @intCast(virt), over);
+                }
+            }
+        }
+
+        if (legal and self.isInterface.get(t) == 0) {
+            legal = try signatures.checkInterfaces(self, dom, t, interfaces);
+        }
+
+        if (!legal) {
+            return C.kIllegalOverrideError;
+        }
+
+        try dom.put(self.resolved.at(t), 1);
+        try dom.loggedResolve(t);
+        return 0;
+    }
+
+    /// As MethodInfo::resolveSignature: resolve method m's return type (void
+    /// allowed), parameter types (not), receiver, and check its optional
+    /// parameters' default values.
+    pub fn sign(self: *TraitsTable, dom: *Domain, m: u32) Allocator.Error!i32 {
+        if (self.signed.get(m) != 0) {
+            return 0;
+        }
+
+        const index = dom.methodAbc(m);
+        const abc = dom.abcs.get(index);
+        const local = m - dom.methodStart.get(index);
+        const returnType = try typenames.resolveTypeId(dom, index, abc.methodReturnType[local], true);
+        if (returnType < TYPE_Any) {
+            return dom.typeError;
+        }
+
+        const first = abc.methodParamStart[local];
+        const count = abc.methodParamStart[local + 1] - first;
+        const start = self.paramType.len;
+        for (0..count) |p| {
+            const ty = try typenames.resolveTypeId(dom, index, abc.paramTypes.get(first + @as(u32, @intCast(p))), false);
+            if (ty < TYPE_Any) {
+                self.paramType.truncate(start);
+                return dom.typeError;
+            }
+
+            try self.paramType.push(dom.gpa, ty);
+        }
+
+        const optionalFirst = abc.methodOptionalStart[local];
+        const optional = abc.methodOptionalStart[local + 1] - optionalFirst;
+        for (0..optional) |j_| {
+            const j: u32 = @intCast(j_);
+            const ty = self.paramType.get(start + count - optional + j);
+            const err = dom.checkDefault(index, abc.optionalValue.get(optionalFirst + j), abc.optionalKind.get(optionalFirst + j), ty);
+            if (err != 0) {
+                self.paramType.truncate(start);
+                return err;
+            }
+        }
+
+        // As avmplus' unchecked-function hack: a function with only untyped
+        // parameters and result takes them all as optional.
+        var optionalCount = optional;
+        if (self.methodFunction.get(m) != 0 and optional == 0 and returnType == TYPE_Any and count > 0) {
+            var untyped = true;
+            for (0..count) |p| {
+                untyped = untyped and self.paramType.get(start + @as(u32, @intCast(p))) == TYPE_Any;
+            }
+
+            if (untyped) {
+                optionalCount = count;
+                try dom.put(self.ignoresRest.at(m), 1);
+            }
+        }
+
+        if (self.methodFunction.get(m) != 0 and count == 0) {
+            try dom.put(self.ignoresRest.at(m), 1);
+        }
+
+        const owner = self.methodTraits.get(m);
+        try dom.put(self.returnType.at(m), returnType);
+        try dom.put(self.receiverType.at(m), if (owner >= 0) owner else dom.objectType());
+        try dom.put(self.paramStart.at(m), start);
+        try dom.put(self.paramCount.at(m), count);
+        try dom.put(self.optionalCount.at(m), optionalCount);
+        try dom.put(self.signed.at(m), 1);
+        try dom.logged(domain_.LOG_Sign, index, 0, local);
+        return 0;
+    }
+};
+
+/// AssemblyScript's f64 to i32 and u32 conversions, which saturate, NaN to 0.
+fn toI32(x: f64) f64 {
+    if (std.math.isNan(x)) {
+        return 0;
+    }
+
+    return @floatFromInt(@as(i32, @intFromFloat(std.math.clamp(@trunc(x), -2147483648.0, 2147483647.0))));
+}
+
+fn toU32(x: f64) f64 {
+    if (std.math.isNan(x)) {
+        return 0;
+    }
+
+    return @floatFromInt(@as(u32, @intFromFloat(std.math.clamp(@trunc(x), 0.0, 4294967295.0))));
+}
+
+/// As PoolObject::isLegalDefaultValue and getLegalDefaultValue: whether a
+/// default value of constant kind `kind` suits a slot or parameter of
+/// builtin type `bt`; the value itself matters only for int and uint.
+pub fn legalDefault(bt: u8, kind: u8, number: f64) bool {
+    if (bt == BUILTIN_Any) {
+        return true;
+    }
+
+    const isNumber = kind == C.CONSTANT_Int or
+        kind == C.CONSTANT_UInt or
+        kind == C.CONSTANT_Double or
+        kind == C.CONSTANT_Float;
+    const isNamespace = kind == C.CONSTANT_Namespace or
+        kind == C.CONSTANT_PackageNamespace or
+        kind == C.CONSTANT_PackageInternalNs or
+        kind == C.CONSTANT_ProtectedNamespace or
+        kind == C.CONSTANT_ExplicitNamespace or
+        kind == C.CONSTANT_StaticProtectedNs or
+        kind == C.CONSTANT_PrivateNs;
+    return switch (bt) {
+        BUILTIN_Object => true,
+        BUILTIN_Float, BUILTIN_Number => isNumber,
+        BUILTIN_Boolean => kind == C.CONSTANT_True or kind == C.CONSTANT_False,
+        BUILTIN_Int => isNumber and number == toI32(number) and number >= -2147483648 and number <= 2147483647,
+        BUILTIN_Uint => isNumber and number == toU32(number) and number >= 0 and number <= 4294967295,
+        BUILTIN_String => kind == C.CONSTANT_Null or kind == C.CONSTANT_Utf8,
+        BUILTIN_Namespace => kind == C.CONSTANT_Null or isNamespace,
+        else => kind == C.CONSTANT_Null,
+    };
+}
+
+/// Whether `kind` names a constant a default value may be.
+pub fn isDefaultKind(kind: u8) bool {
+    return kind == C.CONSTANT_Int or
+        kind == C.CONSTANT_UInt or
+        kind == C.CONSTANT_Double or
+        kind == C.CONSTANT_Float or
+        kind == C.CONSTANT_Utf8 or
+        kind == C.CONSTANT_True or
+        kind == C.CONSTANT_False or
+        kind == C.CONSTANT_Null or
+        kind == C.CONSTANT_Namespace or
+        kind == C.CONSTANT_PackageNamespace or
+        kind == C.CONSTANT_PackageInternalNs or
+        kind == C.CONSTANT_ProtectedNamespace or
+        kind == C.CONSTANT_ExplicitNamespace or
+        kind == C.CONSTANT_StaticProtectedNs or
+        kind == C.CONSTANT_PrivateNs;
+}
+
+const testing = std.testing;
+
+test "int and uint defaults are numbers they hold exactly" {
+    try testing.expect(legalDefault(BUILTIN_Int, C.CONSTANT_Double, -2147483648));
+    try testing.expect(!legalDefault(BUILTIN_Int, C.CONSTANT_Double, 2147483648));
+    try testing.expect(!legalDefault(BUILTIN_Int, C.CONSTANT_Double, 1.5));
+    try testing.expect(!legalDefault(BUILTIN_Int, C.CONSTANT_Double, std.math.nan(f64)));
+    try testing.expect(legalDefault(BUILTIN_Uint, C.CONSTANT_Double, 4294967295));
+    try testing.expect(!legalDefault(BUILTIN_Uint, C.CONSTANT_Double, -1));
+    try testing.expect(legalDefault(BUILTIN_String, C.CONSTANT_Null, 0));
+    try testing.expect(!legalDefault(BUILTIN_Boolean, C.CONSTANT_Null, 0));
+}
+
+test "an override meets accessors with accessors and methods with methods" {
+    try testing.expect(compatibleKind(BKIND_Method, BKIND_Method));
+    try testing.expect(!compatibleKind(BKIND_Method, BKIND_Get));
+    try testing.expect(compatibleKind(BKIND_Get, BKIND_GetSet));
+    try testing.expect(!compatibleKind(BKIND_Var, BKIND_Var));
+}

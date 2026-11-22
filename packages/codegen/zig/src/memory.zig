@@ -569,6 +569,26 @@ pub fn Rows(comptime T: type) type {
             return &self.directory[doubling + past / full][past % full];
         }
 
+        pub inline fn get(self: *const Self, index: u32) T {
+            return self.at(index).*;
+        }
+
+        pub inline fn set(self: *const Self, index: u32, row: T) void {
+            self.at(index).* = row;
+        }
+
+        /// `row` at the end.
+        pub fn push(self: *Self, gpa: Allocator, row: T) Allocator.Error!void {
+            (try self.addOne(gpa)).* = row;
+        }
+
+        /// The rows from `count` on forgotten, their shelves kept: as
+        /// AssemblyScript's `length = count`, never a longer table.
+        pub fn truncate(self: *Self, count: u32) void {
+            std.debug.assert(count <= self.len);
+            self.len = count;
+        }
+
         /// A new row at the end, undefined.
         pub fn addOne(self: *Self, gpa: Allocator) Allocator.Error!*T {
             const room = if (self.shelves <= doubling) first * ((@as(u32, 1) << @intCast(self.shelves)) - 1) else in_doubling + (self.shelves - doubling) * full;

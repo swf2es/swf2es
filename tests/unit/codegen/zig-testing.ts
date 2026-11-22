@@ -21,6 +21,14 @@ const TESTING_SIGNATURES: Record<string, Signature> = {
   poolDump: ["u8s", "str"],
   abcDump: ["u8s bool=false", "str"],
   opcodeTable: ["", "str"],
+  domainFind: ["i32 str str i32 i32=0", "str"],
+  domainSummary: ["", "str"],
+  domainTraits: ["i32", "str"],
+  domainResolve: ["i32", "i32"],
+  domainBuiltins: ["", "str"],
+  domainSlotTypes: ["i32 i32", "str"],
+  domainTraitsCount: ["", "i32"],
+  unspecifiedReads: ["", "i32"],
 };
 
 /** The test build, or the one that fills freed memory with 0xAA, compiled. */
