@@ -79,6 +79,30 @@ pub const ModuleEmitter = struct {
         return .{ .persist = persist, .methods = methods, .domain = domain, .index = index };
     }
 
+    /// A new emitter in place of this one, as AssemblyScript makes one, but
+    /// with its buffers: each Output reserves a whole run of the call's arena.
+    pub fn renew(self: *ModuleEmitter) void {
+        const kept = self.methods;
+        self.* = .{
+            .persist = self.persist,
+            .domain = self.domain,
+            .index = self.index,
+            .methods = .{
+                .gpa = kept.gpa,
+                .out = kept.out,
+                .map = kept.map,
+                .heldText = kept.heldText,
+                .domain = kept.domain,
+                .index = kept.index,
+                .abc = kept.abc,
+                .data = kept.data,
+            },
+        };
+        self.methods.out.reset();
+        self.methods.heldText.reset();
+        self.methods.map.reset();
+    }
+
     /// The module's text.
     pub fn out(self: *ModuleEmitter) *Output {
         return &self.methods.out;

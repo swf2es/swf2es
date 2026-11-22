@@ -499,7 +499,7 @@ fn emitEach(dom: *Domain, gpa: Allocator, bodies: []const u8, reuse: bool, index
         }
 
         if (!reuse) {
-            emitter = try .init(gpa, gpa, dom, index);
+            emitter.renew();
         }
 
         const global = dom.methodStart.get(index) + method;
