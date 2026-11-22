@@ -270,7 +270,17 @@ and free chunks nothing could use.
   criterion:** a reserve, or the call's run started a gap above the top,
   chosen by measuring the libraries, a large application's ABC and
   `codegen-session.ts`, with the call's runs and the chunks reached
-  reported.
+  reported. *Measured at stage 3* (`memory.reserve`, `memoryTopRuns`):
+  linking's call arena rarely outgrows its first run, so the reserve buys
+  little there. With none, the libraries took 9 runs from the top in 5
+  calls, a large application's 29 ABCs after them 41 in 35, and 400
+  corpus SWFs each linked into a child domain and dropped 2,129 in
+  2,121; with 32 chunks, 6, 36 and 2,123, for 0.5 MiB more memory
+  reached (3.6, 3.6 and 10.1 MiB with none; AssemblyScript's memory 4.0,
+  8.0 and 16.0). `codegen-session.ts` compiles modules, so it waits for
+  stage 5, as does the choice: the reserve is none until the emitters'
+  growing output, which the probe above found taking 13 runs a call, is
+  measured with it.
 - A slack of under one chunk per arena: 1,500 live domains would keep
   up to 24 MB at 16 KB, so the first chunk of a small domain is a
   quarter chunk taken from a shared one. To measure.
@@ -394,7 +404,7 @@ two compilers' dump text on every ABC it has.
 | 0 | Scaffold: `build.zig`, `memory.zig` (page allocator, arenas, segmented lists), `panic.zig`, `root.zig`, `src/zig.ts`, the switch, the parity harness with nothing to compare | new | the harness runs both builds; the wasm imports only `env.abort` (the unit test that checks `codegen.wasm`'s imports) |
 | 1 | AVM1, from `experiment/zig-avm1` rebased on dev: `output`, `dtoa`, `avm1/**` | 3,791 + 308 | `actions*` bytes on the corpus's and the repository's AVM1 SWFs; `tests/fuzz/avm1.ts`; `determinism-avm1.ts`; `avm1*.test.ts`; the dumps (`avm1Dump`, `avm1Check`, `avm1Action`, `avm1Opcodes`) through the parity harness; `atEveryMemorySize` over every entry |
 | 2 | ABC reading: `reader`, `pool` (from `experiment/zig-abc`), `constants`, `opcodes`, `parse`, `methods`, `classes`, `traits`, `bodies`, `abc` | 1,750 | `poolDump`, `abcDump`, `readAll`, `opcodeTable` and the error number on every ABC (libraries, tests, the corpus's DoABC tags) and on 4,000 mutated ones (`tests/fuzz/abc.ts` needs `domainAdd`, stage 3); `reader`, `pool`, `abc`, `opcodes` tests; `atEveryMemorySize` over the parser and dumps |
-| 3 | Linking: `table`, `namespaces`, `domain`, `classes`, `typenames`, `traits`, `bindings`, `types`, `signatures`, and `lifetime` without the rebuild | 5,500 | `domainSummary`, `domainTraits`, `domainSlotTypes`, `domainResolve`, `domainFind` and link errors, over libraries, Tamarin and the corpus's ABCs added in the player's order; `domain`, `library-versions` tests; the call arena's reserve measured (section 2); a name that is not valid UTF-8 decoded and interned again as AssemblyScript does (section 6); `atEveryMemorySize` over `domainAdd` |
+| 3 | Linking: `table`, `namespaces`, `domain`, `classes`, `typenames`, `traits`, `bindings`, `types`, `signatures`, and `lifetime` without the rebuild | 5,500 | `domainSummary`, `domainTraits`, `domainSlotTypes`, `domainResolve`, `domainFind` and link errors, over libraries, Tamarin and the corpus's ABCs added in the player's order; `domain` tests (`library-versions` compiles the libraries, and waits for stage 6's log exports); the call arena's reserve measured (section 2); a name that is not valid UTF-8 decoded and interned again as AssemblyScript does (section 6); `atEveryMemorySize` over `domainAdd` |
 | 4 | Verifying and the IR: `code`, `verify`, `typing`, `properties`, `targets`, `ir` | 3,800 | `codeDump`, `domainIr`, `domainCheckIr`, `domainVerifyAll` and VerifyError numbers; `code`, `verify`, `typed`, `ir` tests; the ABC fuzz |
 | 5 | Emitting: `method`, `blocks`, `structure`, `handlers`, `instructions`, `objects`, `values`, `refs`, `copies`, `floats`, `memory`, `stack-names`, `sourcemap`, `module` | 9,200 | `domainEmit` per method, then whole modules, source maps and entries; `pnpm determinism`; `emit`, `copies`, `folds`, `float`, `double`, `ascii` tests |
 | 6 | The exports and lifetimes: `compile` (parts, `ModuleEmitter.begin`/`step`, entries, context, keys, log, replay), `lifetime`'s rebuild, save and load | 1,000 + about 700 of #1185 | `tests/fuzz/domains.ts` on both; `keys`, `wasm` tests; everything in section 5 through `createCodegen`; recovery from a panic by the journal (section 7), tested with `testingPanic` and `testingOverflow` mid-load |
@@ -557,9 +567,20 @@ For AVM2, from reading `assembly/`:
   encode again there too: `assembly/avm2/link/domain.ts` (about line
   600) decodes one name and interns `_${text}`, so invalid UTF-8 is
   normalised per piece (a name ending in a lone 0xC3 becomes `_`). Stage
-  3, which ports it, has a test of a name that is not valid UTF-8 there,
-  and a search of `assembly/` for every other `decodeUnsafe` whose
-  string goes back into bytes.
+  3, which ports it, has a test of a name that is not valid UTF-8 there
+  (`Domain.underscoredName`, through `output.writeDecoded`). The search
+  of `assembly/` for every other `decodeUnsafe` whose string goes back
+  into bytes found, for stage 5: `emit/stack-names.ts` (about lines 72,
+  95 and 101: a method's and a class's name as shown, where `text.length`
+  is the decoded string's, so a name of only a cut-short sequence shows as
+  `<anonymous>`) and `emit/refs.ts` (about lines 228 and 234,
+  `qualified`, whose `uriText.length` is the decoded URI's). Each must
+  decode with `writeDecoded`, and test emptiness after decoding, not on
+  the bytes. `avm1/emit/module.ts` (about line 301) keys units by their
+  decoded text, but that text is the emitter's own ASCII, so bytes
+  compare alike. The rest (`compile.ts`, `avm1/compile.ts`, the
+  `testing/` dumps) decode a whole buffer to hand it out, which the
+  wrapper's `fromUtf8` does.
 - **Text in the emitters.** `Output.text` writes the low byte of each
   UTF-16 unit; the emitters' own text is ASCII. Some 370 lines build a
   name or a snippet as a template string first. Writing those straight
@@ -702,6 +723,61 @@ Stage 2 (the ABC reader and parser) adds nothing to `codegen-zig.wasm`
 yet, since no release export calls the parser before stage 3's
 `domainAdd`; the test build grew from 141,874 to 189,140 bytes with the
 parser and its four dumps.
+
+Stage 3 (linking, `avm2/link/`): `codegen-zig.wasm` 207,957 bytes
+ReleaseSafe, the parser now reached through `domainAdd`; the test build
+325 KB. The libraries link in about the time AssemblyScript's take
+(6 to 8 ms for builtin and playerglobal, warm). As built:
+
+- *All or nothing.* A call that changes the domain runs inside a
+  `Change`: the domain's struct is copied first (every table's length
+  and shelves, every id table's slices, the scalars), the arena's mark
+  taken, and each write to a row the call did not add goes through
+  `Domain.put`, which keeps the old value in a journal in the call's
+  arena. Running out of memory puts the journal back, then the copy,
+  takes out of each id table the ids from its table's length on
+  (linear probing never moves an earlier id, so emptying later slots
+  changes no lookup of those before), empties getBinding's memo, a
+  cache, and gives the arena back to its mark. Native tests hold every
+  such call to `atEveryMemorySize` and to the failure of each
+  allocation in turn, comparing a digest of the whole domain before
+  and after. This answers, for running out of memory, what section 7's
+  journal of calls answers for a trap.
+- *Where M1 keeps what AssemblyScript's collector freed.* An ABC that
+  does not parse gives its bytes and tables back with the arena's mark.
+  One that parses and then fails to link keeps its bytes, as
+  AssemblyScript does, since the strings it interned point into them,
+  and keeps its parsed tables in the arena too until the domain is
+  reset or, from stage 6, rebuilt. An id table that grows leaves its old
+  slices in the arena. getBinding's memo is emptied in place, keeping
+  its room, rather than made anew as AssemblyScript does, so that each
+  finding the runtime reports leaves nothing behind; a lookup finds the
+  same in either.
+- *Unspecified reads.* AssemblyScript reads the first member of an empty
+  last namespace set past the table's end (a name's first namespace, in
+  five places). Zig's reads namespace 0 there and counts it
+  (`domain.unspecified`, the test build's `unspecifiedReads`), and the
+  parity harness compares such a case as unspecified. None has occurred
+  in the corpus, the oracle's ABCs or the mutated ones.
+- *What waits.* `domainCompact`, `domainRebuild` and the rest of the
+  rebuild, saving and loading are stage 6; until then no rebuild ever is,
+  so `domainRevive` never needs one. `domainWantsCompact` and the memory
+  in `domainUsage` are Zig's own, not compared; its live and dead weights
+  count rows alike and are.
+- *Parity.* On the test builds, every ABC added is compared by its
+  error, its traits before and after resolving, the ABCs it sees, its
+  classes' slot types, and the domain's counts, builtins, weights and
+  lookups: the libraries; the tests' ABCs and the link cases; the
+  corpus's 1,000-odd AS3 SWFs and two private ones, each into a child
+  domain then dropped; 8,000 mutated ABCs; the rich and the link ABCs
+  cut and set byte by byte; 150 random lifetimes of application domains;
+  and, where a host keeps them, the 9,884 ABCs ASC compiled for the
+  oracle. Some 1.57 million cases, all the same, the poison build's
+  included. Under `SWF2ES_COMPILER=zig`, `domain.test.ts` passes the 12
+  of its 21 tests that need no module or rebuild, and `tests/fuzz/abc.ts`
+  checks that linking never traps, stopping each accepted ABC where the
+  emitter is not ported yet; `tests/fuzz/domains.ts` compiles modules
+  from its first step and waits for stages 5 and 6.
 
 For stage 5: `Output.init` reserves 64 KB up front, so each `Output` is
 a whole run in the call arena; an emitter made per method or per block
