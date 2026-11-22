@@ -309,6 +309,7 @@ export interface Context3D {
    * Width and height from 32 to MOST_BACK_BUFFER, in the back buffer's pixels. `scale` is
    * those to a CSS pixel where it shows, and to a scissor rectangle's unit: a back buffer
    * configured for best resolution has the stage's contentsScaleFactor, any other 1.
+   * Newly allocated color starts black with initialAlpha (1 by default).
    */
   configure(
     width: number,
@@ -316,6 +317,7 @@ export interface Context3D {
     depth?: boolean,
     antiAlias?: number,
     scale?: number,
+    initialAlpha?: number,
   ): void;
   /** No back buffer, width and height 0, as a size configureBackBuffer refuses leaves AIR's. */
   unconfigure(): void;
