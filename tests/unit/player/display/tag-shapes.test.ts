@@ -139,7 +139,9 @@ test("a shape's paths unread for long are let go of, and read again from its tag
   const swf = readSwf(bytes);
   const tag = swf.tags.find((t) => t.code === 32);
   assert.ok(tag);
-  const eager = shapeLayers(readShape(swf.bytes, tag.code, tag.offset, tag.length, swf.version));
+  const eager = shapeLayers(
+    readShape(swf.bytes, tag.code, tag.offset, tag.length, swf.header.version),
+  );
   assert.deepEqual(plain(layers), eager);
   const fills = layers.flatMap((l) => l.fills);
   const strokes = layers.flatMap((l) => l.strokes);
@@ -232,6 +234,9 @@ test("readGraphicsData, a 9-slice and lines stroked anew read a shape's paths ag
       build: (...args: Parameters<typeof t.lines.build>) => {
         strokes++;
         return t.lines.build(...args);
+      },
+      get unwound() {
+        return t.lines.unwound;
       },
     },
   };
