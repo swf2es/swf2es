@@ -15,6 +15,7 @@ export function configureBackBuffer(
   depth: boolean,
   antiAlias: number,
   scale: number,
+  initialAlpha: number,
 ): void {
   ctx.alive();
   range(32, width - 32, MOST_BACK_BUFFER);
@@ -155,7 +156,7 @@ export function configureBackBuffer(
   ctx.pixels = new Uint8Array(0);
   ctx.topDown = new Uint8Array(0);
   ctx.applyScissor();
-  ctx.clearBackBuffer();
+  ctx.clearBackBuffer(initialAlpha);
 }
 
 /**

@@ -325,8 +325,15 @@ export class WebGLContext3D implements Context3D {
     this.bindFramebuffer(this.gl.FRAMEBUFFER, framebuffer);
   }
 
-  configure(width: number, height: number, depth = false, antiAlias = 0, scale = 1): void {
-    configureBackBuffer(this, width, height, depth, antiAlias, scale);
+  configure(
+    width: number,
+    height: number,
+    depth = false,
+    antiAlias = 0,
+    scale = 1,
+    initialAlpha = 1,
+  ): void {
+    configureBackBuffer(this, width, height, depth, antiAlias, scale, initialAlpha);
   }
 
   unconfigure(): void {
@@ -334,10 +341,10 @@ export class WebGLContext3D implements Context3D {
   }
 
   /** @internal Initialize the new back buffer while keeping the selected texture target. */
-  clearBackBuffer(): void {
+  clearBackBuffer(alpha: number): void {
     this.target(true);
     this.resolveDirty = true;
-    this.clearBuffers(0, 0, 0, 1, 1, 7, 0, this.depthBuffer !== null);
+    this.clearBuffers(0, 0, 0, alpha, 1, 7, 0, this.depthBuffer !== null);
   }
 
   clear(

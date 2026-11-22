@@ -627,7 +627,10 @@ and a single color output. Targets from 4×4 down to 1×1, as a bloom's chain of
 halvings ends in, are cleared, filled and drawn into as AIR does
 (`RenderTargets.as`); a 1×1 probe of partial triangle coverage once differed
 from AIR, so edge rasterization at those sizes is unverified.
-Resizing the back buffer preserves the selected texture and its contents.
+Resizing the back buffer preserves the selected texture and its contents. An initialized
+texture can still read back the last cleared back buffer at its original dimensions. AIR
+reports the requested dimensions immediately and applies them on the next nonempty clear
+of the back buffer. This also holds across several size requests and invalid-size recovery.
 Target depth storage has a separate 64 MiB budget. Full validation/error parity
 and fractional clear-color rounding across GPU drivers remain future work.
 
