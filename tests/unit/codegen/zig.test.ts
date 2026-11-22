@@ -5,10 +5,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { instantiate as instantiateAs } from "../../../packages/codegen/dist/codegen.js";
+import { createCodegen } from "../../../packages/codegen/dist/index.js";
 import { CodegenPanic, fromUtf8, instantiate, toUtf8 } from "../../../packages/codegen/dist/zig.js";
 import { linkAbcs } from "../../parity/link-abc.ts";
 import { richAbc } from "../../parity/rich-abc.ts";
 import { verifyErrorAbcs } from "../../parity/verify-errors.ts";
+import { script } from "./ir-cases.ts";
 import { bindTesting, zigTestingModule } from "./zig-testing.ts";
 
 // From dist/ by name, not by the package's export, which SWF2ES_COMPILER=zig redirects (tests/compiler.ts).
@@ -146,4 +148,31 @@ test("the Zig tests' ABCs are the ones tests/parity builds", async () => {
   assert.deepEqual(await zigBytes("domain.zig", "link_wide"), [...wide]);
   assert.deepEqual(await zigBytes("domain.zig", "link_created"), [...created]);
   assert.deepEqual(await zigBytes("domain.zig", "link_contested"), [...verifyErrorAbcs()[2][1]]);
+});
+
+test("a load that panics Zig's compiler is rejected, and the domain goes on in a new instance", async () => {
+  // The test build panics on these two ABCs (root.zig's domainAdd): a
+  // safety check, and the stack overflowing.
+  const panic = new TextEncoder().encode("\0panic");
+  const overflow = new TextEncoder().encode("\0overflow");
+  const codegen = await createCodegen(await zigTestingModule(false));
+  // The spare instance a recovery replays into is made as the compiler is.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  codegen.reset();
+  const main = codegen.childDomain(0);
+  assert.equal(codegen.add(script([0x24, 7, 0x24, 5, 0xa0, 0x48]), false, main), 0);
+  const first = codegen.compileModuleLogged(["a"], 0);
+  const context = codegen.context(0);
+  const revision = codegen.revision();
+  for (const bytes of [panic, overflow]) {
+    assert.equal(codegen.add(bytes, false, main), 1107);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The domain as it was: the module, its context and the log alike.
+    assert.deepEqual(codegen.context(0), context);
+    assert.equal(codegen.revision(), revision);
+    assert.equal(codegen.compileModule(["a"], 0), first.module);
+  }
+
+  assert.equal(codegen.add(script([0x24, 9, 0x48]), false, main), 0);
+  assert.equal(codegen.compileModule(["a", "b"], 1).length > 0, true);
 });

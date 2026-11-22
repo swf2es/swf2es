@@ -18,6 +18,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const memory = @import("memory.zig");
+const options = @import("options");
 const output = @import("output.zig");
 const avm1 = @import("avm1/compile.zig");
 const avm2 = @import("compile.zig");
@@ -203,6 +204,18 @@ pub export fn domainReset(apiVersion: i32) void {
 }
 
 pub export fn domainAdd(bytes: [*]const u8, len: u32, is_builtin: bool, appDomain: i32) i32 {
+    // For the wrapper's tests of recovery: a load that panics, or traps.
+    if (options.checks) {
+        const abc = staged(u8, bytes, len);
+        if (std.mem.eql(u8, abc, "\x00panic")) {
+            @panic("a panic for the tests");
+        }
+
+        if (std.mem.eql(u8, abc, "\x00overflow")) {
+            _ = overflow(0);
+        }
+    }
+
     return orFailed(i32, avm2.domainAdd(staged(u8, bytes, len), is_builtin, appDomain));
 }
 
@@ -448,4 +461,12 @@ test {
         }
     }
     _ = avm2;
+}
+
+/// Recursion until the stack overflows, a trap that is not a panic, for the wrapper's tests.
+fn overflow(depth: u32) u32 {
+    var frame: [4096]u8 = undefined;
+    frame[depth % frame.len] = @truncate(depth);
+    std.mem.doNotOptimizeAway(&frame);
+    return @call(.never_inline, overflow, .{depth + 1}) +% frame[(depth * 7) % frame.len];
 }
