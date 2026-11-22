@@ -221,12 +221,28 @@ fn throughExports(_: std.mem.Allocator, p: *memory.Pages) !void {
     _ = root.input(0);
     _ = avm1Opcodes();
     try failed.check();
-    s = try stage.call(size);
-    _ = poolDump(@ptrFromInt(s.swf), len);
-    try failed.check();
-    s = try stage.call(size);
-    _ = abcDump(@ptrFromInt(s.swf), len, true);
-    try failed.check();
+    const rich = &abc.rich_abc;
+    for ([_]bool{ false, true }) |is_builtin| {
+        var room = root.input(rich.len);
+        if (room == 0) {
+            return error.OutOfMemory;
+        }
+
+        var at: usize = 0;
+        _ = put(room, &at, rich);
+        _ = poolDump(@ptrFromInt(room), rich.len);
+        try failed.check();
+        room = root.input(rich.len);
+        if (room == 0) {
+            return error.OutOfMemory;
+        }
+
+        at = 0;
+        _ = put(room, &at, rich);
+        _ = abcDump(@ptrFromInt(room), rich.len, is_builtin);
+        try failed.check();
+    }
+
     s = try stage.call(size);
     _ = readAll(@ptrFromInt(s.swf), len, @ptrFromInt(s.swf), len);
     try failed.check();
