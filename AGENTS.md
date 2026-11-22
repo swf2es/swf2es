@@ -242,7 +242,7 @@ of its own.
   method's output never depends on what was compiled before it.
   `codegen.wasm` may import only `env.abort`; a unit test enforces this.
 - **Package boundaries.** `native` and `context3d` depend on nothing, `format` on `native`,
-  `render` on `context3d`, `codegen` and `runtime` on `format`, `cli` on `format`, `codegen`,
+  `render` on `context3d`, `codegen` on `format`, `runtime` on `format` and `native`, `cli` on `format`, `codegen`,
   `runtime` and `player` (its libraries alone), `player` on `format`, `codegen`, `runtime`,
   `context3d`, `native` and `render`, `player-hosts` on `player`, `web` on
   `codegen`, `format`, `player` and `player-hosts`, and `swf2es`, the browser build,

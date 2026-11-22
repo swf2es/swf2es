@@ -108,10 +108,10 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `native`  | the WebAssembly modules, each a sub-path with its own binary: `compress` (zlib and LZMA), `mp3` (minimp3), `audio` (ADPCM and Nellymoser, in Zig), `render` (fills with libtess2, and lyon for densely crossing ones, lines and BitmapData's CPU kernels) and `atf` (Stage3D's ATF textures, their JPEG XR images by jxrlib), C and Zig built by one Zig project | — |
+| `native`  | the WebAssembly modules, each a sub-path with its own binary: `regexp` (Tamarin PCRE), `compress` (zlib and LZMA), `mp3` (minimp3), `audio` (ADPCM and Nellymoser, in Zig), `render` (fills with libtess2, and lyon for densely crossing ones, lines and BitmapData's CPU kernels) and `atf` (Stage3D's ATF textures, their JPEG XR images by jxrlib), built by one Zig project | — |
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | native |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
-| `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
+| `runtime` | AS3 and AVM1 language semantics called by generated code        | format, native            |
 | `context3d` | Stage3D's renderer contracts, AGAL translation and optional WebGL2 backend; the WebGL 2 device layer it shares with `render` | — |
 | `render`  | the renderer ([renderer.md](../renderer.md)): scene list, planner and WebGL 2 backend | context3d |
 | `player`  | display list, timeline, playerglobal, and the view that drives `render` | format, codegen, context3d, native, render, runtime |

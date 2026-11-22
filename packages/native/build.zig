@@ -25,6 +25,7 @@ pub fn build(b: *std.Build) void {
     // Wasm SIMD, which every engine the player runs on has, for the bitmap kernels.
     render(b, wasm(b, &.{ .bulk_memory, .simd128 }), optimize, include);
     atf(b, wasm(b, &.{.bulk_memory}));
+    regexp(b, wasm(b, &.{.bulk_memory}), include);
 }
 
 fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.ResolvedTarget {
@@ -328,6 +329,38 @@ fn atf(b: *std.Build, target: std.Build.ResolvedTarget) void {
     const module = b.addExecutable(.{ .name = "atf", .root_module = root });
     module.entry = .disabled;
     module.stack_size = 256 * 1024;
+    module.max_memory = 256 * 1024 * 1024;
+    b.installArtifact(module);
+}
+
+/// Tamarin's PCRE has its own rules for resetting captures during backtracking.
+fn regexp(b: *std.Build, target: std.Build.ResolvedTarget, include: std.Build.LazyPath) void {
+    const root = b.createModule(.{
+        .root_source_file = b.path("src/regexp/root.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+        .single_threaded = true,
+        .strip = true,
+    });
+    root.export_symbol_names = &.{ "input", "compilePattern", "names", "match", "result" };
+    const pcre = b.path("../../oracle/avmplus/pcre");
+    root.addIncludePath(pcre);
+    root.addIncludePath(b.path("src/regexp/include"));
+    root.addIncludePath(include);
+    const flags = &.{ "-std=c++11", "-Wno-deprecated-register", "-fno-exceptions", "-fno-rtti", "-DHAVE_CONFIG_H", "-include", "src/regexp/include/avmplus.h" };
+    root.addCSourceFiles(.{
+        .root = pcre,
+        .files = &.{
+            "pcre_chartables.cpp",  "pcre_compile.cpp",    "pcre_config.cpp",   "pcre_exec.cpp",
+            "pcre_fullinfo.cpp",    "pcre_newline.cpp",    "pcre_ord2utf8.cpp", "pcre_tables.cpp",
+            "pcre_try_flipped.cpp", "pcre_valid_utf8.cpp", "pcre_xclass.cpp",
+        },
+        .flags = flags,
+    });
+    root.addCSourceFile(.{ .file = b.path("src/regexp/match.cpp"), .flags = flags });
+    const module = b.addExecutable(.{ .name = "regexp", .root_module = root });
+    module.entry = .disabled;
+    module.stack_size = 1024 * 1024;
     module.max_memory = 256 * 1024 * 1024;
     b.installArtifact(module);
 }

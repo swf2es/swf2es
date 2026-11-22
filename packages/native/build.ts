@@ -50,7 +50,15 @@ interface Binary {
   note: string;
 }
 
+const pcre = join(here, "../../oracle/avmplus/pcre");
 const BINARIES: Binary[] = [
+  {
+    path: "regexp",
+    modules: { binary: "regexp" },
+    imports: [],
+    vendored: [...files(pcre, /\.(cpp|h)$/), join(pcre, "LICENCE")],
+    note: "; Tamarin’s PCRE is under BSD-3-Clause and MPL-2.0",
+  },
   {
     path: "mp3",
     modules: { binary: "mp3" },
@@ -233,6 +241,16 @@ ${readFileSync(LYON_NOTICES, "utf8")}`;
 /** Each vendored library's notice, verbatim, and the derived work's, under the sub-path that compiles it in. */
 function notices(): string {
   const sections: [string, string][] = [
+    ["@swf2es/native/regexp: PCRE", readFileSync(join(pcre, "LICENCE"), "utf8")],
+    [
+      "@swf2es/native/regexp: Tamarin's modifications",
+      `Tamarin's PCRE sources are in the repository's pinned oracle/avmplus/pcre submodule. Its Mozilla-licensed files carry these terms:\n\n${readFileSync(
+        join(pcre, "../LICENSE"),
+        "utf8",
+      )
+        .trimEnd()
+        .replace(/[ \t]+$/gm, "")}`,
+    ],
     ["@swf2es/native/compress: zlib", readFileSync(join(vendor, "zlib/LICENSE"), "utf8")],
     ["@swf2es/native/compress: the LZMA SDK", LZMA_SDK],
     ["@swf2es/native/mp3: minimp3", readFileSync(join(vendor, "minimp3/LICENSE"), "utf8")],
@@ -259,7 +277,7 @@ const shared = [
 function inputDigest(binary: Binary): string {
   const digest = createHash("sha256").update(ZIG_VERSION);
   // A binary's own Zig, and C and libc headers where it has them.
-  const own = files(join(here, "src", binary.path), /\.(zig|c)$/);
+  const own = files(join(here, "src", binary.path), /\.(zig|c|cpp)$/);
   if (existsSync(join(here, "src", binary.path, "include"))) {
     own.push(...files(join(here, "src", binary.path, "include"), /\.h$/));
   }

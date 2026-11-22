@@ -8,5 +8,5 @@
     "stripInternal": true
   },
   "include": ["src"],
-  "references": [{ "path": "../format" }]
+  "references": [{ "path": "../format" }, { "path": "../native" }]
 }

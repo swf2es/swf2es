@@ -9,6 +9,7 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
   and whole-level DXT1/DXT5 texture encoding (`DxtEncoder`).
 - `@swf2es/native/compress`: synchronous zlib and LZMA, and the PNG and
   JPEG encoders' passes over a bitmap.
+- `@swf2es/native/regexp` runs named capture matches with the PCRE sources in the pinned Tamarin submodule.
 - `@swf2es/native/mp3`: synchronous MP3 frame decoding with minimp3.
 - `@swf2es/native/audio`: synchronous ADPCM and Nellymoser decoding, in
   Zig alone.

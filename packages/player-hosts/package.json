@@ -17,7 +17,7 @@
     "url": "git+https://github.com/swf2es/swf2es.git",
     "directory": "packages/player-hosts"
   },
-  "license": "Apache-2.0 AND (Apache-2.0 OR MIT) AND MPL-2.0 AND W3C-20150513 AND Zlib AND LicenseRef-LZMA-SDK-Public-Domain AND CC0-1.0 AND SGI-B-2.0 AND BSD-2-Clause AND MIT",
+  "license": "Apache-2.0 AND (Apache-2.0 OR MIT) AND MPL-2.0 AND W3C-20150513 AND Zlib AND LicenseRef-LZMA-SDK-Public-Domain AND CC0-1.0 AND SGI-B-2.0 AND BSD-2-Clause AND MIT AND BSD-3-Clause",
   "type": "module",
   "exports": {
     "./capture": {
