@@ -1,1 +1,11 @@
-["version", "abcVersion", "avm1", "avm1-generated", "avm1-doubles", "avm1-mutated", "avm1-dumps"]
+[
+  "version",
+  "abcVersion",
+  "avm1",
+  "avm1-generated",
+  "avm1-doubles",
+  "avm1-mutated",
+  "avm1-dumps",
+  "abc-dumps",
+  "abc-mutated"
+]

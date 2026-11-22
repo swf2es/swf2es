@@ -393,7 +393,7 @@ two compilers' dump text on every ABC it has.
 |---|---|---|---|
 | 0 | Scaffold: `build.zig`, `memory.zig` (page allocator, arenas, segmented lists), `panic.zig`, `root.zig`, `src/zig.ts`, the switch, the parity harness with nothing to compare | new | the harness runs both builds; the wasm imports only `env.abort` (the unit test that checks `codegen.wasm`'s imports) |
 | 1 | AVM1, from `experiment/zig-avm1` rebased on dev: `output`, `dtoa`, `avm1/**` | 3,791 + 308 | `actions*` bytes on the corpus's and the repository's AVM1 SWFs; `tests/fuzz/avm1.ts`; `determinism-avm1.ts`; `avm1*.test.ts`; the dumps (`avm1Dump`, `avm1Check`, `avm1Action`, `avm1Opcodes`) through the parity harness; `atEveryMemorySize` over every entry |
-| 2 | ABC reading: `reader`, `pool` (from `experiment/zig-abc`), `constants`, `opcodes`, `parse`, `methods`, `classes`, `traits`, `bodies`, `abc` | 1,750 | `poolDump`, `abcDump`, `readAll` and the error number on every ABC and on `tests/fuzz/abc.ts`'s malformed ones; `reader`, `pool`, `abc`, `opcodes` tests |
+| 2 | ABC reading: `reader`, `pool` (from `experiment/zig-abc`), `constants`, `opcodes`, `parse`, `methods`, `classes`, `traits`, `bodies`, `abc` | 1,750 | `poolDump`, `abcDump`, `readAll`, `opcodeTable` and the error number on every ABC (libraries, tests, the corpus's DoABC tags) and on 4,000 mutated ones (`tests/fuzz/abc.ts` needs `domainAdd`, stage 3); `reader`, `pool`, `abc`, `opcodes` tests; `atEveryMemorySize` over the parser and dumps |
 | 3 | Linking: `table`, `namespaces`, `domain`, `classes`, `typenames`, `traits`, `bindings`, `types`, `signatures`, and `lifetime` without the rebuild | 5,500 | `domainSummary`, `domainTraits`, `domainSlotTypes`, `domainResolve`, `domainFind` and link errors, over libraries, Tamarin and the corpus's ABCs added in the player's order; `domain`, `library-versions` tests; the call arena's reserve measured (section 2); a name that is not valid UTF-8 decoded and interned again as AssemblyScript does (section 6); `atEveryMemorySize` over `domainAdd` |
 | 4 | Verifying and the IR: `code`, `verify`, `typing`, `properties`, `targets`, `ir` | 3,800 | `codeDump`, `domainIr`, `domainCheckIr`, `domainVerifyAll` and VerifyError numbers; `code`, `verify`, `typed`, `ir` tests; the ABC fuzz |
 | 5 | Emitting: `method`, `blocks`, `structure`, `handlers`, `instructions`, `objects`, `values`, `refs`, `copies`, `floats`, `memory`, `stack-names`, `sourcemap`, `module` | 9,200 | `domainEmit` per method, then whole modules, source maps and entries; `pnpm determinism`; `emit`, `copies`, `folds`, `float`, `double`, `ascii` tests |
@@ -697,6 +697,25 @@ every block from the held SWF in one call, 248; every unit from it, 248.
 The test-only emitEach with a fresh emitter a block reaches 220 alone.
 One AVM1 unit test (`avm1-emit.test.ts`'s lazy blocks) reads
 `Codegen.usage()`, which waits for stage 3's `domainUsage`.
+
+Stage 2 (the ABC reader and parser) adds nothing to `codegen-zig.wasm`
+yet, since no release export calls the parser before stage 3's
+`domainAdd`; the test build grew from 141,874 to 189,140 bytes with the
+parser and its four dumps.
+
+**Output and `std.Io.Writer` (measured at stage 2).** In the names build,
+the standalone writer and `std.fmt` functions are 3,875 of 106,184 code
+bytes (3.6%); the rest of `print` is inlined into its callers
+(`BlockEmitter.writeRegion`, which inlines every action's writer, is
+21,695). That bounds what a switch saves in AVM1 at a few kilobytes, too
+little to decide on size alone. The case for writing `Output` directly is
+the translation: AssemblyScript's emitters call `out.text`, `out.uint`,
+`out.hex`, `out.double` and `out.string`, and an `Output` with those
+methods lets stage 5 translate its 9,200 lines call for call, where
+`print` format strings would turn some 370 template strings into new
+code to review. Recommended: give `output.zig` AssemblyScript's methods
+before stage 5 starts, keep `writer()` for AVM1 until its idiomatic pass,
+and measure size and time on the first emitter file both ways.
 
 Measure, at the end of stages 1, 2 and 5 and before the swap, for Safe,
 Fast and Small: bytes raw and gzipped, compile time (the libraries,
