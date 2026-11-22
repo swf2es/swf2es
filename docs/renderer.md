@@ -266,15 +266,43 @@ whose entries go once unused for their idle frames:
   and cannot add to them. A
   geometry drawn anew each frame, as a script's drawing redrawn every
   frame is, goes whole before then: copying the indices of 1,600 such
-  geometries a frame (`bench.ts --redraw 800`) took a millisecond. One
-  small enough to merge (below) keeps its arrays: a moving scene makes its
-  runs anew every frame or few, and staging them needs them. Copying each
-  such geometry's vertices from the atlas on the GPU instead, a copy for
-  each, made a frame of `--timelines 400` some 6,400 copies and the GL
+  geometries a frame (`bench.ts --redraw 800`) took a millisecond.
+
+  One small enough to merge (below) keeps its arrays: a moving scene makes
+  its runs anew every frame or few, and staging them needs them. Copying
+  each such geometry's vertices from the atlas on the GPU instead, a copy
+  for each, made a frame of `--timelines 400` some 6,400 copies and the GL
   wait nearly twice as long (0.1.35); and letting a still scene's go and
   tessellating them again when its runs change, or when the stream is
-  made anew, stalled a frame for each such change. A geometry whose owner
-  changes its arrays in place, a 3D object's quad, is added to be kept
+  made anew, stalled a frame for each such change.
+
+  Only a short-lived one, whose owner lets it go within fewer idle frames
+  than `IDLE_FRAMES` (text's glyph quads, after 8), goes when it has been
+  drawn once (`Place.batch.draws`, counted as the runs gather it, an entry
+  once a frame), and no longer merges. A text changed every frame makes
+  new quads each frame, and keeping their arrays till they went idle
+  (0.1.36) let them outlive two of V8's young collections, so that the old
+  generation's sweeps of their many buffers stalled frames by up to
+  100 ms (`players.ts drawing`, text-800). A still label is drawn again
+  and keeps them. The batch a geometry merged by (`Place.batch`) lets go
+  of the arrays as it is let go of: one let go of in the old generation,
+  where V8 can come to allocate batches once a still scene's have lived
+  long (it pretenures what mostly survives), held its arrays through
+  every young collection till the next full one, which alone kept
+  text-800's frames stalling after its still scenes.
+
+  Letting go of every geometry drawn once, whatever its owner, would have
+  freed a large application's art shown for a frame (`--drawn-once 27000
+  --per-frame 45`, 68.6 MB of arrays to 3.0), but nothing in a geometry's
+  first frames tells that from a stroke a timeline played by a few
+  instances makes at a scale, drawn for a frame and again a loop later:
+  once let go of, it never merged again, and with it its whole run
+  (`--timelines 20 --apart`: GL wait 0.9 to 4.0 ms on SwiftShader). So a
+  shape's geometry drawn once keeps its arrays till it goes idle, and that
+  memory stays; keeping the CPU copy in a mirror of the atlas's pages
+  instead of in each geometry's arrays would free it without the cliff.
+
+  A geometry whose owner changes its arrays in place, a 3D object's quad, is added to be kept
   (`add`'s `keep`). A geometry let go of leaves holes, kept sorted
   and merged with their neighbours (`webgl/free-ranges.ts`); what is added
   goes at the top while it fits, so that a frame's additions lie in a row
