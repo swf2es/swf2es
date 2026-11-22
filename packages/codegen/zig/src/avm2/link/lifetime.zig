@@ -328,6 +328,14 @@ fn vacate(dom: *Domain, domain: u32) Allocator.Error!void {
 
 const no_bytes = [_]u8{};
 
+/// A new Domain's application domains, its root, taken out for another's.
+fn truncateDomains(dom: *Domain) void {
+    dom.domainParent.truncate(0);
+    dom.domainDepth.truncate(0);
+    dom.domainState.truncate(0);
+    dom.domainEvicted.truncate(0);
+}
+
 /// The domain built again from its live ABCs and its log (lifetime.ts
 /// tells how, and why a part at a time): step until it returns true, with
 /// nothing else changing the domain or decoding in between, each step in a
@@ -350,7 +358,9 @@ pub const Rebuild = struct {
         fresh.apiVersion = dom.apiVersion;
         fresh.generation = dom.generation + 1;
         // AssemblyScript's shares these arrays with the old domain, whose
-        // tree a rebuild under way never sees grow (leaveRebuild).
+        // tree a rebuild under way never sees grow (leaveRebuild); the new
+        // domain's own root goes for the old one's.
+        truncateDomains(fresh);
         for (0..dom.domainParent.len) |d_| {
             const d: u32 = @intCast(d_);
             try fresh.domainParent.push(gpa, dom.domainParent.get(d));
@@ -658,6 +668,8 @@ pub fn loadDomain(loaded: *Loaded, words: []const u8) Allocator.Error!bool {
 
     dom.apiVersion = @truncate(reader.next());
     dom.generation = reader.next();
+    // The saved domains, the root among them, in place of the new domain's.
+    truncateDomains(dom);
     const domains = reader.count(4);
     for (0..domains) |_| {
         try dom.domainParent.push(gpa, @bitCast(reader.next()));

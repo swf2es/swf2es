@@ -198,7 +198,9 @@ pub fn domainRevive(appDomain: i32, stepped: bool) Allocator.Error!i32 {
     }
 
     const bottom: u32 = @intCast(appDomain);
-    const top = if (bottom < dom.domainState.len) lifetime.evictedTop(dom, bottom) else bottom;
+    // The root has no parent: AssemblyScript's read past the table there,
+    // which holds no evicted domain.
+    const top = if (bottom > 0 and bottom < dom.domainState.len) lifetime.evictedTop(dom, bottom) else bottom;
     const revived = lifetime.revive(dom, bottom);
     if (revived <= 0) {
         return revived;

@@ -42,7 +42,8 @@ test("createCodegen tells the compilers apart, whose identities differ so caches
   assert.deepEqual(zig.abcVersion(Uint8Array.of(16, 0, 46, 0)), { major: 46, minor: 16 });
   zig.reset();
   assert.equal(zig.add(new Uint8Array(0)), 1107);
-  assert.equal(zig.revision(), as.revision());
+  // The wrapper counts the reset; the domain has no ABC, log entry or rebuild.
+  assert.equal(zig.revision(), "1 0 0 0");
 });
 
 test("wrapper and wasm agree on the compiler version", async () => {
