@@ -40,7 +40,7 @@ function shellUtf8(value: string): Uint8Array {
 
 interface Exports {
   memory: WebAssembly.Memory;
-  input(size: number): number;
+  input(size: number, newPattern: number): number;
   compilePattern(flags: number): number;
   names(count: number, stride: number): number;
   match(size: number, start: number): number;
@@ -74,10 +74,10 @@ class Matcher {
     track(this.x.memory);
   }
 
-  private input(value: string): void {
+  private input(value: string, newPattern = false): void {
     const encoded = shellUtf8(value);
     this.size = encoded.length;
-    this.text = this.x.input(this.size);
+    this.text = this.x.input(this.size, +newPattern);
     new Uint8Array(this.x.memory.buffer, this.text, this.size).set(encoded);
   }
 
@@ -87,7 +87,7 @@ class Matcher {
     this.subject = undefined;
     this.groups = [];
     this.changesFirst = false;
-    this.input(pattern);
+    this.input(pattern, true);
     this.valid = !!this.x.compilePattern(flags);
     // Both compilation and Flash's scan for the (?P< spelling stop at NUL.
     const nul = pattern.indexOf("\0");

@@ -8,13 +8,10 @@ const std = @import("std");
 
 pub const panic = std.debug.no_panic;
 
-const page = 65536;
+const arena = @import("arena");
 
 // Statuses, as jxr.c's; a call returns one.
 const DONE = 0;
-
-var base: usize = 0;
-var top: usize = 0;
 
 var result: usize = 0;
 var result_width: u32 = 0;
@@ -26,47 +23,17 @@ extern fn swf2es_jxr_encode_begin(width: c_uint, height: c_uint, alpha: c_int, q
 extern fn swf2es_jxr_encode_rows(pixels: [*]const u8, lines: c_uint) c_int;
 extern fn swf2es_jxr_encode_end(out: *[*]u8, size: *usize) c_int;
 
-/// Memory up to `end`, grown if need be.
-fn reserve(end: u64) bool {
-    const have: u64 = @as(u64, @wasmMemorySize(0)) * page;
-    if (end <= have) {
-        return true;
-    }
-
-    if (end > 0xffff_0000) {
-        return false;
-    }
-
-    return @wasmMemoryGrow(0, @intCast((end - have + page - 1) / page)) >= 0;
-}
-
 /// Forget everything allocated; memory is kept for the next call.
 export fn reset() void {
-    // The arena starts where memory first ended, past the data and the stack.
-    if (base == 0) {
-        base = @wasmMemorySize(0) * page;
-    }
-
-    top = base;
+    arena.reset();
     result = 0;
     result_width = 0;
     result_height = 0;
     result_size = 0;
 }
 
-/// `n` bytes, 16-aligned, growing memory as needed; 0 when it cannot.
 export fn alloc(n: usize) usize {
-    if (base == 0) {
-        reset();
-    }
-
-    const start = std.mem.alignForward(u64, top, 16);
-    if (!reserve(start +| n)) {
-        return 0;
-    }
-
-    top = @intCast(start + n);
-    return @intCast(start);
+    return arena.alloc(n);
 }
 
 // Each block of jxrlib's carries its size 16 bytes before it, for realloc.
@@ -95,8 +62,8 @@ export fn realloc(old: ?*anyopaque, n: usize) ?*anyopaque {
     if (old) |o| {
         const at = @intFromPtr(o);
         const size = @as(*usize, @ptrFromInt(at - header)).*;
-        if (at + size == top and reserve(@as(u64, at) + n)) {
-            top = at + n;
+        if (at + size == arena.top and arena.reserve(@as(u64, at) + n)) {
+            arena.top = at + n;
             @as(*usize, @ptrFromInt(at - header)).* = n;
             return o;
         }

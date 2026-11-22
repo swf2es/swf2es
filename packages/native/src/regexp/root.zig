@@ -1,22 +1,33 @@
-// PCRE frees its heap-backed match frames as it backtracks. Keep their
-// allocation sizes for Zig's allocator; a failed allocation aborts this
-// instance, including compilation paths which assume allocation succeeds.
-const std = @import("std");
-const allocator = std.heap.wasm_allocator;
-const header = 8;
+const arena = @import("arena");
+
+// PCRE pops heap frames while backtracking. Mark out-of-order frees so that
+// popping the last live block also reclaims the freed blocks directly below it.
+const Block = extern struct { previous: ?*Block, freed: bool };
+var last: ?*Block = null;
+
+export fn resetHeap() void {
+    arena.reset();
+    last = null;
+}
 
 export fn avmplus_pcre_malloc(size: usize) [*]u8 {
-    const bytes = allocator.alignedAlloc(u8, .@"8", std.math.add(usize, size, header) catch @trap()) catch @trap();
-    const length: *usize = @ptrCast(bytes.ptr);
-    length.* = bytes.len;
-    return bytes.ptr + header;
+    const at = arena.alloc(size +| @sizeOf(Block));
+    if (at == 0) @trap(); // Some PCRE paths assume allocation succeeds.
+    const block: *Block = @ptrFromInt(at);
+    block.* = .{ .previous = last, .freed = false };
+    last = block;
+    return @ptrFromInt(at + @sizeOf(Block));
 }
 
 export fn avmplus_pcre_free(ptr: ?[*]u8) void {
     const data = ptr orelse return;
-    const bytes: [*]align(8) u8 = @alignCast(data - header);
-    const length: *const usize = @ptrCast(bytes);
-    allocator.free(bytes[0..length.*]);
+    const block: *Block = @ptrFromInt(@intFromPtr(data) - @sizeOf(Block));
+    block.freed = true;
+    while (last) |tail| {
+        if (!tail.freed) break;
+        arena.top = @intFromPtr(tail);
+        last = tail.previous;
+    }
 }
 
 export fn strncmp(a: [*]const u8, b: [*]const u8, n: usize) c_int {
