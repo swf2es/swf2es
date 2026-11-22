@@ -3,6 +3,7 @@ import {
   type Geometries,
   type GeometryData,
   GLYPH_FLOATS,
+  IDLE_FRAMES,
   RELEASE_FRAMES,
   samplesStage,
 } from "../geometry.js";
@@ -101,6 +102,35 @@ function localIndices(source: Uint16Array | Uint32Array, count: number): Uint16A
 }
 
 /**
+ * What merges a small geometry: its arrays while it is its place's (dropBatch), the atlas frame
+ * it was placed on, and how many distinct draws the runs have gathered of it, up to 2, which
+ * decide whether a short-lived one keeps its arrays (settle), with the frame and scene entry of
+ * the last (gathered).
+ */
+export interface Batch {
+  data: GeometryData | null;
+  frame: number;
+  draws: number;
+  drawnAt: number;
+  drawnEntry: number;
+}
+
+/**
+ * A draw of `place`, entry `entry` of atlas frame `frame`'s scene, gathered into a run (Draws):
+ * counted once, however often the entry is gathered, as a mask's is for its push and its pop,
+ * and a frame's whose run table overflowed is again as it draws, up to the 2 that keep a
+ * geometry's arrays past RELEASE_FRAMES (settle).
+ */
+export function gathered(place: Place, frame: number, entry: number): void {
+  const batch = place.batch;
+  if (batch && batch.draws < 2 && (batch.drawnAt !== frame || batch.drawnEntry !== entry)) {
+    batch.draws++;
+    batch.drawnAt = frame;
+    batch.drawnEntry = entry;
+  }
+}
+
+/**
  * `place`'s batch let go of, its arrays first: a batch let go of in the old generation, where V8
  * can come to allocate them once a still scene's have lived long (it pretenures what mostly
  * survives), still holds what it points to through every young collection till the next full
@@ -133,11 +163,10 @@ export interface Place {
   stage: boolean;
   /**
    * Small, unchanged geometries may be copied into a run's streaming buffer from their arrays,
-   * which their registry keeps for one drawn more than once (settle): the frame it was placed
-   * on, and the draws the runs have gathered of it (Draws). Null for one too large to merge,
-   * and for one let go of after a single draw, which then draws from the atlas.
+   * which their registry keeps (settle). Null for one too large to merge, and for a short-lived
+   * one let go of after a single draw, which then draws from the atlas.
    */
-  batch: { data: GeometryData | null; frame: number; draws: number } | null;
+  batch: Batch | null;
   /**
    * Its indices counted from its first vertex: what moving it in the atlas (repack) needs, as
    * WebGL copies an index buffer only as it is. Its geometry's own till it has stood
@@ -153,9 +182,9 @@ export interface Place {
  * own, where the draws find them by their places. Once copied, a geometry
  * keeps only its indices on the CPU (Place.local), counted from its first
  * vertex, and its registry lets go of its arrays (Geometries.release),
- * unless it is small enough to merge and drawn more than once: that one
- * keeps its arrays, which a run's stream stages again whenever moving
- * content makes its runs anew. A geometry
+ * unless it is small enough to merge (settle): that one keeps its arrays,
+ * which a run's stream stages again whenever moving content makes its runs
+ * anew. A geometry
  * let go of leaves holes in its page, which later geometries are placed in
  * once the top is full; a page is packed again only when what is added
  * finds no room, its vertices moved on the GPU and its indices written
@@ -333,7 +362,10 @@ export class GeometryAtlas {
       if (place && data && !data.glyphs && place.vertices === data.positions.length / 2) {
         this.copyVertices(this.pages[place.page], data, place.vertexStart);
         place.stage = samplesStage(data);
-        place.batch = this.batch(data, place.batch?.draws ?? 0);
+        // Its draws carried over: it is the same geometry, changed in place.
+        const draws = place.batch?.draws ?? 0;
+        dropBatch(place);
+        place.batch = this.batch(data, draws);
       } else if (place && data) {
         this.letGo(id);
         geometries.added.push(id);
@@ -447,19 +479,20 @@ export class GeometryAtlas {
    * The geometries placed RELEASE_FRAMES of their registry's ago or more, by its frames, not the
    * atlas', which a BitmapData's draws advance too, and placed still: their arrays let go of
    * (Geometries.release) and their indices copied into arrays of their own, unless they are
-   * small enough to merge and have been drawn more than once, in one frame or over several.
-   * Those keep their arrays, which a run's stream stages again whenever moving content makes its
-   * runs anew: copying such geometries from the page on the GPU instead, a copy for each, made a
-   * frame of moving timelines thousands of copies and ANGLE's GL wait twice as long (0.1.35),
-   * and getting them back by tessellating them again stalls a frame wherever a still run
-   * changes or the stream is made anew. One drawn once, as each text changed every frame or a
-   * shape shown for a frame is, goes, and no longer merges. Keeping the arrays of every
-   * geometry small enough to merge (0.1.36) held such texts' till they went idle, long enough
-   * to outlive two of V8's young collections, and the old generation's sweeps of their many
-   * buffers then stalled frames by up to 100 ms (the players' drawing benchmark, text-800).
-   * Keeping only those a run had staged by then, or those drawn on a later frame, let go of
-   * geometries every sprite of a moving timeline draws for a frame and comes back to later, and
-   * its runs never merged after (bench.ts --timelines 400). Only while the context
+   * small enough to merge. Those keep their arrays, which a run's stream stages again whenever
+   * moving content makes its runs anew: copying such geometries from the page on the GPU
+   * instead, a copy for each, made a frame of moving timelines thousands of copies and ANGLE's
+   * GL wait twice as long (0.1.35), and getting them back by tessellating them again stalls a
+   * frame wherever a still run changes or the stream is made anew. Only one whose owner lets it
+   * go within fewer idle frames than IDLE_FRAMES, as text's glyph quads, and that was drawn once
+   * goes too, and no longer merges: a text changed every frame makes a new one each frame, and
+   * keeping their arrays till they went idle (0.1.36) let them outlive two of V8's young
+   * collections, the old generation's sweeps of their many buffers then stalling frames by up to
+   * 100 ms (the players' drawing benchmark, text-800). No rule of what a geometry did in its
+   * first frames told those from the strokes a timeline played by a few instances makes at a
+   * scale, drawn for a frame and again a loop later: letting go of every geometry drawn once
+   * unmerged such timelines' runs for good (bench.ts --timelines 20 --apart: GL wait 0.9 to
+   * 4.0 ms on SwiftShader). Only while the context
    * is not known to be lost: copies made into a lost one are no copies, and the arrays stay for
    * the restore. In Chrome's window before it flags a loss (webgl/losses.ts), arrays may go
    * after copies that never reached the GPU; the restore's Geometries.lost rebuilds them.
@@ -479,9 +512,10 @@ export class GeometryAtlas {
 
     for (let i = 0; i < k; i++) {
       const place = places[i];
-      // Small enough to merge and drawn more than once (Place.batch): its arrays kept for a run's
-      // stream to stage.
-      const kept = place.batch !== null && place.batch.draws > 1;
+      // Small enough to merge (Place.batch): its arrays kept for a run's stream to stage, unless
+      // it is one of the short-lived kind and was drawn once.
+      const kept =
+        place.batch !== null && (place.batch.draws > 1 || geometries.idleOf(ids[i]) >= IDLE_FRAMES);
       if (this.places[ids[i]] === place && !kept && geometries.get(ids[i])) {
         geometries.release(ids[i]);
         if (geometries.released(ids[i])) {
@@ -828,7 +862,7 @@ export class GeometryAtlas {
 
   private batch(data: GeometryData, draws = 0): Place["batch"] {
     return data.positions.length <= 512 && data.indices.length <= 1024 && !data.depths
-      ? { data, frame: this.frame, draws }
+      ? { data, frame: this.frame, draws, drawnAt: -1, drawnEntry: -1 }
       : null;
   }
 

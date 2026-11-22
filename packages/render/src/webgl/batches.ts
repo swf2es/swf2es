@@ -1,6 +1,6 @@
 import type { GlState } from "@swf2es/context3d/device";
 import type { GeometryData } from "../geometry.js";
-import type { Place } from "./atlas.js";
+import type { Batch, Place } from "./atlas.js";
 import { COLOR_AT, DRAW_AT, MERGED_LINE, MERGED_UNIT, POSITION_AT, TEXEL_AT } from "./programs.js";
 
 /**
@@ -17,8 +17,6 @@ const VERTICES_LEAST = 1 << 14;
 const INDICES_LEAST = 3 << 14;
 /** Frames over which the most used is watched; room four times that is let go of after them. */
 const SHRINK_FRAMES = 240;
-
-type Batch = NonNullable<Place["batch"]>;
 
 /** A run's geometries copied in a row into the stream, where every run of the same geometries finds them. */
 interface Segment {
