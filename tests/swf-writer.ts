@@ -162,8 +162,18 @@ export interface ShapeSpec {
    * round caps and joins, filled with `fill` where it is given.
    */
   lines?: { width: number; color: number; fill?: number | BitmapFill | GradientFillSpec }[];
-  /** Paths, each with the fill it has on its right (fill1) and its line; 1-based, 0 for none. */
-  paths: { fill1: number; fill0?: number; line?: number; commands: PathCommand[] }[];
+  /**
+   * Paths, each with the fill it has on its right (fill1) and its line; 1-based, 0 for none. A
+   * path with `styles` starts a new set of styles, in a style change of its own (DefineShape2
+   * and later), which its own and later paths' indices then name.
+   */
+  paths: {
+    fill1: number;
+    fill0?: number;
+    line?: number;
+    commands: PathCommand[];
+    styles?: { fills: ShapeSpec["fills"]; lines?: ShapeSpec["lines"] };
+  }[];
   /** 1 DefineShape (RGB), 3 DefineShape3 (RGBA), 4 DefineShape4 (RGBA, LINESTYLE2). */
   version?: 1 | 3 | 4;
   /**
@@ -247,9 +257,9 @@ export function shape(spec: ShapeSpec): Uint8Array {
       }
     }
   };
-  const styles = () => {
-    w.align().u8(spec.fills.length);
-    for (const f of spec.fills) {
+  const styles = (fills = spec.fills, lines = spec.lines ?? []) => {
+    w.align().u8(fills.length);
+    for (const f of fills) {
       fillStyle(f);
     }
 
@@ -281,7 +291,13 @@ export function shape(spec: ShapeSpec): Uint8Array {
   const fillBits = sbits(spec.fills.length);
   const lineBits = sbits(lines.length);
   w.ub(4, fillBits).ub(4, lineBits);
-  edges(w, spec.paths, fillBits, lineBits);
+  edges(w, spec.paths, fillBits, lineBits, (next) => {
+    const nextLines = next.lines ?? [];
+    styles(next.fills, nextLines);
+    const bits: [number, number] = [sbits(next.fills.length), sbits(nextLines.length)];
+    w.ub(4, bits[0]).ub(4, bits[1]);
+    return bits;
+  });
   return tag(version === 4 ? 83 : version === 3 ? 32 : 2, w.done());
 }
 
@@ -420,16 +436,24 @@ export function morphShape(spec: MorphShapeSpec): Uint8Array {
  * each path's first move sets its styles, given `fillBits` and `lineBits`
  * (0 and 0 for a morph's end, whose moves set none).
  */
-function edges(
+function edges<S>(
   w: BitWriter,
-  paths: { fill1?: number; fill0?: number; line?: number; commands: PathCommand[] }[],
+  paths: { fill1?: number; fill0?: number; line?: number; commands: PathCommand[]; styles?: S }[],
   fillBits: number,
   lineBits: number,
+  restyle?: (styles: S) => [number, number],
 ): void {
-  const styled = fillBits > 0 || lineBits > 0;
+  let styled = fillBits > 0 || lineBits > 0;
   let x = 0;
   let y = 0;
   for (const path of paths) {
+    if (path.styles && restyle) {
+      // A style change of new styles alone, then the path's own as ever.
+      w.ub(1, 0).ub(5, 16);
+      [fillBits, lineBits] = restyle(path.styles);
+      styled = fillBits > 0 || lineBits > 0;
+    }
+
     for (const [k, cmd] of path.commands.entries()) {
       if ("move" in cmd) {
         const [mx, my] = cmd.move;
