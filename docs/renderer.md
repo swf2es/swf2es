@@ -762,6 +762,9 @@ GPU took its framebuffer binds a frame from 1,300 to 255 (#646) and then
 
 ## Next
 
+The performance work planned, item by item, with how each is measured,
+is in [renderer-plan.md](renderer-plan.md).
+
 - **WebGPU,** behind the same command buffer: a span that stands still
   onto a render bundle.
 - **Spans across layers, masks and text** ([Spans](#spans)), one kind at
