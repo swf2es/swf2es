@@ -55,7 +55,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
     switch (op) {
         ops.OP_pushbyte, ops.OP_pushshort => {
             try em.assign(i, false);
-            try out.int(@bitCast(a));
+            try out.int(@as(i32, @bitCast(a)));
         },
         ops.OP_pushint => {
             try em.assign(i, false);

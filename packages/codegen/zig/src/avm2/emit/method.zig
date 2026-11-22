@@ -635,9 +635,9 @@ pub const MethodEmitter = struct {
         }
     }
 
-    /// Whether instruction i, reading register `read`, only makes its
+    /// Whether instruction i, reading register `r`, only makes its
     /// destination a copy, as flowCopies knows it.
-    pub fn copies_(self: *MethodEmitter, i: u32, read: i32) bool {
+    pub fn copies_(self: *MethodEmitter, i: u32, r: i32) bool {
         const ir = self.ir;
         const stack: i32 = @intCast(ir.localCount + ir.maxScope);
         const dst = ir.dst[i];
@@ -645,8 +645,8 @@ pub const MethodEmitter = struct {
             return false;
         }
 
-        const copy = if (read < @as(i32, @intCast(ir.localCount))) NONE else self.copyOf[@intCast(read)];
-        const from = if (copy == NONE) read else copy;
+        const copy = if (r < @as(i32, @intCast(ir.localCount))) NONE else self.copyOf[@intCast(r)];
+        const from = if (copy == NONE) r else copy;
         if (dst < stack and (from < 0 or from >= stack)) {
             return false;
         }

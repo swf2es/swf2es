@@ -330,6 +330,17 @@ test {
         @import("avm2/abc/properties.zig"),
         @import("avm2/emit/sourcemap.zig"),
         @import("avm2/emit/stack-names.zig"),
+        @import("avm2/emit/method.zig"),
+        @import("avm2/emit/refs.zig"),
+        @import("avm2/emit/values.zig"),
+        @import("avm2/emit/copies.zig"),
+        @import("avm2/emit/floats.zig"),
+        @import("avm2/emit/handlers.zig"),
+        @import("avm2/emit/structure.zig"),
+        @import("avm2/emit/blocks.zig"),
+        @import("avm2/emit/instructions.zig"),
+        @import("avm2/emit/objects.zig"),
+        @import("avm2/emit/memory.zig"),
     }) |file| {
         std.testing.refAllDecls(file);
         inline for (comptime std.meta.declarations(file)) |name| {
