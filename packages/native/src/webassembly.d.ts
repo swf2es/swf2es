@@ -16,6 +16,7 @@ declare namespace WebAssembly {
   var Instance: {
     new (module: Module, imports?: object): Instance;
   };
+  class RuntimeError extends Error {}
   function compile(bytes: ArrayBufferView | ArrayBuffer): Promise<Module>;
 }
 

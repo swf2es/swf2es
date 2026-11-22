@@ -18,7 +18,7 @@
     "url": "git+https://github.com/swf2es/swf2es.git",
     "directory": "packages/native"
   },
-  "license": "Apache-2.0 AND Zlib AND LicenseRef-LZMA-SDK-Public-Domain AND CC0-1.0 AND SGI-B-2.0 AND BSD-2-Clause AND MIT AND W3C-20150513",
+  "license": "Apache-2.0 AND Zlib AND LicenseRef-LZMA-SDK-Public-Domain AND CC0-1.0 AND SGI-B-2.0 AND BSD-2-Clause AND MIT AND W3C-20150513 AND BSD-3-Clause AND MPL-2.0",
   "type": "module",
   "exports": {
     "./atf": {
@@ -40,6 +40,10 @@
     "./mp3": {
       "types": "./dist/mp3/index.d.ts",
       "default": "./dist/mp3/index.js"
+    },
+    "./regexp": {
+      "types": "./dist/regexp/index.d.ts",
+      "default": "./dist/regexp/index.js"
     },
     "./render": {
       "types": "./dist/render/index.d.ts",

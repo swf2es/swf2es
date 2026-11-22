@@ -13,7 +13,7 @@ const allowed: Record<string, string[]> = {
   format: ["native"],
   context3d: [],
   codegen: ["format"],
-  runtime: ["format"],
+  runtime: ["format", "native"],
   render: ["context3d"],
   player: ["codegen", "context3d", "format", "native", "render", "runtime"],
   "player-hosts": ["player"],

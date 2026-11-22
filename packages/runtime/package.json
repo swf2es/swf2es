@@ -41,6 +41,7 @@
     "LICENSE.third-party"
   ],
   "dependencies": {
-    "@swf2es/format": "workspace:*"
+    "@swf2es/format": "workspace:*",
+    "@swf2es/native": "workspace:*"
   }
 }

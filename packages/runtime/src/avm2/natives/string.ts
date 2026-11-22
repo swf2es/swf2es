@@ -4,7 +4,7 @@ import type { Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
 import { lowerCase, upperCase } from "./case.js";
 import { AS3, conversion, type Natives, plain } from "./define.js";
-import { compile, matchArray, replacement as replacementOf } from "./regexp.js";
+import { compile, execMatch, matchArray, replacement as replacementOf } from "./regexp.js";
 
 /** Flash resolves a negative end (start + length) from the string's end. */
 function substr(s: string, start: number, length: number): string {
@@ -133,11 +133,13 @@ export const stringNatives: Natives = {
   "String.String::_search": (rt) => (s: string, pattern: Value) =>
     s.search(pattern?.$re instanceof RegExp ? pattern.$re : compile(rt.toString(pattern), "")),
   "String.String::_match": (rt) => (s: string, pattern: Value) => {
-    const source: string = pattern?.$source ?? rt.toString(pattern);
-    const re: RegExp = pattern?.$re ?? compile(source, "");
+    const regexp = pattern?.$re instanceof RegExp;
+    const source: string = regexp ? pattern.$source : rt.toString(pattern);
+    const extended: boolean = regexp && pattern.$extended;
+    const re: RegExp = regexp ? pattern.$re : compile(source, "");
     if (!re.global) {
-      const m = s.match(re);
-      return m ? matchArray(rt, m, source) : null;
+      const m = execMatch(re, source, extended, s);
+      return m ? matchArray(rt, m) : null;
     }
 
     // As RegExpObject::match: each match from where the last ended, until
@@ -148,16 +150,16 @@ export const stringNatives: Natives = {
     let at = 0;
     for (;;) {
       re.lastIndex = at;
-      const m = re.exec(s);
+      const m = execMatch(re, source, extended, s);
       const last = at;
-      at = m ? m.index + m[0].length : 0;
+      at = re.lastIndex;
       if (!m || at === last) {
         break;
       }
 
-      // A capture named length can truncate the match array before slot 0 is read.
-      if (m.groups && "length" in m.groups) {
-        found.push(rt.getProperty(matchArray(rt, m, source), rt.publicName(0)));
+      // Named captures can replace slot zero or truncate the array before it is read.
+      if ("end" in m && (m.changesFirst || !m.length)) {
+        found.push(rt.getProperty(matchArray(rt, m), rt.publicName(0)));
       } else {
         found.push(m[0]);
       }

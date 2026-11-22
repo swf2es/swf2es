@@ -1,6 +1,7 @@
 // RegExp: `this` holds its JavaScript RegExp in $re; and the match
 // arrays String's methods give too.
 
+import { execNamed, type NamedMatch } from "@swf2es/native/regexp";
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
 import type { Runtime } from "../runtime.js";
@@ -56,8 +57,8 @@ export function regexpNatives(rt: Runtime): Natives {
         return null;
       }
 
-      const m = re.exec(rt.toString(s));
-      return m ? matchArray(rt, m, this.$source) : null;
+      const m = execMatch(re, this.$source, this.$extended, rt.toString(s));
+      return m ? matchArray(rt, m) : null;
     }
   }
 
@@ -65,18 +66,35 @@ export function regexpNatives(rt: Runtime): Natives {
   return natives;
 }
 
-/** A match as AS3 gives it: an Array of the match and its groups, with its index and input. */
-export function matchArray(rt: Runtime, m: RegExpMatchArray, source: string): AsObject {
-  const a = rt.array(Array.from(m));
-  if (m.index !== undefined) {
-    a.$d.set("index", m.index);
-    a.$d.set("input", m.input);
+/** Run patterns with Flash named captures in Tamarin's matcher: capture
+ * retention can change a subsequent backreference and the match itself. */
+export function execMatch(
+  re: RegExp,
+  source: string,
+  extended: boolean,
+  subject: string,
+): RegExpExecArray | NamedMatch | null {
+  if (!source.includes("(?P<")) {
+    return re.exec(subject);
   }
+
+  const match = execNamed(source, re.flags, extended, subject, re.global ? re.lastIndex : 0);
+  if (re.global) {
+    re.lastIndex = match?.end ?? 0;
+  }
+  return match;
+}
+
+/** A match as AS3 gives it: an Array of the match and its groups, with its index and input. */
+export function matchArray(rt: Runtime, m: RegExpExecArray | NamedMatch): AsObject {
+  const a = rt.array(Array.from(m));
+  a.$d.set("index", m.index);
+  a.$d.set("input", m.input);
 
   // avmshell exposes names when the pattern contains "(?P<". An unmatched
   // named group is the empty string even when its numbered slot is undefined.
-  if (m.groups && source.includes("(?P<")) {
-    for (const [name, capture] of Object.entries(m.groups)) {
+  if ("end" in m) {
+    for (const [name, capture] of m.named) {
       rt.setProperty(a, rt.publicName(name), capture ?? "");
     }
   }

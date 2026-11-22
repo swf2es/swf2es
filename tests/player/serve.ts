@@ -37,6 +37,7 @@ export const importMap = {
     "@swf2es/native/render": "/native/render/index.js",
     "@swf2es/native/compress": "/native/compress/index.js",
     "@swf2es/format": "/format/index.js",
+    "@swf2es/native/regexp": "/native/regexp/index.js",
     "@swf2es/native/mp3": "/native/mp3/index.js",
     "@swf2es/native/atf": "/native/atf/index.js",
     "@swf2es/native/audio": "/native/audio/index.js",
