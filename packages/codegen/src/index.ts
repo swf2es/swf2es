@@ -241,8 +241,11 @@ export interface Codegen {
   /**
    * Rebuild the domain without the ABCs of dropped and evicted domains, if
    * memory would otherwise grow and they hold enough to keep it from
-   * growing: whether it did. A rebuild links every live ABC again, tens of
-   * milliseconds for a large application, so a host calls this when it has
+   * growing, or memory is far above what the live ones need: whether it
+   * did. Done in a new instance of the compiler, made ahead, which takes
+   * the old one's place, so that its memory, which never shrinks, goes
+   * with it. A rebuild links every live ABC again and verifies them again,
+   * seconds for a large application, so a host calls this when it has
    * time, as when idle; nothing else does.
    */
   compact(): boolean;
@@ -363,7 +366,7 @@ export interface Codegen {
  * this package free of I/O. The file ships as `@swf2es/codegen/codegen.wasm`.
  */
 export async function createCodegen(module: WebAssembly.Module): Promise<Codegen> {
-  const wasm = await instantiate(module, { env: {} });
+  let wasm = await instantiate(module, { env: {} });
   const version = wasm.compilerVersion();
   if (version !== COMPILER_VERSION) {
     throw new Error(
@@ -519,6 +522,88 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         : new Uint8Array(wasm.memory.buffer, address, wasm.outputLength());
     },
   });
+  // The rebuild domainCompact, domainRevive or domainLoadRebuild started in
+  // `into`, a part a call, each part's garbage collected before the next
+  // (see domainRebuildStep), and the old tables once it is done, before the
+  // next call's allocations would grow memory past them: whether it was done.
+  const rebuild = (into = wasm) => {
+    let step = into.domainRebuildStep();
+    while (step === 0) {
+      into.__collect();
+      step = into.domainRebuildStep();
+    }
+
+    into.__collect();
+    size = wasm.memory.buffer.byteLength;
+    calls = 0;
+    return step > 0;
+  };
+  // A second instance of the compiler, made ahead as instantiating is
+  // asynchronous, that the next rebuild is done in (see moved): wasm memory
+  // never shrinks, so one done in place keeps, for good, as much as the
+  // dead tables and the old and the new took together. Made at once, and
+  // again once one is taken.
+  let spare: typeof wasm | null = null;
+  let making = false;
+  const prepare = () => {
+    if (spare === null && !making) {
+      making = true;
+      instantiate(module, { env: {} }).then(
+        (made) => {
+          spare = made;
+          making = false;
+        },
+        () => {
+          making = false;
+        },
+      );
+    }
+  };
+  // The domain rebuilt in the spare instance, from what this one saves of it
+  // and its live ABCs' bytes, read where they are, and the spare taken for
+  // this one, whose memory goes with it: whether it was. The ABCs' copies in
+  // the spare are its garbage once parsed, collected every few megabytes.
+  const moved = () => {
+    const into = spare;
+    if (into === null) {
+      return false;
+    }
+
+    spare = null;
+    const saved = wasm.domainSaveBytes();
+    if (!into.domainLoad(new Uint8Array(wasm.memory.buffer, saved, wasm.outputLength()))) {
+      return false;
+    }
+
+    into.__collect();
+    let copied = 0;
+    for (let i = 0; i < added; i++) {
+      const at = wasm.domainSavedAbcBytes(i);
+      const length = wasm.outputLength();
+      if (at !== 0 && into.domainLoadAbc(i, new Uint8Array(wasm.memory.buffer, at, length)) !== 0) {
+        return false;
+      }
+
+      copied += length;
+      if (copied >= COPIED_BETWEEN_COLLECTIONS) {
+        into.__collect();
+        copied = 0;
+      }
+    }
+
+    if (!into.domainLoadRebuild() || !rebuild(into)) {
+      return false;
+    }
+
+    // The held SWFs' copies were the old instance's (see hold).
+    holds.length = 0;
+    wasm = into;
+    size = wasm.memory.buffer.byteLength;
+    calls = 0;
+    prepare();
+    return true;
+  };
+  prepare();
   const collected = <T>(result: T, reclaim = false): T => {
     const grown = wasm.memory.buffer.byteLength;
     if (reclaim || grown > size || ++calls >= COLLECT_EVERY) {
@@ -587,30 +672,32 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       return wasm.memory.buffer.byteLength;
     },
     compact() {
-      // A rebuild makes new tables while the old are live: what earlier
-      // calls left is collected first, and the old tables once it is done,
-      // before the next call's allocations would grow memory past them.
+      // Done in the spare instance, once there is one and that would take
+      // less memory; else in place, where the new tables are made
+      // while the old are live: what earlier calls left is collected first,
+      // and the old tables once it is done, before the next call's
+      // allocations would grow memory past them.
+      if (spare !== null && collected(wasm.domainWantsCompact(true))) {
+        wasm.__collect();
+        if (moved()) {
+          return true;
+        }
+      }
+
       if (!collected(wasm.domainWantsCompact())) {
         return false;
       }
 
       wasm.__collect();
       calls = 0;
-      if (!wasm.domainCompact()) {
-        return false;
-      }
-
-      wasm.__collect();
-      size = wasm.memory.buffer.byteLength;
-      calls = 0;
-      return true;
+      return wasm.domainCompact(true) && rebuild();
     },
     isLive(appDomain) {
       return collected(wasm.domainState(appDomain)) === 0;
     },
     reviveDomain(appDomain, abcs) {
       // Its ABCs' bytes are copied into the compiler only if a rebuild let go of them.
-      let revived = collected(wasm.domainRevive(appDomain));
+      let revived = collected(wasm.domainRevive(appDomain, true));
       if (revived < 0) {
         for (const [index, bytes] of abcs) {
           const error = collected(wasm.domainRestore(index, bytes));
@@ -619,19 +706,14 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           }
         }
 
-        revived = collected(wasm.domainRevive(appDomain));
+        revived = collected(wasm.domainRevive(appDomain, true));
       }
 
-      if (revived < 0) {
+      // Revived by a rebuild in place, mid-load: a compaction moves it later.
+      if (revived < 0 || (revived > 0 && !rebuild())) {
         throw new Error(
           `application domain ${appDomain}: not evicted, its parent not live, or an ABC of it not given`,
         );
-      }
-
-      if (revived > 0) {
-        wasm.__collect();
-        size = wasm.memory.buffer.byteLength;
-        calls = 0;
       }
     },
     found(d) {
@@ -758,6 +840,8 @@ function parseEntries(text: string): Map<number, string> {
 }
 
 const COLLECT_EVERY = 64;
+/** How many bytes of ABCs a rebuild in the spare instance copies in between its collections. */
+const COPIED_BETWEEN_COLLECTIONS = 4 << 20;
 /** How many SWFs whose blocks or units are compiled codegen holds a copy of at most. */
 const HELD_SWFS = 4;
 

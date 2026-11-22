@@ -42,14 +42,27 @@ three, with the same VerifyError numbers:
    no use for now, as once its ABCs are compiled, is evicted with them
    (`evictDomain`): no other sees their ABCs, which compile no more and
    keep their indices.
-   `compact` rebuilds the domain only when that keeps codegen's memory
-   from growing: when the tables, by an estimate from their rows, with
-   what a compile's garbage and the rebuild itself take, come near
-   memory's size, and those ABCs weigh 4 MB and enough to bring them
-   back below. Before that a rebuild would reclaim nothing that matters,
-   as wasm memory never shrinks. `usage` tells the estimate, and
-   `compact` asks the same before it collects and rebuilds; a host calls
-   it when it has time, as the player does when idle. A rebuild
+   `compact` rebuilds the domain without those ABCs, in a new instance
+   of the compiler made ahead, which then takes the old one's place
+   (`domainSaveBytes`, `domainLoad`): wasm memory never shrinks, so a
+   rebuild in place kept, for good, as much as the dead tables and the
+   old and the new ones took together, and over a long session of busy
+   real content that loads some 1,500 SWFs, many of them again and
+   again, memory went from one doubling to the next. The new instance is given
+   what a rebuild reads of the domain, its log and the live ABCs' bytes,
+   and its memory is grown at once to what they will hold, by an estimate
+   from the tables' rows, so that it holds the live tables and a reserve,
+   and the old instance's memory goes with it. It is due when the tables
+   come near memory's size, which a load would then grow, and the dead
+   ABCs weigh 4 MB, a sixteenth of memory and a quarter of the live ones,
+   so that a rebuild of seconds is not done for a few megabytes; or when
+   memory is four times what the live ones need, as a large compile
+   leaves it; and only where the new instance would take an eighth less
+   memory at least, or a rebuild in place would not fit and double it. Otherwise, as until the new instance is made, `compact`
+   rebuilds in place, before the old tables and the new would no longer
+   fit. `usage` tells the estimate, and `compact` asks the same
+   before it collects and rebuilds; a host calls it when it has time, as
+   the player does when idle. A rebuild
    links the live ABCs again, in their places, and does again, where it
    happened, what the domain has logged: each finding recorded, and the
    first answer to what resolves lazily, a traits' types, a method's
@@ -57,10 +70,12 @@ three, with the same VerifyError numbers:
    see the ABCs there were when first asked; an ancestor may define the
    same name since, which a lookup would find now. So a live ABC links,
    resolves and compiles as it did, since no ABC let go of was ever seen
-   by it, and the collector frees all the others took, the names only
-   they spelled included: wasm memory never shrinks, but what was freed
-   is used again. A rebuild of a large application's domain takes tens of
-   milliseconds, its first verifications most. An evicted domain is
+   by it, and none of what the others took is left, the names only they
+   spelled included. It goes a part at a time (`domainRebuildStep`), the
+   garbage of each collected before the next, as a module's parts are:
+   verifying every ABC again in one call took more memory than the
+   tables. A rebuild of a large application's domain takes seconds, its
+   verifications most of them. An evicted domain is
    revived (`reviveDomain`) with its evicted ancestors, the first a child
    of a live domain, given their ABCs again if a rebuild let go of them:
    one rebuild links them in their places, their log done again with

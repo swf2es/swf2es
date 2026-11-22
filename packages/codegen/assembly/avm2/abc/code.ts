@@ -1281,6 +1281,13 @@ export class Verifier {
   }
 }
 
+/**
+ * The garbage, roughly, in bytes, that verifying a byte of a body's code
+ * makes, as measured on large ABCs: what a budget of garbage is divided
+ * by for Verifier.run's.
+ */
+export const VERIFY_COST: u64 = 5;
+
 /** What a body counts for in Verifier.run's budget at least, as one of a few bytes still takes a decode. */
 const BODY_COST: u64 = 64;
 

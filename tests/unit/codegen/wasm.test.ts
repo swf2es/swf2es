@@ -214,6 +214,68 @@ test("the release build compiles what the test build compiles, byte for byte", {
   assert.throws(() => codegen.compileModule(["b", "a"], 2), /only 2 have been added/);
 });
 
+test("a long session's compactions rebuild the domain in a new instance, whose memory holds the live ABCs", {
+  skip,
+}, async () => {
+  // As busy content plays for hours, many SWFs loaded again and again, each
+  // into a child of the main SWF's domain that goes once compiled, the host
+  // compacting after each as when idle. wasm memory never shrinks, so a
+  // compaction in place kept what the dead tables and the old and new took
+  // together for good: in another instance, codegen's memory comes down to
+  // what the live ones need, however long the session.
+  const builtin = new Uint8Array(await readFile(new URL("builtin.abc", generated)));
+  const turn = () => new Promise((resolve) => setImmediate(resolve));
+  const codegen = await createCodegen(module);
+  codegen.reset();
+  assert.equal(codegen.add(builtin, true), 0);
+  codegen.compileModule();
+  const main = codegen.childDomain(0);
+  const own = script([0x24, 7, 0x24, 5, 0xa0, 0x48]);
+  assert.equal(codegen.add(own, false, main), 0);
+  const compiled = codegen.compileModule(["b", "a"], 1);
+
+  // Dead tables built up while the host has no time to compact.
+  for (let n = 0; n < 100; n++) {
+    const child = codegen.childDomain(main);
+    assert.equal(codegen.add(builtin, true, child), 0);
+    codegen.compileModule();
+    codegen.dropDomain(child);
+  }
+
+  const peak = codegen.memoryBytes();
+  const { dead } = codegen.usage();
+  assert.ok(peak >= 32 << 20 && dead > peak / 2, `${peak} ${dead}`);
+  await turn();
+  assert.equal(codegen.compact(), true);
+  assert.ok(codegen.memoryBytes() <= peak / 4, `${codegen.memoryBytes()} of ${peak}`);
+  assert.equal(codegen.usage().dead, 0);
+  assert.equal(codegen.compileModule(["b", "a"], 1), compiled);
+
+  // A long session after it: never past that peak, the main domain's ABC
+  // compiling as before.
+  let highest = 0;
+  for (let n = 0; n < 1500; n++) {
+    const child = codegen.childDomain(main);
+    assert.equal(
+      codegen.add(n % 10 === 0 ? builtin : script([0x24, n & 0x7f, 0x48]), n % 10 === 0, child),
+      0,
+    );
+    codegen.compileModule();
+    if (n % 7 === 0) {
+      codegen.evictDomain(child);
+    } else {
+      codegen.dropDomain(child);
+    }
+
+    await turn();
+    codegen.compact();
+    highest = Math.max(highest, codegen.memoryBytes());
+  }
+
+  assert.ok(highest < peak, `${highest} of ${peak}`);
+  assert.equal(codegen.compileModule(["b", "a"], 1), compiled);
+});
+
 test("a module's source map and entries are written when asked for, from it alone", () => {
   testing.domainReset(50);
   testing.domainAdd(script([0x24, 7, 0x24, 5, 0xa0, 0x48]), false);

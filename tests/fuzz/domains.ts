@@ -163,7 +163,11 @@ const below = (n: number) => Math.floor(random() * n);
 const pick = <T>(list: T[]) => list[below(list.length)];
 
 const build = process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test";
-const subject = await loadTesting(build);
+// The subject is now and then rebuilt in a new instance, which takes its place (moved).
+// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+let current: any = await loadTesting(build);
+// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+const subject: any = new Proxy({}, { get: (_, name) => current[name] });
 const reference = await loadTesting(build);
 const elsewhere = await loadTesting(build);
 for (const t of [subject, reference, elsewhere]) {
@@ -347,9 +351,68 @@ function compare(step: number, i: number): void {
   }
 }
 
-/** Revive evicted domain `d` in the subject with its evicted ancestors, given their ABCs if asked. */
-function revive(step: number, d: number): void {
-  let revived = subject.domainRevive(d);
+/**
+ * The rebuild the subject started a part at a time, each part of a budget
+ * picked at random, from a body's worth to one part for all: 1 if done, -1
+ * if it failed.
+ */
+function stepRebuild(): number {
+  subject.domainPartBudget(pick([1, 64, 4096, 1 << 20, 0]));
+  let stepped = subject.domainRebuildStep();
+  while (stepped === 0) {
+    stepped = subject.domainRebuildStep();
+  }
+
+  subject.domainPartBudget(0);
+  return stepped;
+}
+
+/**
+ * The subject's domain, as it saves it, rebuilt in a new instance from its
+ * live ABCs' bytes, which then takes its place, as the wrapper's compact
+ * does: 1 if done, -1 if it failed.
+ */
+async function moved(): Promise<number> {
+  const next = await loadTesting(build);
+  const out = (address: number) =>
+    new Uint8Array(current.memory.buffer, address, current.outputLength()).slice();
+  if (!next.domainLoad(out(current.domainSaveBytes()))) {
+    return -1;
+  }
+
+  for (let i = 0; i < hashes.length; i++) {
+    const at = current.domainSavedAbcBytes(i);
+    if (at !== 0 && next.domainLoadAbc(i, out(at)) !== 0) {
+      return -1;
+    }
+  }
+
+  if (!next.domainLoadRebuild()) {
+    return -1;
+  }
+
+  const was = current;
+  current = next;
+  const stepped = stepRebuild();
+  if (stepped < 0) {
+    current = was;
+  }
+
+  return stepped;
+}
+
+/**
+ * Revive evicted domain `d` in the subject with its evicted ancestors, given
+ * their ABCs if asked, by a rebuild in one call, a part at a time, or in a
+ * new instance.
+ */
+async function revive(step: number, d: number): Promise<void> {
+  const way = below(3);
+  const once = async () => {
+    const revived = subject.domainRevive(d, way > 0);
+    return revived !== 2 ? revived : way === 1 ? stepRebuild() : await moved();
+  };
+  let revived = await once();
   if (revived < 0) {
     for (let i = 0; i < hashes.length; i++) {
       if (state(abcDomain[i]) === 1 && subject.domainRestore(i, bytes[i]) !== 0) {
@@ -357,7 +420,7 @@ function revive(step: number, d: number): void {
       }
     }
 
-    revived = subject.domainRevive(d);
+    revived = await once();
   }
 
   if (revived < 0) {
@@ -440,12 +503,30 @@ for (; step < steps && failures.length === 0; step++) {
   } else if (op < 88) {
     const evicted = parent.map((_, d) => d).filter((d) => state(d) === 1);
     if (evicted.length) {
-      revive(step, pick(evicted));
+      await revive(step, pick(evicted));
     }
   } else if (op < 90) {
     shadow(step);
   } else if (op < 93) {
-    if (subject.domainRebuild()) {
+    // In one call, a part at a time, which a rebuild left part way leaves
+    // as it was, or in a new instance.
+    const way = below(4);
+    if (way === 2) {
+      subject.domainPartBudget(1);
+      subject.domainRebuild(true);
+      subject.domainRebuildStep();
+      subject.domainPartBudget(0);
+      // Evicting the root does nothing, but leave what is under way.
+      subject.domainEvict(0);
+    }
+
+    const done =
+      way === 3
+        ? (await moved()) > 0
+        : way === 1
+          ? subject.domainRebuild(true) && stepRebuild() > 0
+          : subject.domainRebuild();
+    if (done) {
       counts.rebuilds++;
     } else {
       failures.push(`step ${step}: a rebuild failed`);
