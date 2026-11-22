@@ -21,9 +21,11 @@ test("codegen.wasm imports nothing but abort", () => {
   );
 });
 
-const zigModule = await WebAssembly.compile(
-  await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen-zig.wasm"))),
-);
+// Both by name from dist/, not by the package's export, which SWF2ES_COMPILER=zig redirects.
+const dist = (name: string) =>
+  readFile(new URL(`../../../packages/codegen/dist/${name}`, import.meta.url));
+const zigModule = await WebAssembly.compile(await dist("codegen-zig.wasm"));
+const asModule = await WebAssembly.compile(await dist("codegen.wasm"));
 
 test("codegen-zig.wasm, the compiler in Zig, imports nothing but abort too", () => {
   assert.deepEqual(
@@ -33,7 +35,7 @@ test("codegen-zig.wasm, the compiler in Zig, imports nothing but abort too", () 
 });
 
 test("createCodegen tells the compilers apart, whose identities differ so caches never mix", async () => {
-  const as = await createCodegen(module);
+  const as = await createCodegen(asModule);
   const zig = await createCodegen(zigModule);
   assert.match(zig.identity ?? "", /^[0-9a-f]{64}$/);
   assert.notEqual(zig.identity, as.identity);

@@ -17,6 +17,7 @@ import {
   TryFlag,
 } from "../../avm1-assembler.ts";
 import { backwardActions, branch, sharedBackwardSwf, unitActions } from "../../avm1-backward.ts";
+import { CODEGEN_WASM } from "../../compiler.ts";
 import { loadTesting, testing } from "./testing-module.ts";
 
 // AVM1 blocks assembled in the tests, compiled by codegen's emitter
@@ -1160,7 +1161,7 @@ test("a block's range outside the SWF's bytes is an empty block", () => {
 test("backward branches read SWF prefixes, including functions and chained distant jumps", async () => {
   const codegen = await createCodegen(
     await WebAssembly.compile(
-      await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
+      await readFile(new URL(`../../../packages/codegen/dist/${CODEGEN_WASM}`, import.meta.url)),
     ),
   );
   for (const distant of [false, true]) {
@@ -1199,7 +1200,7 @@ test("backward branches read SWF prefixes, including functions and chained dista
 test("code outside a block's bytes runs in units, as it would in the block, alone as in the module", async () => {
   const codegen = await createCodegen(
     await WebAssembly.compile(
-      await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
+      await readFile(new URL(`../../../packages/codegen/dist/${CODEGEN_WASM}`, import.meta.url)),
     ),
   );
   const { bytes, offset } = unitActions();
@@ -1236,7 +1237,7 @@ test("code outside a block's bytes runs in units, as it would in the block, alon
 test("the SWFs whose units compile are held, the few used last, until let go", async () => {
   const codegen = await createCodegen(
     await WebAssembly.compile(
-      await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
+      await readFile(new URL(`../../../packages/codegen/dist/${CODEGEN_WASM}`, import.meta.url)),
     ),
   );
   const { bytes, offset } = unitActions();
@@ -1338,7 +1339,7 @@ test("each block compiled alone is its entry in the module, in the test and rele
     );
   }
 
-  const wasm = new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url);
+  const wasm = new URL(`../../../packages/codegen/dist/${CODEGEN_WASM}`, import.meta.url);
   const codegen = await createCodegen(
     await WebAssembly.compile(await readFile(fileURLToPath(wasm))),
   );
@@ -1360,7 +1361,7 @@ test("each block compiled alone is its entry in the module, in the test and rele
 test("lazy blocks copy their SWF in once, which its units then share", async () => {
   const codegen = await createCodegen(
     await WebAssembly.compile(
-      await readFile(new URL("../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
+      await readFile(new URL(`../../../packages/codegen/dist/${CODEGEN_WASM}`, import.meta.url)),
     ),
   );
   const bytes = new Uint8Array(5 * 1024 * 1024);

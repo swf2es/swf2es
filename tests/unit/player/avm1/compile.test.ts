@@ -9,9 +9,10 @@ import { Player } from "../../../../packages/player/dist/player.js";
 import { Runtime } from "../../../../packages/runtime/dist/avm1/index.js";
 import { Avm1Assembler, constant } from "../../../avm1-assembler.ts";
 import { backwardSwf } from "../../../avm1-backward.ts";
+import { CODEGEN_WASM } from "../../../compiler.ts";
 
 const module = await WebAssembly.compile(
-  await readFile(new URL("../../../../packages/codegen/dist/codegen.wasm", import.meta.url)),
+  await readFile(new URL(`../../../../packages/codegen/dist/${CODEGEN_WASM}`, import.meta.url)),
 );
 
 for (const version of [4, 8]) {
