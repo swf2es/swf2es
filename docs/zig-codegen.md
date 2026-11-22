@@ -823,12 +823,16 @@ Stage 4 (the verifier and the IR: `avm2/ir/ir.ts`, `abc/code`,
   which garbage collection between calls makes cheap. Its scratch is
   zeroed when made, where AssemblyScript's keeps stale values from the
   bodies before; nothing read them, as the parity suites show.
-- *No recursion on input depth.* `target` and `throwsAt` call each other
-  in AssemblyScript through loop headers, as deep as a body's handlers
-  go; here they are one loop over a stack of frames (`targets.run`),
-  which keeps AssemblyScript's order and its one shared buffer of saved
-  values, nested headers overwriting it as the recursion's do. The IR
-  dump's type names (`Vector.<...>`) count their levels.
+- *No recursion on input depth* is needed here: `target` and `throwsAt`
+  call each other only through a loop header, and a handler's target is
+  past its range (checkHandlers rejects one before its end), so after the
+  instruction that throws, never a backward edge or a loop header: the
+  recursion is at most target, throwsAt, target, and is ported as it is,
+  with no allocation. (A first version made it a loop over frames in the
+  call's arena, which allocated on every throwing instruction: 151 MB and
+  234 ms for a megabyte body of them, now 114 MB and 113 ms, against
+  AssemblyScript's 128 MB and 84 ms.) The IR dump's type names
+  (`Vector.<...>`) count their levels.
 - *Writes the rollback undoes.* Every row the verifier writes in place
   goes through `put`: the ABC marked verified, a function's flag, scope
   chain and list of chains, contested functions' merged chains, classes'
@@ -848,6 +852,28 @@ Stage 4 (the verifier and the IR: `avm2/ir/ir.ts`, `abc/code`,
   Under `SWF2ES_COMPILER=zig` the `code`, `verify`, `typed` and `ir`
   tests pass 92 of 99; the rest compile modules. The ABC fuzz verifies
   and checks the IR of each ABC it accepts.
+- *For stages 5 and 6.* The Verifier keeps its results and queue in the
+  call's arena, and truncates its log entry with raw writes: valid while
+  its init and its runs share one call and one Change. AssemblyScript
+  steps it across calls (`run(budget)` with a finite budget, for the
+  rebuild); stage 6, which ports that, must keep them in the domain's
+  arena and journal the truncation, and give the stepped path parity
+  cases, which have none yet. The decoder the domain holds is dropped as
+  each call starts and as each Change begins. A call that runs out of
+  memory leaves wasm memory as large as it grew, up to 4 GiB, which never
+  shrinks: the host's recovery (section 7) should count that, a fresh
+  instance being the only way to give it back. Parity case counts include
+  the two private SWFs where SWF2ES_PRIVATE names them.
+- *Parity of the IR, whole.* `domainIrAll` (both test builds) writes every
+  verified body's IR as numbers, block entry frames, flags and the with
+  bit included, which stage 5 reads; each verify suite compares it for
+  every ABC. The suites print the VerifyError numbers AssemblyScript gave,
+  by number: the review's fuzz of structured bodies (`verify-fuzz`,
+  4,000 ABCs) reaches 26 of them; `tests/parity/verify-errors.ts` adds
+  1008 (a name bound in two namespaces of its set) and 1035 (getsuper in
+  a function). 1109 (callstatic of a method with no receiver type) is
+  unreachable: callstatic takes only methods bound to traits, whose
+  receiver is their traits.
 - *Size.* The verifier is not reached from a release export before stage
   5, so `codegen-zig.wasm` is unchanged (210,080 bytes, 73,864 gzipped);
   the test build grew from 328,159 to 448,069 bytes (112,586 to 152,340
@@ -860,7 +886,13 @@ Stage 4 (the verifier and the IR: `avm2/ir/ir.ts`, `abc/code`,
   168 KB does not hold for ReleaseSafe as translated so far,
   and section 7's levers (Output written directly, tables in the
   emitters, Small for cold files) are to be measured on the first emitter
-  files of stage 5.
+  files of stage 5. The release's true cost is measured from now on with
+  `zig build probe`, the release with a probe export reaching
+  `verifyMethods` (and, later, what stage 5 adds): 333,974 bytes, 115.5
+  KB gzipped in ReleaseSafe, against 210,001 and 73.8 without it (some 47
+  KB raw of it stage 3's linker, unreachable before); ReleaseSmall
+  233,821 and 83.5; ReleaseFast 347,324 and 109.2; `wasm-opt -Oz` takes
+  ReleaseSafe to 298,765 and 111.5, ReleaseSmall to 207,376 and 79.9.
 
 For stage 5: `Output.init` reserves 64 KB up front, so each `Output` is
 a whole run in the call arena; an emitter made per method or per block
