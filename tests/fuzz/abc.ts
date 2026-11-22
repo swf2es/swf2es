@@ -249,8 +249,20 @@ for (let k = 0; k < caseCount; k++) {
     }
   } catch (e) {
     if (/ has no \w+ yet/.test((e as Error).message)) {
-      // SWF2ES_COMPILER=zig before its emitter: what it has, linking, did not trap.
+      // SWF2ES_COMPILER=zig before its emitter: what it has, linking and
+      // verifying, must not trap either.
       unported++;
+      try {
+        testing.domainVerifyAll();
+        const checked: string = testing.domainCheckIr();
+        if (!checked.startsWith("checked ")) {
+          fail(abc, `the IR is malformed (${checked})`);
+        }
+      } catch (e2) {
+        fail(abc, `the verifier trapped (${(e2 as Error).message})`);
+        testing = await loadTesting(build);
+      }
+
       continue;
     }
 
@@ -266,7 +278,7 @@ for (let k = 0; k < caseCount; k++) {
 }
 
 const seconds = ((Date.now() - started) / 1000).toFixed(1);
-const stopped = unported ? `, ${unported} of them only linked (not ported yet)` : "";
+const stopped = unported ? `, ${unported} of them only linked and verified (not ported yet)` : "";
 const summary = `${caseCount} cases from ${seeds.length} seeds (seed ${seed}), ${accepted} accepted${stopped}, slowest ${slowest.ms.toFixed(0)} ms`;
 if (failures.length) {
   console.log(failures.slice(0, 20).join("\n"));
