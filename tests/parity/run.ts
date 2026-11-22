@@ -1,15 +1,21 @@
 // The parity harness (docs/zig-codegen.md, section 5): the compiler in
 // AssemblyScript, the oracle until it is deleted, and the compiler in Zig
-// fed the same calls, their results compared byte for byte; and Zig's test
-// build that fills freed memory with 0xAA against Zig's compiler, which
-// differ only where output reads memory nothing wrote. Each suite names the
-// exports it calls: one that calls an export Zig's compiler does not have
-// yet is reported as not ported, and skipped. Each compiler's results are
-// written to out/, to compare by eye.
+// fed the same calls, their results compared byte for byte; and Zig's
+// poison build, which fills freed memory with 0xAA, against Zig's own,
+// which differ only where output reads memory nothing wrote. A suite runs
+// on the release builds, or on the test builds for the dumps each stage
+// ports. Each names the exports it calls: one that calls an export Zig's
+// does not have yet is reported as not ported, and skipped. A case that
+// throws is recorded as its result, so one failure stops nothing.
+//
+// expected.json lists the suites that must be the same: one that differs,
+// or is no longer ported, fails. Each compiler's results go to out/, and
+// where a case's large result (a module) differs, both, with the first
+// line they differ at.
 //
 //   node tests/parity/run.ts [suite...]
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AIR_API_VERSION, API_VERSION } from "@swf2es/codegen";
@@ -24,13 +30,43 @@ import { bindTesting, zigTestingModule } from "../unit/codegen/zig-testing.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const out = fileURLToPath(new URL("out/", import.meta.url));
+const expected: string[] = JSON.parse(
+  readFileSync(fileURLToPath(new URL("expected.json", import.meta.url)), "utf8"),
+);
+
+/** A suite's results: a line a case, and the large results the lines name by digest. */
+class Results {
+  readonly lines: string[] = [];
+  readonly blobs = new Map<string, Uint8Array>();
+
+  /** Case `name`'s result, or what it threw. */
+  case(name: string, run: () => string | number | boolean): void {
+    try {
+      this.lines.push(`${name}: ${run()}`);
+    } catch (error) {
+      const e = error as Error;
+      this.lines.push(`${name}: threw ${e?.name}: ${e?.message}`);
+    }
+  }
+
+  /** A large result, as its length and digest, kept to show where it differs. */
+  blob(name: string, bytes: Uint8Array): string {
+    this.blobs.set(name, bytes.slice());
+    return `${bytes.length} ${createHash("sha256").update(bytes).digest("hex")}`;
+  }
+}
+
+/** asc's glue for either build; the test build's exports beyond are reached by name. */
+// biome-ignore lint/suspicious/noExplicitAny: the test builds' exports are untyped, as asc's bindings
+type Compiler = CodegenExports & Record<string, any>;
 
 interface Suite {
   name: string;
+  /** The release builds, or the test builds with their dumps. */
+  build: "release" | "testing";
   /** The exports it calls. */
-  needs: (keyof typeof SIGNATURES)[];
-  /** Its results, one a line, from one compiler. */
-  run(compiler: CodegenExports): string[];
+  needs: string[];
+  run(compiler: Compiler, results: Results): void;
 }
 
 /** The ABCs there are without the oracle: the libraries the player ships, and the tests' own. */
@@ -72,53 +108,61 @@ function odd(): [string, Uint8Array][] {
   return found;
 }
 
-/** What a call handed out, by its length and digest: a module may be megabytes. */
-function digest(c: CodegenExports, address: number): string {
-  const bytes = new Uint8Array(c.memory.buffer, address, c.outputLength());
-  return `${bytes.length} ${createHash("sha256").update(bytes).digest("hex")}`;
-}
+/** What a call handed out. */
+const handed = (c: Compiler, address: number) =>
+  new Uint8Array(c.memory.buffer, address >>> 0, c.outputLength());
 
 /** The libraries added as the player adds them, each one's module, source map and entries. */
-function libraries(c: CodegenExports, version: number, list: Uint8Array[]): string[] {
-  const lines: string[] = [];
-  c.domainReset(version);
-  for (const abc of list) {
-    lines.push(`add ${c.domainAdd(abc, true, 0)}`);
+function libraries(c: Compiler, r: Results, version: number, list: [string, Uint8Array][]): void {
+  r.case(`reset ${version}`, () => {
+    c.domainReset(version);
+    return "done";
+  });
+  for (const [name, abc] of list) {
+    r.case(`add ${name} at ${version}`, () => c.domainAdd(abc, true, 0));
   }
 
-  for (let index = 0; index < list.length; index++) {
-    const parts = [digest(c, c.domainModuleBytes("", index, true, false))];
-    while (!c.domainModuleDone()) {
-      c.__collect();
-      parts.push(digest(c, c.domainModuleMoreBytes()));
-    }
+  for (const [index, [name]] of list.entries()) {
+    r.case(`module ${name} at ${version}`, () => {
+      const parts = [handed(c, c.domainModuleBytes("", index, true, false))];
+      while (!c.domainModuleDone()) {
+        parts[parts.length - 1] = parts[parts.length - 1].slice();
+        c.__collect();
+        parts.push(handed(c, c.domainModuleMoreBytes()));
+      }
 
-    lines.push(`module ${index}: ${parts.join(", ")}`);
-    lines.push(
-      `source map ${index}: ${createHash("sha256").update(c.domainSourceMap()).digest("hex")}`,
+      return r.blob(`module ${name} at ${version}`, Buffer.concat(parts));
+    });
+    r.case(`source map ${name} at ${version}`, () =>
+      r.blob(`source map ${name} at ${version}`, Buffer.from(c.domainSourceMap())),
     );
-    lines.push(
-      `entries ${index}: ${createHash("sha256").update(c.domainModuleEntries()).digest("hex")}`,
+    r.case(`entries ${name} at ${version}`, () =>
+      r.blob(`entries ${name} at ${version}`, Buffer.from(c.domainModuleEntries())),
     );
     c.__collect();
   }
-
-  return lines;
 }
 
 const SUITES: Suite[] = [
   {
     name: "version",
+    build: "release",
     needs: ["compilerVersion"],
-    run: (c) => [c.compilerVersion()],
+    run: (c, r) => r.case("compilerVersion", () => c.compilerVersion()),
   },
   {
     name: "abcVersion",
+    build: "release",
     needs: ["abcVersion"],
-    run: (c) => [...abcs(), ...odd()].map(([name, bytes]) => `${name}: ${c.abcVersion(bytes)}`),
+    run: (c, r) => {
+      for (const [name, bytes] of [...abcs(), ...odd()]) {
+        r.case(name, () => c.abcVersion(bytes));
+      }
+    },
   },
   {
     name: "libraries",
+    build: "release",
     needs: [
       "domainReset",
       "domainAdd",
@@ -128,62 +172,109 @@ const SUITES: Suite[] = [
       "domainSourceMap",
       "domainModuleEntries",
     ],
-    run: (c) => [
-      ...libraries(c, API_VERSION, [builtinLibrary, playerglobalLibrary]),
-      ...libraries(c, AIR_API_VERSION, [builtinLibrary, playerglobalLibrary, airLibrary]),
-    ],
+    run: (c, r) => {
+      const fp: [string, Uint8Array][] = [
+        ["builtin", builtinLibrary],
+        ["playerglobal", playerglobalLibrary],
+      ];
+      libraries(c, r, API_VERSION, fp);
+      libraries(c, r, AIR_API_VERSION, [...fp, ["air", airLibrary]]);
+    },
   },
 ];
 
 const compile = (path: string) => WebAssembly.compile(readFileSync(join(root, path)));
-const asModule = await compile("packages/codegen/dist/codegen.wasm");
-const zigModule = await compile("packages/codegen/dist/codegen-zig.wasm");
-const poisonModule = await zigTestingModule(true);
-const has = new Set(WebAssembly.Module.exports(zigModule).map((e) => e.name));
+const modules = {
+  as: await compile("packages/codegen/dist/codegen.wasm"),
+  asTesting: await compile("packages/codegen/dist-test/testing.wasm"),
+  zig: await compile("packages/codegen/dist/codegen-zig.wasm"),
+  zigTesting: await zigTestingModule(false),
+  poison: await zigTestingModule(true),
+};
+const { instantiate: instantiateAsTesting } = await import(
+  new URL("../../packages/codegen/dist-test/testing.js", import.meta.url).href
+);
+const exported = (module: WebAssembly.Module) =>
+  new Set(WebAssembly.Module.exports(module).map((e) => e.name));
+const has = { release: exported(modules.zig), testing: exported(modules.zigTesting) };
+
+/** Fresh instances of the three, as a host makes one, for each suite. */
+async function instances(build: Suite["build"]): Promise<Record<string, Compiler>> {
+  return build === "release"
+    ? {
+        as: await instantiateAs(modules.as, { env: {} }),
+        zig: await instantiateZig(modules.zig),
+        poison: await bindTesting(modules.poison),
+      }
+    : {
+        as: await instantiateAsTesting(modules.asTesting, { env: {} }),
+        zig: await bindTesting(modules.zigTesting),
+        poison: await bindTesting(modules.poison),
+      };
+}
 
 let failed = 0;
-for (const [name, module] of [
-  ["codegen-zig.wasm", zigModule],
-  ["testing-zig-poison.wasm", poisonModule],
-] as const) {
+for (const [name, module] of Object.entries(modules)) {
   const imports = WebAssembly.Module.imports(module).map((i) => `${i.module}.${i.name}`);
-  if (imports.join() !== "env.abort") {
+  if (name !== "as" && name !== "asTesting" && imports.join() !== "env.abort") {
     console.log(`${name} imports ${imports.join(", ")}, not env.abort alone`);
     failed++;
   }
 }
 
 const exports = Object.keys(SIGNATURES);
-const ported = exports.filter((name) => has.has(name));
+const ported = exports.filter((name) => has.release.has(name));
 console.log(
   `parity: Zig's compiler has ${ported.length} of codegen.wasm's ${exports.length} exports`,
 );
 
-/** The first line two compilers' results differ at, or -1. */
+/** The first line two lists differ at, or -1. */
 function differs(a: string[], b: string[]): number {
   const at = a.findIndex((line, i) => line !== b[i]);
   return at >= 0 ? at : a.length === b.length ? -1 : Math.min(a.length, b.length);
 }
 
+/** Two large results' first differing line, both written to out/ beside each other. */
+function showBlobs(suite: string, key: string, a: [string, Results], b: [string, Results]): string {
+  const [aName, aBytes] = [a[0], a[1].blobs.get(key)];
+  const [bName, bBytes] = [b[0], b[1].blobs.get(key)];
+  if (!aBytes || !bBytes) {
+    return "";
+  }
+
+  const dir = join(out, suite);
+  mkdirSync(dir, { recursive: true });
+  const file = key.replace(/[^\w.-]+/g, "-");
+  writeFileSync(join(dir, `${file}.${aName}`), aBytes);
+  writeFileSync(join(dir, `${file}.${bName}`), bBytes);
+  const aLines = Buffer.from(aBytes).toString("latin1").split("\n");
+  const bLines = Buffer.from(bBytes).toString("latin1").split("\n");
+  const at = differs(aLines, bLines);
+  return `\n    ${key}, line ${at + 1} (out/${suite}/${file}.*):\n      ${aName}: ${aLines[at]?.slice(0, 200)}\n      ${bName}: ${bLines[at]?.slice(0, 200)}`;
+}
+
 const wanted = process.argv.slice(2);
+rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 const report: Record<string, string> = {};
 for (const suite of SUITES.filter((s) => wanted.length === 0 || wanted.includes(s.name))) {
-  const missing = suite.needs.filter((name) => !has.has(name));
+  const missing = suite.needs.filter((name) => !has[suite.build].has(name));
   if (missing.length > 0) {
     report[suite.name] = `not ported: ${missing.join(", ")}`;
     console.log(`  ${suite.name}: not ported (${missing.join(", ")})`);
+    if (expected.includes(suite.name)) {
+      console.log(`  ${suite.name} is in expected.json, but not ported`);
+      failed++;
+    }
+
     continue;
   }
 
-  // A fresh instance of each for each suite, as a host makes one.
-  const results = {
-    as: suite.run(await instantiateAs(asModule, { env: {} })),
-    zig: suite.run(await instantiateZig(zigModule)),
-    poison: suite.run(await bindTesting(poisonModule)),
-  };
-  for (const [compiler, lines] of Object.entries(results)) {
-    writeFileSync(join(out, `${suite.name}.${compiler}.txt`), lines.join("\n"));
+  const results: Record<string, Results> = {};
+  for (const [compiler, instance] of Object.entries(await instances(suite.build))) {
+    results[compiler] = new Results();
+    suite.run(instance, results[compiler]);
+    writeFileSync(join(out, `${suite.name}.${compiler}.txt`), results[compiler].lines.join("\n"));
   }
 
   const mismatches: string[] = [];
@@ -191,19 +282,26 @@ for (const suite of SUITES.filter((s) => wanted.length === 0 || wanted.includes(
     ["as", "zig"],
     ["zig", "poison"],
   ] as const) {
-    const at = differs(results[a], results[b]);
+    const [la, lb] = [results[a].lines, results[b].lines];
+    const at = differs(la, lb);
     if (at >= 0) {
+      const key = la[at]?.slice(0, la[at].indexOf(": "));
       mismatches.push(
-        `${b} differs from ${a} at line ${at + 1} of ${results[a].length}:\n    ${a}: ${results[a][at]}\n    ${b}: ${results[b][at]}`,
+        `${b} differs from ${a} at case ${at + 1} of ${la.length}:\n    ${a}: ${la[at]}\n    ${b}: ${lb[at]}` +
+          (key ? showBlobs(suite.name, key, [a, results[a]], [b, results[b]]) : ""),
       );
     }
   }
 
-  report[suite.name] = mismatches.length ? "differs" : `same, ${results.as.length} results`;
+  report[suite.name] = mismatches.length ? "differs" : `same, ${results.as.lines.length} cases`;
   console.log(
     `  ${suite.name}: ${mismatches.length ? mismatches.join("\n  ") : report[suite.name]}`,
   );
-  failed += mismatches.length;
+  if (mismatches.length && expected.includes(suite.name)) {
+    failed++;
+  } else if (!mismatches.length && !expected.includes(suite.name)) {
+    console.log(`  ${suite.name} is the same now: add it to tests/parity/expected.json`);
+  }
 }
 
 writeFileSync(join(out, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
