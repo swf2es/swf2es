@@ -70,15 +70,18 @@ pub const Pages = struct {
             end += grown * std.wasm.page_size;
         }
 
-        var self: Pages = .{
-            .base = base,
-            .limit = max_chunks - @as(u32, @intCast(base / chunk_size)),
-            .free_bits = bits,
-        };
+        var self: Pages = .{ .base = base, .limit = moduleLimit(base), .free_bits = bits };
         const chunks: u32 = @intCast((end - base) / chunk_size);
         self.mark(0, chunks, true);
         self.chunks = chunks;
         return self;
+    }
+
+    /// The most chunks memory past `base` may reach: all but the last of
+    /// wasm32's 4 GiB, so that no run's end, an address one past it, is
+    /// 2^32, which a u32 address cannot hold.
+    fn moduleLimit(base: usize) u32 {
+        return max_chunks - @as(u32, @intCast(base / chunk_size)) - 1;
     }
 
     /// Pages over `region`, which memory may grow to fill: natively, for
@@ -190,6 +193,12 @@ pub const Pages = struct {
 
         if (wasm and @wasmMemoryGrow(0, more / grow_chunks) < 0) {
             return false;
+        }
+
+        // Fresh memory is zero, which code may come to rely on as much as on what it freed.
+        if (poison) {
+            const at: [*]u8 = @ptrFromInt(self.address(self.chunks));
+            @memset(at[0 .. @as(usize, more) * chunk_size], poison_byte);
         }
 
         self.mark(self.chunks, more, true);
@@ -358,7 +367,9 @@ pub const Arena = struct {
 
     pub const deinit = reset;
 
-    /// Where the arena is, to restore it to: valid until it is reset, or restored to an earlier mark.
+    /// Where the arena is, to restore it to: valid until it is reset, or
+    /// restored to an earlier mark. Restoring a mark no longer valid is a
+    /// bug, which panics: its run is not among the arena's.
     pub const Mark = struct {
         run: ?*Run,
         run_len: usize,
@@ -378,7 +389,7 @@ pub const Arena = struct {
     /// Everything allocated since `saved` given back, as a link that fails rolls back.
     pub fn restore(self: *Arena, saved: Mark) void {
         while (self.newest != saved.run) {
-            const run = self.newest.?;
+            const run = self.newest orelse @panic("an arena restored to a mark no longer valid");
             self.newest = run.older;
             self.source.rawFree(run.bytes(), run_alignment, @returnAddress());
         }
@@ -510,14 +521,16 @@ pub fn allocZeroed(gpa: Allocator, comptime T: type, count: u32) Allocator.Error
 }
 
 /// A table whose rows never move: shelves that double from a few rows up
-/// to a chunk's worth, then shelves of a chunk each. Grown in a bump arena,
+/// to a chunk's worth of rows, then shelves of that many each (a run of
+/// two chunks, with its arena run's header, where a shelf is the only
+/// thing in its run). Grown in a bump arena,
 /// it leaves no old copy behind but its directory of shelves, a pointer a
 /// shelf; a link that fails rolls it back with `restore`, after its arena.
 pub fn Rows(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        /// Rows a full shelf holds: a chunk's worth, by a power of two.
+        /// Rows a full shelf holds: a chunk's worth of bytes, rounded down to a power of two.
         const full: u32 = std.math.floorPowerOfTwo(u32, @max(1, chunk_size / @sizeOf(T)));
         const first: u32 = @min(full, 8);
         /// How many shelves double, and the rows they hold together.
@@ -725,6 +738,14 @@ test "memory never grows past its limit" {
     try testing.expectEqual(0, p.used);
 }
 
+test "no run ends past the last whole chunk below 4 GiB" {
+    inline for (.{ 1 << 20, (1 << 20) + 34 * 1024 * 1024 }) |heap| {
+        const base = std.mem.alignForward(u64, heap, chunk_size);
+        const limit = Pages.moduleLimit(base);
+        try testing.expectEqual((1 << 32) - @as(u64, chunk_size), base + @as(u64, limit) * chunk_size);
+    }
+}
+
 test "the arena's last allocation grows in place at the top, past its first run" {
     const t = try TestPages.init(64 << 20);
     defer t.deinit();
@@ -909,6 +930,29 @@ test "every run an entry takes may fail, and leaves the domain as it was, its me
     defer t.deinit();
     try testing.checkAllAllocationFailures(t.pages.allocator(), addEntries, .{&t.pages});
     try testing.expectEqual(0, t.pages.used);
+}
+
+/// Memory of every size from one wasm page to 120, so that memory runs
+/// out at every point of the entries: where a run can neither grow in
+/// place nor be taken, as when memory.grow fails. Each entry a later stage
+/// ports, which changes a domain, is held to this as `addEntries` is.
+pub fn atEveryMemorySize(comptime entries: fn (Allocator, *Pages) anyerror!void) !void {
+    var ran_out: u32 = 0;
+    for (1..121) |size| {
+        const t = try TestPages.init(size * std.wasm.page_size);
+        defer t.deinit();
+        entries(t.pages.allocator(), &t.pages) catch |err| {
+            try testing.expectEqual(error.OutOfMemory, err);
+            ran_out += 1;
+        };
+        try testing.expectEqual(0, t.pages.used);
+    }
+
+    try testing.expect(ran_out > 0);
+}
+
+test "entries that run out of memory anywhere, a run neither grown nor taken, roll back" {
+    try atEveryMemorySize(addEntries);
 }
 
 test "a run that cannot grow in place is replaced by a new one, with the same rows" {
