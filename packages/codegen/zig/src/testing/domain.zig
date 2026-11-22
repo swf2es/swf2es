@@ -370,6 +370,62 @@ pub fn domainCheckIr(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
     return std.fmt.allocPrint(gpa, "checked {d} bodies, {d} instructions", .{ bodies, rows });
 }
 
+/// Every verified body's whole IR, as numbers, for comparing compilers
+/// (testing/domain.ts's domainIrAll).
+pub fn domainIrAll(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
+    if (dom.abcs.len == 0) {
+        return "";
+    }
+
+    const index = dom.abcs.len - 1;
+    const abc = dom.abcs.get(index);
+    const results = try code.verifyMethods(dom, index);
+    var decoder: BodyDecoder = try .init(gpa, abc, dom.abcBuffer.get(index), dom, index);
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    const w = &out.writer;
+    var first = true;
+    write: {
+        for (0..abc.bodyCount()) |b| {
+            const body: u32 = @intCast(b);
+            if (results[body] != 0) {
+                continue;
+            }
+
+            const m = dom.methodStart.get(index) + abc.bodyMethod.get(body);
+            _ = try decoder.decode(body, dom.traits.scopeOf(m));
+            const ir = &decoder.ir;
+            if (!first) w.writeByte('\n') catch break :write;
+            first = false;
+            w.print("body {d} frame {d} locals {d} scope {d} outer {d}", .{ body, ir.frameSize, ir.localCount, ir.maxScope, ir.outerSize }) catch break :write;
+            for (0..ir.blockCount) |k| {
+                w.print("\nblock {d} {d} {d} {d} {d} |", .{ k, ir.blockPc[k], ir.blockFirst[k], ir.blockStack[k], ir.blockScope[k] }) catch break :write;
+                for (0..ir.frameSize) |v| {
+                    const at = k * ir.frameSize + v;
+                    w.print(" {d}:{d}", .{ ir.entryType[at], ir.entryFlags[at] }) catch break :write;
+                }
+            }
+
+            for (0..ir.count) |i| {
+                w.print("\n{d} {d} {d} {d} {d} {d} {d} {d} {d} {d}", .{ ir.op[i], ir.dst[i], ir.src[i], ir.srcCount[i], ir.a[i], ir.b[i], ir.c[i], ir.type[i], ir.notNull[i], ir.pc[i] }) catch break :write;
+            }
+
+            for (0..ir.handlerCount) |h| {
+                w.print("\nhandler {d} {d} {d} {d} {d}", .{ ir.handlerFrom[h], ir.handlerTo[h], ir.handlerBlock[h], ir.handlerType[h], ir.handlerScope[h] }) catch break :write;
+            }
+
+            w.writeAll("\ncases ") catch break :write;
+            for (0..ir.caseCount) |c| {
+                if (c > 0) w.writeByte(' ') catch break :write;
+                w.print("{d}", .{ir.cases[c]}) catch break :write;
+            }
+        }
+
+        return out.written();
+    }
+
+    return error.OutOfMemory;
+}
+
 fn irLine(w: *std.Io.Writer, dom: *const Domain, ir: *const Ir, i: u32) std.Io.Writer.Error!void {
     const op = ir.op[i];
     const dst = ir.dst[i];
@@ -746,6 +802,30 @@ pub const link_created = [_]u8{
     0x00, 0x01, 0x01, 0x47, 0x00, 0x00,
 };
 
+// tests/parity/verify-errors.ts's third: a function created in two scope
+// chains, contested and settled, a handler with a catch scope, a switch of
+// 20 cases.
+pub const link_contested = [_]u8{
+    0x10, 0x00, 0x2e, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x06, 0x4f, 0x62, 0x6a, 0x65, 0x63,
+    0x74, 0x01, 0x43, 0x01, 0x78, 0x01, 0x41, 0x01, 0x6d, 0x01, 0x66, 0x03, 0x16, 0x01, 0x16,
+    0x05, 0x02, 0x02, 0x01, 0x02, 0x08, 0x07, 0x01, 0x02, 0x07, 0x01, 0x03, 0x07, 0x01, 0x04,
+    0x07, 0x02, 0x04, 0x09, 0x04, 0x01, 0x07, 0x01, 0x06, 0x07, 0x01, 0x07, 0x05, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x01, 0x00, 0x00, 0x01, 0x03, 0x03, 0x00, 0x00, 0x00,
+    0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x06, 0x01, 0x00, 0x03, 0x02, 0x00, 0x01, 0x00, 0x01,
+    0x02, 0x04, 0x01, 0x00, 0x05, 0x00, 0x03, 0x01, 0x00, 0x03, 0x11, 0xd0, 0x30, 0xd0, 0x60,
+    0x01, 0x30, 0x60, 0x01, 0x58, 0x00, 0x1d, 0x68, 0x02, 0x40, 0x04, 0x29, 0x47, 0x00, 0x00,
+    0x01, 0x01, 0x01, 0x00, 0x01, 0x03, 0xd0, 0x30, 0x47, 0x00, 0x00, 0x02, 0x01, 0x01, 0x00,
+    0x01, 0x01, 0x47, 0x00, 0x00, 0x03, 0x02, 0x01, 0x00, 0x02, 0x51, 0xd0, 0x30, 0x40, 0x04,
+    0x29, 0x5d, 0x03, 0x29, 0x24, 0x01, 0x1b, 0x41, 0x00, 0x00, 0x13, 0x41, 0x00, 0x00, 0x41,
+    0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x41,
+    0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x41,
+    0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x41,
+    0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x41, 0x00, 0x00, 0x47, 0x5a, 0x00, 0x29,
+    0x29, 0x47, 0x01, 0x05, 0x4b, 0x4c, 0x00, 0x03, 0x00, 0x04, 0x02, 0x01, 0x00, 0x01, 0x01,
+    0x47, 0x00, 0x00,
+};
+
 /// A digest of everything a domain holds but getBinding's memo, which a
 /// rollback empties: each table's rows, each id table's slots, the numbers
 /// beside them, and by their content what rows point at (each ABC's
@@ -1067,11 +1147,15 @@ fn lifeStep(d: *Domain, a: *memory.Arena, step: u32) !void {
         9 => try testing.expectEqualStrings("checked 2 bodies, 18 instructions", try domain_.changed(d, a, domainCheckIr, .{d.scratch})),
         10 => _ = try domain_.changed(d, a, domainIr, .{ d.scratch, 0 }),
         11 => _ = try domain_.changed(d, a, code.verifyMethods, .{0}),
+        12 => try testing.expectEqual(0, try domain_.changed(d, a, domain_.addAbc, .{ a, &link_contested, false, 0 })),
+        13 => try testing.expectEqualStrings("verified 5 of 5 bodies", try domain_.changed(d, a, domainVerifyAll, .{d.scratch})),
+        14 => _ = try domain_.changed(d, a, domainIrAll, .{d.scratch}),
+        15 => _ = try domain_.changed(d, a, domainIr, .{ d.scratch, 3 }),
         else => try testing.expectEqual(0, try domain_.changed(d, a, lifetime.restore, .{ a, 1, &link_user })),
     }
 }
 
-const life_steps = 13;
+const life_steps = 17;
 
 /// linkLife's calls on a domain over `source`, each that runs out of memory
 /// checked to leave the domain and its arena as they were, then made again:

@@ -8,7 +8,8 @@ import { bind, SIGNATURES, type Signature } from "../../../packages/codegen/dist
 
 const TESTING_SIGNATURES: Record<string, Signature> = {
   memoryChunksUsed: ["", "i32"],
-  memoryReached: ["", "i32"],
+  // Read as unsigned, as an address is: memory past 2 GiB.
+  memoryReached: ["", "address"],
   memoryTopRuns: ["", "i32"],
   memoryReserve: ["i32", "void"],
   testingPanic: ["", "void"],
@@ -35,6 +36,7 @@ const TESTING_SIGNATURES: Record<string, Signature> = {
   domainVerifyAll: ["", "str"],
   domainIr: ["i32", "str"],
   domainCheckIr: ["", "str"],
+  domainIrAll: ["", "str"],
 };
 
 /** The test build, or the one that fills freed memory with 0xAA, compiled. */

@@ -69,6 +69,7 @@ const testing_exports = exports ++ [_][]const u8{
     "domainVerifyAll",
     "domainIr",
     "domainCheckIr",
+    "domainIrAll",
     "avm1Opcodes",
     "avm1Dump",
     "avm1Check",
@@ -95,6 +96,10 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(module(b, target, "codegen-zig", "src/root.zig", &exports, false, true));
     b.installArtifact(module(b, target, "testing-zig", "src/testing.zig", &testing_exports, false, true));
     b.installArtifact(module(b, target, "testing-zig-poison", "src/testing.zig", &testing_exports, true, true));
+
+    // The release build with probes reaching what later stages will reach from its exports, for measuring.
+    const probe = b.addInstallArtifact(module(b, target, "codegen-zig-probe", "src/probe.zig", &(exports ++ [_][]const u8{"probeVerify"}), false, true), .{});
+    b.step("probe", "Build the release with probes, to measure its size as the port goes").dependOn(&probe.step);
 
     const names = b.addInstallArtifact(module(b, target, "codegen-zig-names", "src/root.zig", &exports, false, false), .{});
     b.step("names", "Build the compiler with the name section").dependOn(&names.step);

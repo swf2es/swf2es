@@ -183,6 +183,10 @@ export fn domainIr(body: u32) usize {
     return root.handOut(avm2.changed(domain.domainIr, .{ root.gpa(), body }) catch |err| return root.fail(err));
 }
 
+export fn domainIrAll() usize {
+    return root.handOut(avm2.changed(domain.domainIrAll, .{root.gpa()}) catch |err| return root.fail(err));
+}
+
 export fn domainCheckIr() usize {
     return root.handOut(avm2.changed(domain.domainCheckIr, .{root.gpa()}) catch |err| return root.fail(err));
 }

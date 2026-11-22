@@ -82,6 +82,7 @@ export {
   domainEmit,
   domainFind,
   domainIr,
+  domainIrAll,
   domainResolve,
   domainSlotTypes,
   domainSummary,

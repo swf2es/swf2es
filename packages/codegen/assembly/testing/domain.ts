@@ -363,6 +363,62 @@ export function domainCheckIr(): string {
   return `checked ${bodies} bodies, ${rows} instructions`;
 }
 
+/**
+ * Every verified body's whole IR, as numbers, for comparing compilers: per
+ * body its frame, per block its depths and every entry value's type and
+ * flags, every instruction's fields, the handlers and the case targets.
+ */
+export function domainIrAll(): string {
+  const index = <u32>(domain.abcs.length - 1);
+  const abc = domain.abcs[index];
+  const results = verifyMethods(domain, index);
+  const decoder = new BodyDecoder(abc, domain.abcBase[index], domain, index);
+  const out: string[] = [];
+  for (let body: u32 = 0; body < abc.bodyCount; body++) {
+    if (results[body] !== 0) {
+      continue;
+    }
+
+    const m = domain.methodStart[index] + abc.bodyMethod[body];
+    decoder.decode(body, domain.traits.scopeOf(m));
+    const ir = decoder.ir;
+    out.push(
+      `body ${body} frame ${ir.frameSize} locals ${ir.localCount} scope ${ir.maxScope} outer ${ir.outerSize}`,
+    );
+    for (let k: u32 = 0; k < ir.blockCount; k++) {
+      const entry: string[] = [];
+      for (let v: u32 = 0; v < ir.frameSize; v++) {
+        entry.push(`${ir.entryType[k * ir.frameSize + v]}:${ir.entryFlags[k * ir.frameSize + v]}`);
+      }
+
+      out.push(
+        `block ${k} ${ir.blockPc[k]} ${ir.blockFirst[k]} ${ir.blockStack[k]} ${ir.blockScope[k]} | ${entry.join(" ")}`,
+      );
+    }
+
+    for (let i: u32 = 0; i < ir.count; i++) {
+      out.push(
+        `${ir.op[i]} ${ir.dst[i]} ${ir.src[i]} ${ir.srcCount[i]} ${ir.a[i]} ${ir.b[i]} ${ir.c[i]} ${ir.type[i]} ${ir.notNull[i]} ${ir.pc[i]}`,
+      );
+    }
+
+    for (let h: u32 = 0; h < ir.handlerCount; h++) {
+      out.push(
+        `handler ${ir.handlerFrom[h]} ${ir.handlerTo[h]} ${ir.handlerBlock[h]} ${ir.handlerType[h]} ${ir.handlerScope[h]}`,
+      );
+    }
+
+    const cases: string[] = [];
+    for (let c: u32 = 0; c < ir.caseCount; c++) {
+      cases.push(ir.cases[c].toString());
+    }
+
+    out.push(`cases ${cases.join(" ")}`);
+  }
+
+  return out.join("\n");
+}
+
 function irLine(ir: Ir, i: u32): string {
   const srcs: string[] = [];
   for (let k: u32 = 0; k < ir.srcCount[i]; k++) {

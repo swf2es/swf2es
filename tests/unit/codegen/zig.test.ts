@@ -8,6 +8,7 @@ import { instantiate as instantiateAs } from "../../../packages/codegen/dist/cod
 import { CodegenPanic, fromUtf8, instantiate, toUtf8 } from "../../../packages/codegen/dist/zig.js";
 import { linkAbcs } from "../../parity/link-abc.ts";
 import { richAbc } from "../../parity/rich-abc.ts";
+import { verifyErrorAbcs } from "../../parity/verify-errors.ts";
 import { bindTesting, zigTestingModule } from "./zig-testing.ts";
 
 // From dist/ by name, not by the package's export, which SWF2ES_COMPILER=zig redirects (tests/compiler.ts).
@@ -138,4 +139,5 @@ test("the Zig tests' ABCs are the ones tests/parity builds", async () => {
   assert.deepEqual(await zigBytes("domain.zig", "link_failing"), [...failing]);
   assert.deepEqual(await zigBytes("domain.zig", "link_wide"), [...wide]);
   assert.deepEqual(await zigBytes("domain.zig", "link_created"), [...created]);
+  assert.deepEqual(await zigBytes("domain.zig", "link_contested"), [...verifyErrorAbcs()[2][1]]);
 });
