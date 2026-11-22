@@ -1430,8 +1430,27 @@ function verifyLast(c: Compiler, r: Results, name: string, irs: number): void {
 }
 
 /**
+ * The JavaScript some bodies of the last ABC added compile to, each alone
+ * (domainEmit): every body of a small ABC; of a large one, `count` spread
+ * over it.
+ */
+function emitLast(c: Compiler, r: Results, name: string, count: number): void {
+  let bodies = 0;
+  linked(c, r, `${name}: verify`, () => {
+    const text: string = c.domainVerifyAll();
+    bodies = Number(/of (\d+) bodies$/.exec(text)?.[1] ?? 0);
+    return r.blob(`${name}: verify`, Buffer.from(text));
+  });
+  const step = Math.max(1, Math.ceil(bodies / count));
+  for (let b = 0; b < bodies; b += step) {
+    linked(c, r, `${name}: emit ${b}`, () => r.blob(`${name}: emit ${b}`, Buffer.from(c.domainEmit(b))));
+  }
+}
+
+/**
  * Each SWF's ABCs added into a child of the root, as linkSwfs adds them,
- * each verified after it is added; the domain made again every 40 SWFs.
+ * each verified (or what `each` does) after it is added; the domain made
+ * again every 40 SWFs.
  */
 function verifySwfs(
   c: Compiler,
@@ -1439,6 +1458,7 @@ function verifySwfs(
   base: Base,
   swfs: [string, [string, Uint8Array][]][],
   irs: number,
+  each: (c: Compiler, r: Results, name: string, count: number) => void = verifyLast,
 ): void {
   const linking = new Linking(c, r);
   for (const [k, [swf, list]] of swfs.entries()) {
@@ -1454,7 +1474,7 @@ function verifySwfs(
     });
     for (const [name, bytes] of list) {
       if (linking.link(name, bytes, child)) {
-        verifyLast(c, r, name, irs);
+        each(c, r, name, irs);
       }
     }
 
@@ -1930,6 +1950,78 @@ const SUITES: Suite[] = [
       }
 
       verifySwfs(c, r, base, cases, 5);
+    },
+  },
+  {
+    name: "emit-libraries",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainEmit"],
+    run: (c, r) => {
+      const linking = new Linking(c, r);
+      for (const [name, base] of Object.entries({ player: PLAYER, air: AIR, shell: SHELL })) {
+        linking.reset(name, { version: base.version, libraries: [] });
+        for (const [k, library] of base.libraries.entries()) {
+          if (linking.link(`${name} library ${k}`, library, 0, true)) {
+            emitLast(c, r, `${name} library ${k}`, 120);
+          }
+        }
+
+        c.__collect();
+      }
+    },
+  },
+  {
+    name: "emit-tests",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainEmit"],
+    run: (c, r) =>
+      verifySwfs(
+        c,
+        r,
+        PLAYER,
+        linkSeeds().map(([name, bytes]) => [name, [[name, bytes]]]),
+        256,
+        emitLast,
+      ),
+  },
+  {
+    name: "emit-swfs",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainEmit"],
+    run: (c, r) => verifySwfs(c, r, PLAYER, bySwf(swfAbcs()), 48, emitLast),
+  },
+  {
+    name: "emit-oracle",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainEmit"],
+    unavailable: () => (existsSync(oracleDir()) ? null : "no oracle cache"),
+    run: (c, r) => verifySwfs(c, r, SHELL, oracleAbcs(), 32, emitLast),
+  },
+  {
+    name: "emit-mutated",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainEmit"],
+    run: (c, r) =>
+      verifySwfs(
+        c,
+        r,
+        PLAYER,
+        mutatedCode(3000).map(([name, bytes]) => [name, [[name, bytes]]]),
+        16,
+        emitLast,
+      ),
+  },
+  {
+    name: "emit-fuzz",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainVerifyAll", "domainEmit"],
+    run: (c, r) => {
+      const base = { version: API_VERSION, libraries: [builtinLibrary] };
+      const cases = structuredAbcs(2000, 1).map((bytes, k): [string, [string, Uint8Array][]] => [
+        `structured ${k}`,
+        [[`structured ${k}`, bytes]],
+      ]);
+      verifySwfs(c, r, base, cases, 8, emitLast);
     },
   },
   {
