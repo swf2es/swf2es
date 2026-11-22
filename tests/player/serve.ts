@@ -154,6 +154,11 @@ export async function serve(
       path = path.slice(WORKER.length);
     }
 
+    // The compiler in Zig in its place while it is ported (docs/zig-codegen.md).
+    if (path === "/codegen/codegen.wasm" && process.env.SWF2ES_CODEGEN === "zig") {
+      path = "/codegen/codegen-zig.wasm";
+    }
+
     for (const [prefix, dir] of served) {
       if (!path.startsWith(prefix)) {
         continue;
