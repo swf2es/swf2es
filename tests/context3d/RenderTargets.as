@@ -139,10 +139,82 @@ package
 			c.setTextureAt(0, null);
 		}
 
+		// A destination larger than either configuration exposes the size AIR actually copied.
+		private function readExtent(label:String):void
+		{
+			var dest:BitmapData = new BitmapData(96, 96, true, 0xff123456);
+			c.drawToBitmapData(dest);
+			trace("rendertargets", label, c.backBufferWidth + "x" + c.backBufferHeight,
+					dest.getPixel32(8, 8).toString(16), dest.getPixel32(24, 24).toString(16),
+					dest.getPixel32(56, 56).toString(16), dest.getPixel32(72, 40).toString(16),
+					dest.getPixel32(40, 72).toString(16));
+			dest.dispose();
+		}
+
+		private function resizeReadback(t:Texture, other:Texture):void
+		{
+			c.setRenderToTexture(t);
+			c.clear(0, 1, 0);
+			readExtent("before-first-back-clear");
+			c.setRenderToBackBuffer();
+			c.configureBackBuffer(64, 64, 4, true);
+			c.setDepthTest(false, "always");
+			c.clear(1, 0, 1);
+			c.setScissorRectangle(new Rectangle(16, 16, 24, 24));
+			fill(1, 1, 0);
+			c.setRenderToTexture(t, true, 4);
+			c.clear(0, 1, 0);
+			c.configureBackBuffer(80, 48, 0, true);
+			readExtent("first-read-after-resize");
+			c.setRenderToTexture(other);
+			c.clear(1, 0, 0);
+			c.configureBackBuffer(48, 80, 0, true);
+			readExtent("read-after-second-resize");
+			c.setRenderToBackBuffer();
+			c.clear(0, 0, 0, 1, 1, 0, 0);
+			c.enableErrorChecking = false;
+			fill(0, 0, 1);
+			c.enableErrorChecking = true;
+			c.setRenderToTexture(t);
+			readExtent("read-after-unchecked-draw");
+			try
+			{
+				c.configureBackBuffer(0, 80, 0, true);
+			}
+			catch (error:Error)
+			{
+				trace("rendertargets read-refused", error.errorID);
+			}
+			readExtent("read-while-unconfigured");
+			c.enableErrorChecking = false;
+			fill(0, 0, 1);
+			c.enableErrorChecking = true;
+			c.configureBackBuffer(64, 64, 4, true);
+			readExtent("read-after-recovery");
+			c.setRenderToBackBuffer();
+			c.clear(0, 0, 0, 1, 1, 0, 2);
+			c.setRenderToTexture(t);
+			readExtent("read-after-return-to-original");
+			c.setRenderToBackBuffer();
+			c.configureBackBuffer(80, 48, 0, true);
+			c.setRenderToTexture(t);
+			readExtent("resize-while-back-selected");
+			c.setRenderToBackBuffer();
+			c.clear(0, 0, 0, 1, 1, 0, 2);
+			c.setRenderToTexture(t);
+			readExtent("read-after-depth-clear");
+			c.setRenderToBackBuffer();
+			c.clear(0, 0, 1);
+			readExtent("read-after-color-clear");
+			c.configureBackBuffer(64, 64, 0, true);
+			show(t, "unchecked-invalid-texture");
+		}
+
 		private function run():void
 		{
 			var t:Texture = c.createTexture(32, 16, "bgra", true);
 			var other:Texture = c.createTexture(64, 64, "bgra", false);
+			resizeReadback(t, other);
 			c.clear(0, 0, 1, 1);
 			c.setRenderToTexture(t);
 			c.clear(0, 1, 0, 1);
@@ -275,6 +347,40 @@ package
 			}
 			c.setTextureAt(0, null);
 			c.setRenderToBackBuffer();
+			for each (var width:int in [64, 80])
+			{
+				c.clear(0, 0, 1);
+				c.setRenderToTexture(t, true, 4);
+				c.clear(0, 1, 0);
+				c.configureBackBuffer(width, 64, 0, true);
+				c.clear(1, 0, 0);
+				c.setRenderToBackBuffer();
+				try
+				{
+					sample("configured-back-" + width);
+				}
+				catch (readError:Error)
+				{
+					trace("rendertargets configured-back-" + width, readError.errorID);
+				}
+				show(t, "configured-texture-" + width);
+			}
+			c.setRenderToTexture(t);
+			c.clear(0, 1, 0);
+			c.configureBackBuffer(64, 64, 4, true);
+			show(t, "resize-preserved-texture");
+			c.setRenderToTexture(t);
+			try
+			{
+				c.configureBackBuffer(0, 64, 0, true);
+			}
+			catch (sizeError:Error)
+			{
+				trace("rendertargets refused-size", sizeError.errorID);
+			}
+			c.configureBackBuffer(64, 64, 0, true);
+			c.clear(0, 0, 1);
+			show(t, "recovered-texture");
 			t.dispose();
 			other.dispose();
 		}

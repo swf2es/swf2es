@@ -44,6 +44,12 @@ export interface ContextState {
   /** The profile it was made for, as Context3D.profile reads it. */
   profile: Profile;
   cleared: number;
+  /** Requested pixel size, observable before a back-buffer clear installs it on the GPU. */
+  backWidth: number;
+  backHeight: number;
+  scale: number;
+  pendingBackBuffer: boolean;
+  hasBackBufferImage: boolean;
   depth: boolean;
   aa: number;
   /**
@@ -208,7 +214,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
   };
   const context = (o: AsObject): Context3D => state(o).backend;
   const requireClear = (entry: ContextState): void => {
-    if (!entry.backend.width || !entry.backend.height) {
+    if (!entry.backWidth || !entry.backHeight) {
       throw s.rt.error("Error", 3698);
     }
 
@@ -389,6 +395,11 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
         slot,
         profile: profiles.get(slot) ?? "baseline",
         cleared: 0,
+        backWidth: 0,
+        backHeight: 0,
+        scale: 1,
+        pendingBackBuffer: false,
+        hasBackBufferImage: false,
         depth: false,
         aa: 0,
         width: 0,
@@ -455,13 +466,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
   let rescale: ((entry: ContextState) => void) | null = null;
   const rescaled = (): void => {
     for (const entry of contexts.values()) {
-      if (
-        rescale &&
-        entry.best &&
-        entry.backend.width &&
-        !entry.backend.disposed &&
-        !entry.target
-      ) {
+      if (rescale && entry.best && entry.backWidth && !entry.backend.disposed && !entry.target) {
         rescale(entry);
       }
     }
