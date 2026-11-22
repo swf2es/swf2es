@@ -244,7 +244,6 @@ function parseEntries(text: string): Map<number, string> {
 
 const utf8 = new TextDecoder();
 
-/** The SWFs compared in every way: how many, how many blocks, and how many differ. */
 /**
  * The AVM1 SWFs there are: the tests' blocks as SWFs of three versions,
  * code before a block, and the corpus's, where it was fetched. The parity
@@ -276,6 +275,7 @@ export function avm1Swfs(): Avm1Swf[] {
   ];
 }
 
+/** The SWFs compared in every way: how many, how many blocks, and how many differ. */
 export async function avm1Determinism(): Promise<{
   swfs: number;
   blocks: number;

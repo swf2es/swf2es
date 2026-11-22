@@ -223,7 +223,8 @@ function avm1(c: Compiler, r: Results, swf: Avm1Swf): void {
         `${name}: unit ${key}`,
         handed(c, c.actionsUnitBytes(bytes, offsets, lengths, version, at, end, bound, five !== 0)),
       );
-      return `${code} ${c.actionsUnitLimits().join(",")}`;
+      // The code stays readable after the limits are read, as asc's does.
+      return `${code} ${c.actionsUnitLimits().join(",")} ${c.outputLength()}`;
     });
   }
 
@@ -277,6 +278,367 @@ function privateSwfs(): Avm1Swf[] {
     });
 }
 
+/** A seeded xorshift: the same numbers on every host. */
+function random(seed: number): { below: (n: number) => number; next: () => number } {
+  let state = seed | 0 || 1;
+  const next = () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return state >>> 0;
+  };
+  return { next, below: (n) => next() % n };
+}
+
+/**
+ * Random AVM1 actions, most well formed, some cut short or of lengths
+ * that lie: every kind the decoder reads, jumps and Ifs back and forth,
+ * functions, Withs, Trys, pools, Pushes of every type.
+ */
+function actions(rng: ReturnType<typeof random>, max: number): number[] {
+  const { below, next } = rng;
+  const out: number[] = [];
+  const str = () => {
+    const s: number[] = [];
+    for (let i = below(5); i > 0; i--) {
+      s.push(below(6) ? 97 + below(26) : below(256));
+    }
+
+    if (below(20)) {
+      s.push(0);
+    }
+
+    return s;
+  };
+  const u16 = (v: number) => [v & 255, (v >> 8) & 255];
+  const near = () => (below(4) ? (below(40) - 30) & 0xffff : next() & 0xffff);
+  const simple = [
+    0x04, 0x06, 0x07, 0x0a, 0x0b, 0x12, 0x17, 0x1c, 0x1d, 0x3c, 0x3d, 0x3e, 0x40, 0x47, 0x4e, 0x4f,
+    0x52, 0x2a, 0x00, 0x26,
+  ];
+  for (let i = 1 + below(max); i > 0; i--) {
+    let op: number;
+    let body: number[] = [];
+    switch (below(22)) {
+      case 0:
+      case 1:
+      case 2:
+        out.push(simple[below(simple.length)]);
+        continue;
+      case 3:
+        out.push(below(0x80));
+        continue;
+      case 4:
+      case 5:
+        op = 0x99;
+        body = u16(near());
+        break;
+      case 6:
+      case 7:
+        op = 0x9d;
+        body = u16(near());
+        break;
+      case 8:
+      case 9:
+        op = 0x96;
+        for (let j = below(4); j >= 0; j--) {
+          const type = below(11);
+          body.push(type);
+          if (type === 0) {
+            body.push(...str());
+          } else if (type === 1 || type === 7) {
+            body.push(below(256), below(256), below(256), below(256));
+          } else if (type === 6) {
+            for (let q = 0; q < 8; q++) {
+              body.push(below(256));
+            }
+          } else if (type === 4 || type === 5 || type === 8) {
+            body.push(below(256));
+          } else if (type === 9) {
+            body.push(below(256), below(256));
+          }
+        }
+        break;
+      case 10: {
+        op = 0x9b;
+        const params = below(3);
+        body = [...str(), ...u16(params)];
+        for (let j = 0; j < params; j++) {
+          body.push(...str());
+        }
+        body.push(...u16(below(12)));
+        break;
+      }
+      case 11: {
+        op = 0x8e;
+        const params = below(3);
+        body = [...str(), ...u16(params), below(6), ...u16(next() & 0xffff)];
+        for (let j = 0; j < params; j++) {
+          body.push(below(6), ...str());
+        }
+        body.push(...u16(below(12)));
+        break;
+      }
+      case 12:
+        op = 0x94;
+        body = u16(below(10));
+        break;
+      case 13: {
+        op = 0x8f;
+        const flags = below(8);
+        body = [flags, ...u16(below(8)), ...u16(below(8)), ...u16(below(8))];
+        body.push(...(flags & 4 ? [below(6)] : str()));
+        break;
+      }
+      case 14:
+        op = 0x8a;
+        body = [...u16(below(4)), below(5)];
+        break;
+      case 15:
+        op = 0x8d;
+        body = [below(5)];
+        break;
+      case 16: {
+        op = 0x88;
+        const count = below(4);
+        body = u16(count + below(2));
+        for (let j = 0; j < count; j++) {
+          body.push(...str());
+        }
+        break;
+      }
+      case 17:
+        op = 0x87;
+        body = [below(8)];
+        break;
+      case 18:
+        op = [0x81, 0x83, 0x8b, 0x8c, 0x9a, 0x9f][below(6)];
+        body =
+          op === 0x83
+            ? [...str(), ...str()]
+            : op === 0x81
+              ? u16(below(9))
+              : op === 0x9a
+                ? [below(256)]
+                : op === 0x9f
+                  ? [below(4), ...u16(below(5))]
+                  : str();
+        break;
+      default:
+        op = 0x80 + below(0x80);
+        for (let j = below(6); j > 0; j--) {
+          body.push(below(256));
+        }
+        break;
+    }
+
+    let length = body.length;
+    if (!below(25)) {
+      length = below(3) ? length + below(5) - 2 : next() & 0xffff;
+    }
+
+    out.push(op, ...u16(length & 0xffff), ...body);
+  }
+
+  if (below(4)) {
+    out.push(0);
+  }
+
+  return out;
+}
+
+/**
+ * Generated SWFs: bytes before the first block and between blocks, two or
+ * three blocks, now and then a range outside the SWF or one more offset
+ * than lengths, an odd SWF version; and with each, block lists with
+ * repeats, garbage and indices out of range, and unit keys the module did
+ * not list, some far outside the SWF. The calls of `avm1` beside: the
+ * module not kept, actionsEmitEach's string.
+ */
+function generated(c: Compiler, r: Results, count: number): void {
+  const rng = random(1);
+  const { below, next } = rng;
+  for (let k = 0; k < count; k++) {
+    const bytes: number[] = [];
+    for (let i = below(3); i > 0; i--) {
+      bytes.push(below(256));
+    }
+
+    const offsets: number[] = [];
+    const lengths: number[] = [];
+    const blocks = 1 + below(3);
+    for (let b = 0; b < blocks; b++) {
+      const block = actions(rng, 12);
+      offsets.push(bytes.length);
+      lengths.push(block.length);
+      bytes.push(...block);
+      if (below(2)) {
+        bytes.push(...actions(rng, 4));
+      }
+    }
+
+    if (!below(10)) {
+      offsets.push(below(3) ? below(bytes.length + 5) - 2 : -below(1 << 30));
+      lengths.push(below(3) ? below(bytes.length + 5) - 2 : next() | 0);
+    }
+
+    if (!below(15)) {
+      lengths.pop();
+    }
+
+    const swf = Uint8Array.from(bytes);
+    const off = Int32Array.from(offsets);
+    const len = Int32Array.from(lengths);
+    const version = below(12) ? 4 + below(8) : next() | 0;
+    const name = `generated ${k}`;
+    r.case(`${name}: module`, () =>
+      r.blob(
+        `${name}: module`,
+        handed(c, c.actionsModuleBytes(swf, off, len, version, below(8) !== 0)),
+      ),
+    );
+    r.case(`${name}: entries`, () => c.actionsModuleEntries());
+    let units = "";
+    r.case(`${name}: units`, () => {
+      units = c.actionsModuleUnits();
+      return units;
+    });
+    const lists = [
+      Array.from(off, (_, i) => i).join(","),
+      "0,0",
+      `${blocks - 1},0, 1,-1,x,0x1,+0,99999999999,,${below(5)},\u00a01,\u30001`,
+      "",
+    ];
+    for (const list of lists) {
+      for (const reuse of [true, false]) {
+        r.case(
+          `${name}: each ${list} ${reuse}`,
+          () => handed(c, c.actionsEmitEachBytes(swf, off, len, version, list, reuse)).length,
+        );
+      }
+    }
+
+    r.case(`${name}: each as a string`, () =>
+      c.actionsEmitEach(swf, off, len, version, lists[2], true),
+    );
+    const keys = units
+      .split("\u0002")
+      .map((item) => item.split("\u0001"))
+      .filter((parts) => parts.length === 4)
+      .map(([, numbers]) => numbers.split(",").map(Number));
+    for (let i = 0; i < 4; i++) {
+      const at = below(bytes.length + 4) - 2;
+      const end = below(3) ? at + below(bytes.length + 3) : below(bytes.length + 9) - 3;
+      keys.push([at, end, below(3) ? swf.length : end + below(6) - 1, below(2)]);
+    }
+
+    if (!below(5)) {
+      keys.push(
+        [next() | 0, next() | 0, next() | 0, 1],
+        [0, 2147483647, 2147483647, 0],
+        [-2147483648, 0, 0, 0],
+      );
+    }
+
+    const handle = k & 3;
+    r.case(`${name}: hold`, () => {
+      c.actionsHold(handle, swf, off, len);
+      return c.actionsHeldCount();
+    });
+    for (const [at, end, bound, five] of keys) {
+      r.case(`${name}: unit ${at},${end},${bound},${five}`, () => {
+        const code = handed(
+          c,
+          c.actionsUnitBytes(swf, off, len, version, at, end, bound, five !== 0),
+        );
+        return `${Buffer.from(code).toString("latin1")} ${c.actionsUnitLimits().join(",")} ${c.outputLength()}`;
+      });
+      r.case(`${name}: held unit ${at},${end},${bound},${five}`, () => {
+        const address = c.actionsHeldUnitBytes(handle, version, at, end, bound, five !== 0);
+        return address >>> 0 === 0
+          ? "none"
+          : `${Buffer.from(handed(c, address)).toString("latin1")} ${c.actionsUnitLimits().join(",")}`;
+      });
+    }
+
+    r.case(`${name}: held blocks`, () =>
+      Buffer.from(handed(c, c.actionsHeldEmitEachBytes(handle, version, lists[0]))).toString(
+        "latin1",
+      ),
+    );
+    if (!below(3)) {
+      r.case(`${name}: release`, () => {
+        c.actionsRelease(handle);
+        c.actionsRelease(99);
+        return `${c.actionsHeldCount()} ${c.actionsHeldEmitEachBytes(handle, version, "0")}`;
+      });
+    }
+
+    if (k % 20 === 19) {
+      c.__collect();
+    }
+  }
+}
+
+/** Pushes of 100 numbers each, floats and doubles of every kind, as dtoa writes them. */
+function doubles(c: Compiler, r: Results, count: number): void {
+  const { below, next } = random(1);
+  const f64 = new Float64Array(1);
+  const u32 = new Uint32Array(f64.buffer);
+  const f32 = new Float32Array(1);
+  const u8 = new Uint8Array(f32.buffer);
+  for (let k = 0; k < count; k++) {
+    const body: number[] = [];
+    for (let j = 0; j < 100; j++) {
+      const how = below(8);
+      if (how === 0) {
+        u8.set([below(256), below(256), below(256), below(256)]);
+        body.push(1, ...u8);
+        continue;
+      }
+
+      if (how === 1) {
+        f64[0] = (below(2000000) - 1000000) / 10 ** below(12);
+      } else if (how === 2) {
+        f64[0] = (next() * 4294967296 + next()) * 10 ** (below(60) - 30);
+      } else if (how === 3) {
+        f64[0] = Number(`${below(1000000)}e${below(640) - 330}`);
+      } else if (how === 4) {
+        u32[0] = next();
+        u32[1] = below(0x00200000);
+      } else if (how === 5) {
+        f64[0] = 2 ** (below(2100) - 1075) * below(3);
+      } else {
+        u32[0] = next();
+        u32[1] = next();
+      }
+
+      const b = new Uint8Array(f64.buffer);
+      body.push(6, b[4], b[5], b[6], b[7], b[0], b[1], b[2], b[3]);
+    }
+
+    const block = Uint8Array.from([0x96, body.length & 255, body.length >> 8, ...body, 0]);
+    r.case(`doubles ${k}`, () =>
+      Buffer.from(
+        handed(
+          c,
+          c.actionsEmitEachBytes(
+            block,
+            Int32Array.of(0),
+            Int32Array.of(block.length),
+            6,
+            "0",
+            true,
+          ),
+        ),
+      ).toString("latin1"),
+    );
+    if (k % 50 === 49) {
+      c.__collect();
+    }
+  }
+}
+
 /** The tests' blocks mutated, seeded: each a SWF of one block, of SWF 5 or 10 by turns. */
 function mutatedBlocks(count: number): Avm1Swf[] {
   const seeds = testBlocks();
@@ -318,6 +680,8 @@ function mutatedBlocks(count: number): Avm1Swf[] {
   return swfs;
 }
 
+let corpusCounted = false;
+
 const SUITES: Suite[] = [
   {
     name: "version",
@@ -340,10 +704,37 @@ const SUITES: Suite[] = [
     build: "release",
     needs: AVM1_EXPORTS,
     run: (c, r) => {
-      for (const swf of [...avm1Swfs(), ...privateSwfs()]) {
+      const swfs = avm1Swfs();
+      const corpus = swfs.filter((swf) => swf.name.endsWith(".swf")).length;
+      if (!corpusCounted) {
+        console.log(`  avm1: ${swfs.length} SWFs, ${corpus} of them the corpus's`);
+        corpusCounted = true;
+      }
+
+      r.case("corpus SWFs", () => {
+        // Without the corpus the suite is the tests' few SWFs: fetched in CI, it must be there.
+        if (corpus === 0 && process.env.CI) {
+          throw new Error("no corpus SWFs: node tests/player/corpus/fetch-ruffle.ts");
+        }
+
+        return corpus;
+      });
+      for (const swf of [...swfs, ...privateSwfs()]) {
         avm1(c, r, swf);
       }
     },
+  },
+  {
+    name: "avm1-generated",
+    build: "release",
+    needs: [...AVM1_EXPORTS, "actionsEmitEach"],
+    run: (c, r) => generated(c, r, 2000),
+  },
+  {
+    name: "avm1-doubles",
+    build: "release",
+    needs: ["actionsEmitEachBytes"],
+    run: (c, r) => doubles(c, r, 2000),
   },
   {
     name: "avm1-mutated",
