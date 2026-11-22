@@ -29,6 +29,7 @@ import {
 import { isAs3, readActions, readDoAbc, readSwf } from "../../packages/format/dist/index.js";
 import { type Avm1Swf, avm1Swfs, testBlocks } from "../conformance/determinism-avm1.ts";
 import { bindTesting, zigTestingModule } from "../unit/codegen/zig-testing.ts";
+import { richAbc } from "./rich-abc.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const out = fileURLToPath(new URL("out/", import.meta.url));
@@ -49,8 +50,11 @@ class Results {
   readonly blobs = new Map<string, Uint8Array>();
 
   readonly capture: ReadonlySet<string>;
+  /** Which compiler's: as, zig or poison. */
+  readonly compiler: string;
 
-  constructor(capture: ReadonlySet<string> = new Set()) {
+  constructor(compiler: string, capture: ReadonlySet<string> = new Set()) {
+    this.compiler = compiler;
     this.capture = capture;
   }
 
@@ -766,23 +770,34 @@ function mutatedAbcs(count: number): [string, Uint8Array][] {
 const KINDS = Uint8Array.from({ length: 64 }, (_, i) => (i * 7 + 3) % 8);
 
 /**
- * A pool dump with what AssemblyScript's leaves unspecified written as `*`:
- * a pool that failed among its namespace sets has no table of members, and
+ * The pool dumps whose sets AssemblyScript's leaves unspecified: a pool
+ * that failed among its namespace sets has no table of members, and
  * AssemblyScript's dump read the sets before past its end, whatever memory
- * followed. Such a dump has an error, sets and no multinames.
+ * followed, where Zig's writes them empty. Zig's dump decides (it runs
+ * first): an error, sets all empty, and no multinames.
  */
-function poolDumped(text: string): string {
-  if (!text.includes("\nerror ") || !text.includes("nsset ") || text.includes("\nmn ")) {
-    return text;
+const unspecifiedSets = new Set<string>();
+
+function poolDumped(r: Results, name: string, text: string): string {
+  if (r.compiler === "zig") {
+    const sets = text.match(/^nsset .*$/gm) ?? [];
+    if (
+      text.includes("\nerror ") &&
+      !text.includes("\nmn ") &&
+      sets.length > 0 &&
+      sets.every((line) => /^nsset \d+ $/.test(line))
+    ) {
+      unspecifiedSets.add(name);
+    }
   }
 
-  return text.replace(/^nsset (\d+) .*$/gm, "nsset $1 *");
+  return unspecifiedSets.has(name) ? text.replace(/^nsset (\d+) .*$/gm, "nsset $1 *") : text;
 }
 
 /** An ABC's dumps: its pool, its tables as a SWF's and as a library's, and reads of every kind. */
 function abcDumps(c: Compiler, r: Results, name: string, bytes: Uint8Array): void {
   r.case(`${name}: pool`, () =>
-    r.blob(`${name}: pool`, Buffer.from(poolDumped(c.poolDump(bytes)))),
+    r.blob(`${name}: pool`, Buffer.from(poolDumped(r, name, c.poolDump(bytes)))),
   );
   for (const builtin of [false, true]) {
     r.case(`${name}: tables, builtin ${builtin}`, () =>
@@ -900,6 +915,40 @@ const SUITES: Suite[] = [
     },
   },
   {
+    name: "abc-sweep",
+    build: "testing",
+    needs: ["poolDump", "abcDump", "readAll"],
+    run: (c, r) => {
+      // The rich ABC at 46.16 and 47.16, cut at every length and every byte set to edge values.
+      let k = 0;
+      for (const floats of [false, true]) {
+        const seed = richAbc(floats);
+        const name = floats ? "rich 47.16" : "rich 46.16";
+        for (let n = 0; n <= seed.length; n++) {
+          abcDumps(c, r, `${name} cut ${n}`, seed.subarray(0, n));
+          if (++k % 64 === 0) {
+            c.__collect();
+          }
+        }
+
+        for (let at = 0; at < seed.length; at++) {
+          const b = seed[at];
+          const values = [0, 1, 2, 3, 0x7f, 0x80, 0xff, b ^ 1, (b + 1) & 255, (b - 1) & 255];
+          for (const v of new Set([...values, b ^ 0x80, b ^ 0x40, b ^ 0x08, 0x1d, 0x09, 0x07])) {
+            if (v !== b) {
+              const bytes = seed.slice();
+              bytes[at] = v;
+              abcDumps(c, r, `${name} set ${at}=${v}`, bytes);
+              if (++k % 64 === 0) {
+                c.__collect();
+              }
+            }
+          }
+        }
+      }
+    },
+  },
+  {
     name: "abc-mutated",
     build: "testing",
     needs: ["poolDump", "abcDump", "readAll"],
@@ -952,16 +1001,17 @@ const has = { release: exported(modules.zig), testing: exported(modules.zigTesti
 
 /** Fresh instances of the three, as a host makes one, for each suite. */
 async function instances(build: Suite["build"]): Promise<Record<string, Compiler>> {
+  // Zig's first: what it writes decides how the others' unspecified parts are compared (poolDumped).
   return build === "release"
     ? {
-        as: await instantiateAs(modules.as, { env: {} }),
         zig: await instantiateZig(modules.zig),
         poison: await bindTesting(modules.poison),
+        as: await instantiateAs(modules.as, { env: {} }),
       }
     : {
-        as: await instantiateAsTesting(modules.asTesting, { env: {} }),
         zig: await bindTesting(modules.zigTesting),
         poison: await bindTesting(modules.poison),
+        as: await instantiateAsTesting(modules.asTesting, { env: {} }),
       };
 }
 
@@ -992,7 +1042,7 @@ function differs(a: string[], b: string[]): number {
  */
 async function showBlobs(suite: Suite, key: string, aName: string, bName: string): Promise<string> {
   const fresh = await instances(suite.build);
-  const [a, b] = [new Results(new Set([key])), new Results(new Set([key]))];
+  const [a, b] = [new Results(aName, new Set([key])), new Results(bName, new Set([key]))];
   suite.run(fresh[aName], a);
   suite.run(fresh[bName], b);
   const [aBytes, bBytes] = [a.blobs.get(key), b.blobs.get(key)];
@@ -1030,7 +1080,7 @@ for (const suite of SUITES.filter((s) => wanted.length === 0 || wanted.includes(
 
   const results: Record<string, Results> = {};
   for (const [compiler, instance] of Object.entries(await instances(suite.build))) {
-    results[compiler] = new Results();
+    results[compiler] = new Results(compiler);
     suite.run(instance, results[compiler]);
     writeFileSync(join(out, `${suite.name}.${compiler}.txt`), results[compiler].lines.join("\n"));
   }

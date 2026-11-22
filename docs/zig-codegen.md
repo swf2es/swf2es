@@ -703,6 +703,18 @@ yet, since no release export calls the parser before stage 3's
 `domainAdd`; the test build grew from 141,874 to 189,140 bytes with the
 parser and its four dumps.
 
+For stage 5: `Output.init` reserves 64 KB up front, so each `Output` is
+a whole run in the call arena; an emitter made per method or per block
+should reuse one, as AssemblyScript's reuse their buffers.
+
+The parser's tables go to the allocator it is given (stage 3: the
+domain's arena) and what only the parse needs (a set's members while
+they are counted, the TypeName stamps) to a scratch allocator, the call's
+arena, so a domain keeps nothing of a parse but its tables. Each ABC and
+pool has its own default tables (`Abc.init`, `ConstantPool.init`), never
+shared constants. The reader requires PADDING bytes past the ABC, which
+domainAdd guarantees by copying the ABC so, as the dumps do.
+
 **Output and `std.Io.Writer` (measured at stage 2).** In the names build,
 the standalone writer and `std.fmt` functions are 3,875 of 106,184 code
 bytes (3.6%); the rest of `print` is inlined into its callers

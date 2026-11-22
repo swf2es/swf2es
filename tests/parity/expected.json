@@ -7,5 +7,6 @@
   "avm1-mutated",
   "avm1-dumps",
   "abc-dumps",
+  "abc-sweep",
   "abc-mutated"
 ]
