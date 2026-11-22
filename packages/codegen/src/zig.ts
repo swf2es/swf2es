@@ -32,9 +32,13 @@ type Runtime = "memory" | "__new" | "__pin" | "__unpin" | "__collect" | "__rtti_
  * are; `=value` a default, as the AssemblyScript function declares it.
  * Results: `str` UTF-8 handed out, decoded as AssemblyScript decodes it;
  * `address` an address handed out, as the *Bytes exports return it;
- * `f64x2` two doubles at an address.
+ * `f64x2` two doubles at an address; `f64s` doubles handed out, as many as
+ * `outputLength` bytes hold.
  */
-export type Signature = readonly [string, "void" | "i32" | "bool" | "str" | "address" | "f64x2"];
+export type Signature = readonly [
+  string,
+  "void" | "i32" | "bool" | "str" | "address" | "f64x2" | "f64s",
+];
 
 /** Every export of codegen.wasm's, by its AssemblyScript signature. */
 export const SIGNATURES: { readonly [name in Exclude<keyof CodegenExports, Runtime>]: Signature } =
@@ -287,6 +291,12 @@ export async function bind<T>(
           return value >>> 0;
         case "f64x2":
           return new Float64Array(exports.memory.buffer, value >>> 0, 2).slice();
+        case "f64s":
+          return new Float64Array(
+            exports.memory.buffer,
+            value >>> 0,
+            exports.outputLength() / 8,
+          ).slice();
         default:
           return value;
       }

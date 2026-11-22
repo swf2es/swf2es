@@ -17,6 +17,10 @@ const TESTING_SIGNATURES: Record<string, Signature> = {
   avm1Dump: ["u8s", "str"],
   avm1Check: ["u8s", "str"],
   avm1Action: ["u8s i32", "str"],
+  readAll: ["u8s u8s", "f64s"],
+  poolDump: ["u8s", "str"],
+  abcDump: ["u8s bool=false", "str"],
+  opcodeTable: ["", "str"],
 };
 
 /** The test build, or the one that fills freed memory with 0xAA, compiled. */

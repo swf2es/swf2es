@@ -46,6 +46,10 @@ const testing_exports = exports ++ [_][]const u8{
     "avm1Dump",
     "avm1Check",
     "avm1Action",
+    "readAll",
+    "poolDump",
+    "abcDump",
+    "opcodeTable",
 };
 
 /// The shadow stack, first in memory so that overflowing it traps rather

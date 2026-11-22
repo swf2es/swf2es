@@ -9,6 +9,7 @@ const memory = @import("memory.zig");
 const root = @import("root.zig");
 const avm1 = @import("testing/avm1.zig");
 const avm1_compile = @import("avm1/compile.zig");
+const abc = @import("testing/abc.zig");
 
 pub const panic = root.panic;
 
@@ -96,6 +97,29 @@ export fn avm1Check(bytes: [*]const u8, len: u32) usize {
 /// The action at `offset` of an AVM1 block alone.
 export fn avm1Action(bytes: [*]const u8, len: u32, offset: i32) usize {
     return root.handOut(avm1.action(root.gpa(), bytes[0..len], offset) catch |err| return root.failWriting(err));
+}
+
+// The ABC reader's and parser's dumps (assembly/testing/abc.ts).
+
+/// The values `kinds` read in order from `bytes`, then the position and whether the reader failed, as f64s.
+export fn readAll(bytes: [*]const u8, len: u32, kinds: [*]const u8, kinds_len: u32) usize {
+    const values = abc.readAll(root.gpa(), bytes[0..len], kinds[0..kinds_len]) catch |err| return root.fail(err);
+    return root.handOut(std.mem.sliceAsBytes(values));
+}
+
+/// The constant pool of an ABC block, one entry a line.
+export fn poolDump(bytes: [*]const u8, len: u32) usize {
+    return root.handOut(abc.poolDump(root.gpa(), bytes[0..len]) catch |err| return root.failWriting(err));
+}
+
+/// An ABC block's tables after the constant pool, one entry a line.
+export fn abcDump(bytes: [*]const u8, len: u32, is_builtin: bool) usize {
+    return root.handOut(abc.abcDump(root.gpa(), bytes[0..len], is_builtin) catch |err| return root.failWriting(err));
+}
+
+/// AVM2's opcode table.
+export fn opcodeTable() usize {
+    return root.handOut(abc.opcodeTable(root.gpa()) catch |err| return root.failWriting(err));
 }
 
 /// What the exports keep and hold let go, and the call's and the global
@@ -197,6 +221,18 @@ fn throughExports(_: std.mem.Allocator, p: *memory.Pages) !void {
     _ = root.input(0);
     _ = avm1Opcodes();
     try failed.check();
+    s = try stage.call(size);
+    _ = poolDump(@ptrFromInt(s.swf), len);
+    try failed.check();
+    s = try stage.call(size);
+    _ = abcDump(@ptrFromInt(s.swf), len, true);
+    try failed.check();
+    s = try stage.call(size);
+    _ = readAll(@ptrFromInt(s.swf), len, @ptrFromInt(s.swf), len);
+    try failed.check();
+    _ = root.input(0);
+    _ = opcodeTable();
+    try failed.check();
 }
 
 test "the exports, staging to handing out, may run out of memory anywhere and keep nothing" {
@@ -206,4 +242,5 @@ test "the exports, staging to handing out, may run out of memory anywhere and ke
 test {
     _ = root;
     _ = avm1;
+    _ = abc;
 }

@@ -287,10 +287,10 @@ fn writeValue(w: *Writer, value: decode.Value) Writer.Error!void {
     switch (value) {
         .string => |s| try writeString(w, s),
         .float => |n| {
-            try writeF64(w, n);
+            try output.writeF64(w, n);
             try w.writeByte('f');
         },
-        .double => |n| try writeF64(w, n),
+        .double => |n| try output.writeF64(w, n),
         .null => try w.writeAll("null"),
         .undefined => try w.writeAll("undefined"),
         .register => |r| try w.print("r{d}", .{r}),
@@ -301,157 +301,9 @@ fn writeValue(w: *Writer, value: decode.Value) Writer.Error!void {
     }
 }
 
-/// A double as AssemblyScript's f64.toString writes it, as a template string does.
-fn writeF64(w: *Writer, d: f64) Writer.Error!void {
-    if (d == 0) {
-        return w.writeAll("0.0");
-    }
-
-    if (std.math.isNan(d)) {
-        return w.writeAll("NaN");
-    }
-
-    if (std.math.isInf(d)) {
-        return w.writeAll(if (d < 0) "-Infinity" else "Infinity");
-    }
-
-    var buffer: [dtoa.max_length]u8 = undefined;
-    try w.writeAll(dtoa.dtoa(&buffer, d));
-}
-
 /// A string as `"..."`, of the string AssemblyScript decodes its bytes to.
 fn writeString(w: *Writer, s: []const u8) Writer.Error!void {
     try w.writeByte('"');
-    try writeDecoded(w, s);
+    try output.writeDecoded(w, s);
     try w.writeByte('"');
-}
-
-/// The UTF-16 units String.UTF8.decodeUnsafe makes of `bytes`, written as
-/// WTF-8: valid UTF-8 for valid UTF-8, a lone surrogate as its three bytes,
-/// which the wrapper's fromUtf8 reads back to the same units.
-pub fn writeDecoded(w: *Writer, bytes: []const u8) Writer.Error!void {
-    var pending: ?u32 = null;
-    var at: usize = 0;
-    while (at < bytes.len) {
-        var lead: u32 = bytes[at];
-        at += 1;
-        var units: [2]u32 = undefined;
-        var n: usize = 1;
-        if (lead & 128 == 0) {
-            units[0] = lead;
-        } else {
-            if (at == bytes.len) {
-                break;
-            }
-
-            const second: u32 = bytes[at] & 63;
-            at += 1;
-            if (lead & 224 == 192) {
-                units[0] = ((lead & 31) << 6) | second;
-            } else {
-                if (at == bytes.len) {
-                    break;
-                }
-
-                const third: u32 = bytes[at] & 63;
-                at += 1;
-                if (lead & 240 == 224) {
-                    lead = ((lead & 15) << 12) | (second << 6) | third;
-                } else {
-                    if (at == bytes.len) {
-                        break;
-                    }
-
-                    lead = ((lead & 7) << 18) | (second << 12) | (third << 6) | (bytes[at] & 63);
-                    at += 1;
-                }
-
-                if (lead < 0x10000) {
-                    units[0] = lead;
-                } else {
-                    units = .{ ((lead - 0x10000) >> 10) | 0xd800, ((lead - 0x10000) & 0x3ff) | 0xdc00 };
-                    n = 2;
-                }
-            }
-        }
-
-        for (units[0..n]) |unit| {
-            pending = try writeUnit(w, pending, unit);
-        }
-    }
-
-    if (pending) |high| {
-        try writeCodePoint(w, high);
-    }
-}
-
-/// Unit `unit` after a high surrogate `pending`, if one waits for its low
-/// one: a pair as one code point, anything else alone. The high surrogate
-/// that now waits, if one does.
-fn writeUnit(w: *Writer, pending: ?u32, unit: u32) Writer.Error!?u32 {
-    if (pending) |high| {
-        if (unit >= 0xdc00 and unit <= 0xdfff) {
-            try writeCodePoint(w, 0x10000 + ((high - 0xd800) << 10) + (unit - 0xdc00));
-            return null;
-        }
-
-        try writeCodePoint(w, high);
-    }
-
-    if (unit >= 0xd800 and unit <= 0xdbff) {
-        return unit;
-    }
-
-    try writeCodePoint(w, unit);
-    return null;
-}
-
-fn writeCodePoint(w: *Writer, c: u32) Writer.Error!void {
-    var buffer: [4]u8 = undefined;
-    const n: usize = switch (c) {
-        0...0x7f => blk: {
-            buffer[0] = @intCast(c);
-            break :blk 1;
-        },
-        0x80...0x7ff => blk: {
-            buffer[0] = @intCast(0xc0 | (c >> 6));
-            buffer[1] = @intCast(0x80 | (c & 63));
-            break :blk 2;
-        },
-        0x800...0xffff => blk: {
-            buffer[0] = @intCast(0xe0 | (c >> 12));
-            buffer[1] = @intCast(0x80 | ((c >> 6) & 63));
-            buffer[2] = @intCast(0x80 | (c & 63));
-            break :blk 3;
-        },
-        else => blk: {
-            buffer[0] = @intCast(0xf0 | (c >> 18));
-            buffer[1] = @intCast(0x80 | ((c >> 12) & 63));
-            buffer[2] = @intCast(0x80 | ((c >> 6) & 63));
-            buffer[3] = @intCast(0x80 | (c & 63));
-            break :blk 4;
-        },
-    };
-    try w.writeAll(buffer[0..n]);
-}
-
-fn expectDecoded(bytes: []const u8, wtf8: []const u8) !void {
-    var buffer: [64]u8 = undefined;
-    var w: Writer = .fixed(&buffer);
-    try writeDecoded(&w, bytes);
-    try std.testing.expectEqualSlices(u8, wtf8, w.buffered());
-}
-
-test "strings are AssemblyScript's decoding of their bytes, as WTF-8" {
-    try expectDecoded("a\xc3\xa9", "a\xc3\xa9");
-    // Cut short at the end: dropped.
-    try expectDecoded("a\xc3", "a");
-    try expectDecoded("a\xe2\x82", "a");
-    // Overlong: read for its bits.
-    try expectDecoded("\xc0\xaf", "/");
-    // Surrogates' three bytes, alone or as a pair.
-    try expectDecoded("\xed\xa0\x80", "\xed\xa0\x80");
-    try expectDecoded("\xed\xa0\x80\xed\xb0\x80", "\xf0\x90\x80\x80");
-    // A stray continuation byte begins a sequence of four.
-    try expectDecoded("\x80\x41\x41\x41b", "\xe1\x81\x81b");
 }
