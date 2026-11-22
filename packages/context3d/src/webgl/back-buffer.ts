@@ -19,12 +19,6 @@ export function configureBackBuffer(
   ctx.alive();
   range(32, width - 32, MOST_BACK_BUFFER);
   range(32, height - 32, MOST_BACK_BUFFER);
-  if (ctx.renderTexture) {
-    throw new Context3DError(
-      "operation",
-      "Context3D experiment: resize while rendering to texture",
-    );
-  }
 
   // AIR preserves color, depth and bindings when the request is unchanged.
   // Shadow passes can issue this every frame when returning to the back buffer.
@@ -134,7 +128,7 @@ export function configureBackBuffer(
     gl.deleteRenderbuffer(depthBuffer);
     gl.deleteRenderbuffer(colorBuffer);
     gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-    ctx.bindFramebuffer(gl.FRAMEBUFFER, ctx.framebuffer);
+    ctx.restoreTargetFramebuffer();
     throw error;
   }
 
@@ -161,7 +155,7 @@ export function configureBackBuffer(
   ctx.pixels = new Uint8Array(0);
   ctx.topDown = new Uint8Array(0);
   ctx.applyScissor();
-  ctx.clear(0, 0, 0, 1);
+  ctx.clearBackBuffer();
 }
 
 /**
@@ -196,12 +190,6 @@ function storageLimit(ctx: WebGLContext3D): Int32Array {
 
 export function unconfigureBackBuffer(ctx: WebGLContext3D): void {
   ctx.alive();
-  if (ctx.renderTexture) {
-    throw new Context3DError(
-      "operation",
-      "Context3D experiment: resize while rendering to texture",
-    );
-  }
 
   const gl = ctx.gl;
   gl.deleteTexture(ctx.texture);

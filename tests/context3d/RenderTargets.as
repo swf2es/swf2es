@@ -275,6 +275,40 @@ package
 			}
 			c.setTextureAt(0, null);
 			c.setRenderToBackBuffer();
+			for each (var width:int in [64, 80])
+			{
+				c.clear(0, 0, 1);
+				c.setRenderToTexture(t, true, 4);
+				c.clear(0, 1, 0);
+				c.configureBackBuffer(width, 64, 0, true);
+				c.clear(1, 0, 0);
+				c.setRenderToBackBuffer();
+				try
+				{
+					sample("configured-back-" + width);
+				}
+				catch (readError:Error)
+				{
+					trace("rendertargets configured-back-" + width, readError.errorID);
+				}
+				show(t, "configured-texture-" + width);
+			}
+			c.setRenderToTexture(t);
+			c.clear(0, 1, 0);
+			c.configureBackBuffer(64, 64, 4, true);
+			show(t, "resize-preserved-texture");
+			c.setRenderToTexture(t);
+			try
+			{
+				c.configureBackBuffer(0, 64, 0, true);
+			}
+			catch (sizeError:Error)
+			{
+				trace("rendertargets refused-size", sizeError.errorID);
+			}
+			c.configureBackBuffer(64, 64, 0, true);
+			c.clear(0, 0, 1);
+			show(t, "recovered-texture");
 			t.dispose();
 			other.dispose();
 		}
