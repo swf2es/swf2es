@@ -133,18 +133,18 @@ export const stringNatives: Natives = {
   "String.String::_search": (rt) => (s: string, pattern: Value) =>
     s.search(pattern?.$re instanceof RegExp ? pattern.$re : compile(rt.toString(pattern), "")),
   "String.String::_match": (rt) => (s: string, pattern: Value) => {
-    const re: RegExp =
-      pattern?.$re instanceof RegExp ? pattern.$re : compile(rt.toString(pattern), "");
+    const source: string = pattern?.$source ?? rt.toString(pattern);
+    const re: RegExp = pattern?.$re ?? compile(source, "");
     if (!re.global) {
       const m = s.match(re);
-      return m ? matchArray(rt, m) : null;
+      return m ? matchArray(rt, m, source) : null;
     }
 
     // As RegExpObject::match: each match from where the last ended, until
     // one fails or is empty, so none is an empty Array; lastIndex is then
     // where the last try ended, 0 for a failed one, one on if it was there.
     const old = re.lastIndex;
-    const found: string[] = [];
+    const found: Value[] = [];
     let at = 0;
     for (;;) {
       re.lastIndex = at;
@@ -155,7 +155,12 @@ export const stringNatives: Natives = {
         break;
       }
 
-      found.push(m[0]);
+      // A capture named length can truncate the match array before slot 0 is read.
+      if (m.groups && "length" in m.groups) {
+        found.push(rt.getProperty(matchArray(rt, m, source), rt.publicName(0)));
+      } else {
+        found.push(m[0]);
+      }
     }
 
     re.lastIndex = at === old ? at + 1 : at;
