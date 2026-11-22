@@ -974,6 +974,43 @@ emitters' code, by file, ReleaseSafe and ReleaseSmall: module 44.5 and
 instructions inlined) 26.5 and 16.2, stack-names 8.5 and 3.1, refs 8.4
 and 5.6, structure 6.4 and 3.3, values 6.1 and 3.8; the rest is inlined.
 
+Stage 6 (the exports and lifetimes), as built:
+
+- *Every export.* Keys, the log and its replay, the rebuild (whole and a
+  part at a time), compaction, revival with a rebuild, and saving and
+  loading. Every export of AssemblyScript's compiler is Zig's too, but
+  its runtime's. Each domain is in an arena of its own (`Box`), so a
+  rebuild or a load makes the new one beside the old. A rebuild's parts
+  each run in a Change of the new domain. One that runs out of memory
+  fails the rebuild, leaving the domain as it was and a domain being
+  revived evicted. The domain it replaces is given back, with its kept
+  module and its verified bodies.
+- *Rebuilds parse the live ABCs again* into the new domain's arena, as
+  the old one's arena goes with it. AssemblyScript's hands the new domain
+  its Abc objects. `wantsRebuild` counts that re-parse for an in-place
+  rebuild, which is Zig's own decision. The weights `domainUsage` reports
+  stay AssemblyScript's, and are compared. An arena per parsed ABC, handed
+  to the new domain, was tried (branch `zig/stage-6-abc-arenas`). It takes
+  whole 16 KB chunks, so a small ABC costs at least that, which the dead
+  weight does not see. It is M2's starting point, with a sub-chunk
+  allocator for small ABCs whose dead runs are reused.
+- *Recovery from a panic* is the wrapper's, by its journal of calls
+  (section 7): replayed into a spare instance kept at hand for Zig's
+  compiler. A dropped domain's ABCs give way in the journal to an empty
+  ABC, which keeps their indices, and its compiles' logs go, so the
+  journal does not keep every ABC a long session loads. Two gaps:
+  - A panic before the spare instance exists cannot be recovered from.
+    It is made asynchronously as the compiler is, so the gap is the
+    first calls after `createCodegen`.
+  - The rebuilds since the reset are not replayed. A recovered domain's
+    `generation` is 0, so keys taken after a recovery differ from those
+    before it, which costs cache misses only.
+- *Writes outside put.* A stepped verifier truncates its log entry in a
+  later call than the one that added it, and a push in the same call may
+  write over that row: a rollback writes it back (`Domain.truncated`).
+- *Peak memory* on `codegen-session.ts`, 300 loads: Zig 27.4 MB against
+  AssemblyScript's 29.8 MB, with 6 rebuilds each, in 5.9 s against 5.7.
+
 **Release mode, decided.** The user's decision after stage 5: the
 release ships in ReleaseSafe. About 180 KB gzipped is fine, so section
 7's bound of twice AssemblyScript's size and its 1.15 bound on compile
