@@ -134,8 +134,18 @@ function parameters(spec: string): Parameter[] {
 
 const align8 = (n: number) => (n + 7) & ~7;
 
-/** The exports that read the last call, whose result they report, rather than start one. */
-const READS_LAST_CALL = new Set(["outputLength", "codegenError"]);
+/**
+ * The exports that read what the last call left rather than start one, as
+ * asc's do: the call's output stays readable after them (a unit's limits,
+ * read after its code, the held SWFs counted or one let go).
+ */
+const READS_LAST_CALL = new Set([
+  "outputLength",
+  "codegenError",
+  "actionsUnitLimits",
+  "actionsHeldCount",
+  "actionsRelease",
+]);
 
 /**
  * The exports of a Zig build of the compiler, instantiated from `module`,
