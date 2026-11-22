@@ -7,6 +7,12 @@ const output = @import("../output.zig");
 const compile = @import("../compile.zig");
 const domain_ = @import("../avm2/link/domain.zig");
 const Domain = domain_.Domain;
+const code = @import("../avm2/abc/code.zig");
+const BodyDecoder = code.BodyDecoder;
+const ops = @import("../avm2/abc/opcodes.zig");
+const ir_ = @import("../avm2/ir/ir.zig");
+const Ir = ir_.Ir;
+const traits_ = @import("../avm2/link/traits.zig");
 
 /// The domain's binding of `name` in the namespace of type `type` (NS_*) and
 /// URI `uri`, visible at `version` from application domain `appDomain`:
@@ -176,6 +182,321 @@ pub fn domainSlotTypes(dom: *Domain, gpa: Allocator, index: i32, cls: i32) Alloc
     return out.items;
 }
 
+/// Verify every method of the domain's last ABC that its scripts can run,
+/// with types: a "body B method M error N" line for each that fails, then
+/// "verified V of B bodies".
+pub fn domainVerifyAll(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
+    if (dom.abcs.len == 0) {
+        return "verified 0 of 0 bodies";
+    }
+
+    const index = dom.abcs.len - 1;
+    const abc = dom.abcs.get(index);
+    const results = try code.verifyMethods(dom, index);
+    var out: std.ArrayList(u8) = .empty;
+    var verified: u32 = 0;
+    for (results, 0..) |result, b| {
+        if (result >= 0) {
+            verified += 1;
+        }
+
+        if (result > 0) {
+            try out.print(gpa, "body {d} method {d} error {d}\n", .{ b, abc.bodyMethod.get(@intCast(b)), result });
+        }
+    }
+
+    try out.print(gpa, "verified {d} of {d} bodies", .{ verified, results.len });
+    return out.items;
+}
+
+/// The IR of body `body` of the domain's last ABC, after verifying the ABC
+/// as domainVerifyAll does: "B<n> @<pc> stack [types] scope [types]" per
+/// block, then a line per instruction, "<pc>: [dst =] op srcs [a b c] : type",
+/// a trailing ! marking a type known not null; "error N" if it failed.
+pub fn domainIr(dom: *Domain, gpa: Allocator, body: u32) Allocator.Error![]const u8 {
+    if (dom.abcs.len == 0) {
+        return "not verified";
+    }
+
+    const index = dom.abcs.len - 1;
+    const abc = dom.abcs.get(index);
+    const results = try code.verifyMethods(dom, index);
+    if (body >= results.len) {
+        return "not verified";
+    }
+
+    if (results[body] != 0) {
+        return if (results[body] < 0) "not verified" else std.fmt.allocPrint(gpa, "error {d}", .{results[body]});
+    }
+
+    var decoder: BodyDecoder = try .init(gpa, abc, dom.abcBuffer.get(index), dom, index);
+    const m = dom.methodStart.get(index) + abc.bodyMethod.get(body);
+    const result = try decoder.decode(body, dom.traits.scopeOf(m));
+    if (result.@"error" != 0) {
+        return std.fmt.allocPrint(gpa, "error {d}", .{result.@"error"});
+    }
+
+    const ir = &decoder.ir;
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    const w = &out.writer;
+    write: {
+        const stackBase = ir.localCount + ir.maxScope;
+        var lines: u32 = 0;
+        for (0..ir.blockCount) |k_| {
+            const k: u32 = @intCast(k_);
+            const entry = k * ir.frameSize;
+            if (lines > 0) w.writeByte('\n') catch break :write;
+            lines += 1;
+            w.print("B{d} @{d} stack [", .{ k, ir.blockPc[k] }) catch break :write;
+            for (0..ir.blockStack[k]) |d| {
+                if (d > 0) w.writeAll(", ") catch break :write;
+                const at = entry + stackBase + @as(u32, @intCast(d));
+                writeType(w, dom, ir.entryType[at], ir.entryFlags[at] & 1) catch break :write;
+            }
+
+            w.writeAll("] scope [") catch break :write;
+            for (0..ir.blockScope[k]) |d| {
+                if (d > 0) w.writeAll(", ") catch break :write;
+                writeType(w, dom, ir.entryType[entry + ir.localCount + @as(u32, @intCast(d))], 1) catch break :write;
+            }
+
+            w.writeByte(']') catch break :write;
+            const last = if (k + 1 < ir.blockCount) ir.blockFirst[k + 1] else ir.count;
+            var i = ir.blockFirst[k];
+            while (i < last) : (i += 1) {
+                w.writeAll("\n  ") catch break :write;
+                irLine(w, dom, ir, i) catch break :write;
+            }
+        }
+
+        for (0..ir.handlerCount) |h| {
+            if (lines > 0) w.writeByte('\n') catch break :write;
+            lines += 1;
+            w.print("handler {d}..{d} B{d} ", .{ ir.handlerFrom[h], ir.handlerTo[h], ir.handlerBlock[h] }) catch break :write;
+            writeType(w, dom, ir.handlerType[h], 0) catch break :write;
+        }
+
+        return out.written();
+    }
+
+    return error.OutOfMemory;
+}
+
+/// Check the IR of every method of the domain's last ABC that verifies
+/// (testing/domain.ts tells what): "checked N bodies, R instructions" or
+/// the first problem.
+pub fn domainCheckIr(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
+    if (dom.abcs.len == 0) {
+        return "checked 0 bodies, 0 instructions";
+    }
+
+    const index = dom.abcs.len - 1;
+    const abc = dom.abcs.get(index);
+    const results = try code.verifyMethods(dom, index);
+    var decoder: BodyDecoder = try .init(gpa, abc, dom.abcBuffer.get(index), dom, index);
+    var bodies: u32 = 0;
+    var rows: u32 = 0;
+    for (0..abc.bodyCount()) |b| {
+        const body: u32 = @intCast(b);
+        if (results[body] != 0) {
+            continue;
+        }
+
+        const m = dom.methodStart.get(index) + abc.bodyMethod.get(body);
+        _ = try decoder.decode(body, dom.traits.scopeOf(m));
+        const ir = &decoder.ir;
+        bodies += 1;
+        rows += ir.count;
+        const size: i32 = @intCast(ir.frameSize);
+        for (0..ir.blockCount) |k_| {
+            const k: u32 = @intCast(k_);
+            const first = ir.blockFirst[k];
+            const last = if (k + 1 < ir.blockCount) ir.blockFirst[k + 1] else ir.count;
+            const end = if (k + 1 < ir.blockCount) ir.blockPc[k + 1] else abc.bodyCodeLength.get(body);
+            if (last == first and k + 1 == ir.blockCount) {
+                return std.fmt.allocPrint(gpa, "body {d} B{d}: empty last block", .{ body, k });
+            }
+
+            var i = first;
+            while (i < last) : (i += 1) {
+                const op = ir.op[i];
+                const where = .{ body, k, i, irName(op) };
+                if (ir.dst[i] >= size or ir.dst[i] < -1) {
+                    return std.fmt.allocPrint(gpa, "body {d} B{d} row {d} ({s}): dst {d} outside the frame of {d}", where ++ .{ ir.dst[i], size });
+                }
+
+                if (ir.srcCount[i] != 0 and (ir.src[i] < 0 or ir.src[i] + @as(i32, @bitCast(ir.srcCount[i])) > size)) {
+                    return std.fmt.allocPrint(gpa, "body {d} B{d} row {d} ({s}): src {d}+{d} outside the frame of {d}", where ++ .{ ir.src[i], ir.srcCount[i], size });
+                }
+
+                if (ir.pc[i] < ir.blockPc[k] or ir.pc[i] >= end) {
+                    return std.fmt.allocPrint(gpa, "body {d} B{d} row {d} ({s}): pc {d} outside {d}..{d}", where ++ .{ ir.pc[i], ir.blockPc[k], end });
+                }
+
+                const branches = (op >= 0x0c and op <= 0x1a) or op == 0x10;
+                if (branches and ir.a[i] >= ir.blockCount) {
+                    return std.fmt.allocPrint(gpa, "body {d} B{d} row {d} ({s}): target B{d} of {d}", where ++ .{ ir.a[i], ir.blockCount });
+                }
+
+                if (ir.isSwitch(i)) {
+                    if (ir.a[i] >= ir.blockCount) {
+                        return std.fmt.allocPrint(gpa, "body {d} B{d} row {d} ({s}): default B{d}", where ++ .{ir.a[i]});
+                    }
+
+                    var c = ir.b[i];
+                    while (c <= ir.b[i] + @as(u32, @bitCast(ir.c[i]))) : (c += 1) {
+                        if (ir.cases[c] >= ir.blockCount) {
+                            return std.fmt.allocPrint(gpa, "body {d} B{d} row {d} ({s}): case B{d}", where ++ .{ir.cases[c]});
+                        }
+                    }
+                }
+            }
+
+            // A block ends in a jump, switch, return or throw, or falls into the next.
+            const lastOp: u16 = if (last > first) ir.op[last - 1] else 0;
+            const terminal = lastOp == 0x10 or lastOp == 0x1b or lastOp == 0x03 or lastOp == 0x47 or lastOp == 0x48;
+            if (!terminal and k + 1 == ir.blockCount) {
+                return std.fmt.allocPrint(gpa, "body {d} B{d}: falls off the end after {s}", .{ body, k, irName(lastOp) });
+            }
+        }
+
+        for (0..ir.handlerCount) |h| {
+            if (ir.handlerBlock[h] >= ir.blockCount) {
+                return std.fmt.allocPrint(gpa, "body {d} handler {d}: block B{d}", .{ body, h, ir.handlerBlock[h] });
+            }
+        }
+    }
+
+    return std.fmt.allocPrint(gpa, "checked {d} bodies, {d} instructions", .{ bodies, rows });
+}
+
+fn irLine(w: *std.Io.Writer, dom: *const Domain, ir: *const Ir, i: u32) std.Io.Writer.Error!void {
+    const op = ir.op[i];
+    const dst = ir.dst[i];
+    try w.print("{d}: ", .{ir.pc[i]});
+    if (dst >= 0) {
+        try register(w, ir, dst);
+        try w.writeAll(" = ");
+    }
+
+    try w.writeAll(irName(op));
+    for (0..ir.srcCount[i]) |k| {
+        try w.writeByte(' ');
+        try register(w, ir, ir.src[i] + @as(i32, @intCast(k)));
+    }
+
+    if (ir.isSwitch(i)) {
+        try w.print(" default B{d} [", .{ir.a[i]});
+        var c = ir.b[i];
+        while (c <= ir.b[i] + @as(u32, @bitCast(ir.c[i]))) : (c += 1) {
+            if (c > ir.b[i]) try w.writeByte(' ');
+            try w.print("B{d}", .{ir.cases[c]});
+        }
+
+        try w.writeByte(']');
+    } else if (op == 0x10 or (op >= 0x0c and op <= 0x1a)) {
+        try w.print(" B{d}", .{ir.a[i]});
+    } else if (op == ir_.IR_Coerce) {
+        try w.writeByte(' ');
+        try writeType(w, dom, ir.c[i], 0);
+    } else if (ir.a[i] != 0 or ir.b[i] != 0 or ir.c[i] != 0) {
+        try w.print(" [{d} {d} {d}]", .{ ir.a[i], ir.b[i], ir.c[i] });
+    }
+
+    if (dst >= 0) {
+        try w.writeAll(" : ");
+        try writeType(w, dom, ir.type[i], ir.notNull[i]);
+    }
+}
+
+fn register(w: *std.Io.Writer, ir: *const Ir, r: i32) std.Io.Writer.Error!void {
+    const local: i32 = @intCast(ir.localCount);
+    if (r < local) {
+        return w.print("l{d}", .{r});
+    }
+
+    const scopes: i32 = @intCast(ir.maxScope);
+    if (r < local + scopes) {
+        return w.print("sc{d}", .{r - local});
+    }
+
+    return w.print("s{d}", .{r - local - scopes});
+}
+
+fn irName(op: u16) []const u8 {
+    if (op < 256) {
+        return ops.opcodeNames[op];
+    }
+
+    return switch (op) {
+        ir_.IR_Coerce => "coerce",
+        ir_.IR_CheckNull => "checknull",
+        ir_.IR_CallGetter => "callgetter",
+        ir_.IR_CallSetter => "callsetter",
+        ir_.IR_CallInterface => "callinterface",
+        ir_.IR_CallSuper => "callsuperid",
+        ir_.IR_FindPropGlobal => "findpropglobal",
+        ir_.IR_FindPropGlobalStrict => "findpropglobalstrict",
+        ir_.IR_GetGlobalScope => "getglobalscope",
+        ir_.IR_Nip => "nip",
+        ir_.IR_ConstructSlot => "constructslot",
+        else => "ir?",
+    };
+}
+
+/// A type's name: "*", void, null, a class's name, "Name$" for its class
+/// object, Vector.<T> as deep as T nests (AssemblyScript recurses there;
+/// this counts the levels).
+fn writeType(w: *std.Io.Writer, dom: *const Domain, ty: i32, notNull: u8) std.Io.Writer.Error!void {
+    const traits = &dom.traits;
+    var t = ty;
+    var vectors: u32 = 0;
+    while (t >= 0) {
+        const u: u32 = @intCast(t);
+        const kind = traits.kind.get(u);
+        const isVector = traits.param.get(u) != -1 or
+            (kind == traits_.TRAITS_Instance and traits.first.get(u) == traits.end.get(u) and
+                traits.base.get(u) == dom.vectorObjectType and t != dom.vectorObjectType);
+        if (!isVector) {
+            break;
+        }
+
+        try w.writeAll("Vector.<");
+        vectors += 1;
+        t = traits.param.get(u);
+    }
+
+    if (t < 0) {
+        try w.writeByte('*');
+    } else {
+        const u: u32 = @intCast(t);
+        switch (traits.kind.get(u)) {
+            traits_.TRAITS_Void => try w.writeAll("void"),
+            traits_.TRAITS_Null => try w.writeAll("null"),
+            traits_.TRAITS_Script => try w.writeAll("global"),
+            traits_.TRAITS_Activation => try w.writeAll("activation"),
+            traits_.TRAITS_Catch => try w.writeAll("catch"),
+            else => |kind| {
+                const index = traits.abc.get(u);
+                const abc = dom.abcs.get(index);
+                const id = dom.nameOf(index, abc.instanceName[traits.owner.get(u)]);
+                try output.writeDecoded(w, dom.stringOf(id));
+                if (kind == traits_.TRAITS_Class) {
+                    try w.writeByte('$');
+                }
+            },
+        }
+    }
+
+    for (0..vectors) |_| {
+        try w.writeByte('>');
+    }
+
+    if (notNull != 0) {
+        try w.writeByte('!');
+    }
+}
+
 /// How many traits the domain has.
 pub fn domainTraitsCount() Allocator.Error!i32 {
     return @intCast((try compile.domain()).traits.kind.len);
@@ -189,7 +510,8 @@ const testing = std.testing;
 // a builtin one that links with nothing before it, a user one extending
 // its class from another application domain, one that fails to link, and
 // a wide one whose strings, namespaces and members outgrow an id table's
-// first 64 slots in the call that links it.
+// first 64 slots in the call that links it, and the user one creating its
+// class, for the verifier.
 pub const link_builtin = [_]u8{
     0x10, 0x00, 0x2e, 0x00, 0x03, 0x03, 0xff, 0xff, 0xff, 0xff, 0x0f, 0x00, 0x02, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0xf8, 0x3f, 0x15, 0x00, 0x06, 0x4f, 0x62, 0x6a, 0x65, 0x63, 0x74,
@@ -402,6 +724,28 @@ pub const link_wide = [_]u8{
     0x01, 0x47, 0x00, 0x00,
 };
 
+pub const link_created = [_]u8{
+    0x10, 0x00, 0x2e, 0x00, 0x03, 0x03, 0xff, 0xff, 0xff, 0xff, 0x0f, 0x00, 0x02, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xf8, 0x3f, 0x15, 0x00, 0x06, 0x4f, 0x62, 0x6a, 0x65, 0x63, 0x74,
+    0x05, 0x43, 0x6c, 0x61, 0x73, 0x73, 0x08, 0x46, 0x75, 0x6e, 0x63, 0x74, 0x69, 0x6f, 0x6e,
+    0x04, 0x76, 0x6f, 0x69, 0x64, 0x05, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x01, 0x41, 0x01, 0x42,
+    0x01, 0x49, 0x01, 0x46, 0x07, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6e, 0x67, 0x01, 0x6d, 0x01,
+    0x78, 0x09, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x74, 0x79, 0x70, 0x65, 0x03, 0x69, 0x6e, 0x74,
+    0x04, 0x75, 0x69, 0x6e, 0x74, 0x06, 0x4e, 0x75, 0x6d, 0x62, 0x65, 0x72, 0x06, 0x53, 0x74,
+    0x72, 0x69, 0x6e, 0x67, 0x07, 0x42, 0x6f, 0x6f, 0x6c, 0x65, 0x61, 0x6e, 0x01, 0x6e, 0x04,
+    0x16, 0x01, 0x16, 0x07, 0x08, 0x09, 0x02, 0x02, 0x01, 0x02, 0x17, 0x07, 0x01, 0x02, 0x07,
+    0x01, 0x03, 0x07, 0x01, 0x04, 0x07, 0x01, 0x05, 0x07, 0x01, 0x06, 0x07, 0x01, 0x07, 0x07,
+    0x01, 0x08, 0x07, 0x01, 0x09, 0x07, 0x01, 0x0a, 0x07, 0x01, 0x0b, 0x07, 0x01, 0x0c, 0x07,
+    0x01, 0x0d, 0x07, 0x01, 0x0e, 0x07, 0x01, 0x0f, 0x07, 0x01, 0x10, 0x07, 0x01, 0x11, 0x07,
+    0x01, 0x12, 0x07, 0x01, 0x13, 0x07, 0x01, 0x14, 0x09, 0x07, 0x01, 0x07, 0x02, 0x07, 0x07,
+    0x03, 0x0c, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x07, 0x00, 0x00, 0x00, 0x02, 0x0b, 0x21, 0x00,
+    0x03, 0x0d, 0x00, 0x00, 0x07, 0x00, 0x01, 0x00, 0x01, 0x02, 0x01, 0x05, 0x04, 0x01, 0x00,
+    0x02, 0x02, 0x04, 0x01, 0x00, 0x03, 0x12, 0xd0, 0x30, 0xd0, 0x60, 0x01, 0x30, 0x60, 0x07,
+    0x30, 0x60, 0x07, 0x58, 0x00, 0x1d, 0x1d, 0x68, 0x05, 0x47, 0x00, 0x00, 0x01, 0x01, 0x01,
+    0x00, 0x01, 0x01, 0x47, 0x00, 0x00,
+};
+
 /// A digest of everything a domain holds but getBinding's memo, which a
 /// rollback empties: each table's rows, each id table's slots, the numbers
 /// beside them, and by their content what rows point at (each ABC's
@@ -457,6 +801,7 @@ fn hashField(h: *std.hash.Wyhash, dom: *const Domain, comptime name: []const u8)
     const skipped = comptime std.mem.eql(u8, name, "gpa") or
         std.mem.eql(u8, name, "scratch") or
         std.mem.eql(u8, name, "undo") or
+        std.mem.eql(u8, name, "decoder") or
         std.mem.eql(u8, name, "bindingMemo") or
         // Addresses into the ABCs' bytes, which abcBuffer has by content.
         std.mem.eql(u8, name, "abcBase") or
@@ -717,11 +1062,16 @@ fn lifeStep(d: *Domain, a: *memory.Arena, step: u32) !void {
         4 => try testing.expectEqual(0, try domain_.changed(d, a, domain_.addAbc, .{ a, &link_wide, false, 0 })),
         5 => try domain_.changed(d, a, Domain.addFound, .{ 1, 0, "", "A", 0, true }),
         6 => try testing.expectEqual(0, try domain_.changed(d, a, domainResolve, .{0})),
+        7 => try testing.expectEqual(0, try domain_.changed(d, a, domain_.addAbc, .{ a, &link_created, false, 0 })),
+        8 => try testing.expectEqualStrings("verified 2 of 2 bodies", try domain_.changed(d, a, domainVerifyAll, .{d.scratch})),
+        9 => try testing.expectEqualStrings("checked 2 bodies, 18 instructions", try domain_.changed(d, a, domainCheckIr, .{d.scratch})),
+        10 => _ = try domain_.changed(d, a, domainIr, .{ d.scratch, 0 }),
+        11 => _ = try domain_.changed(d, a, code.verifyMethods, .{0}),
         else => try testing.expectEqual(0, try domain_.changed(d, a, lifetime.restore, .{ a, 1, &link_user })),
     }
 }
 
-const life_steps = 8;
+const life_steps = 13;
 
 /// linkLife's calls on a domain over `source`, each that runs out of memory
 /// checked to leave the domain and its arena as they were, then made again:

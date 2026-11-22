@@ -31,6 +31,10 @@ const TESTING_SIGNATURES: Record<string, Signature> = {
   domainSlotTypes: ["i32 i32", "str"],
   domainTraitsCount: ["", "i32"],
   unspecifiedReads: ["", "i32"],
+  codeDump: ["u8s bool=false", "str"],
+  domainVerifyAll: ["", "str"],
+  domainIr: ["i32", "str"],
+  domainCheckIr: ["", "str"],
 };
 
 /** The test build, or the one that fills freed memory with 0xAA, compiled. */

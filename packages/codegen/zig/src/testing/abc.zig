@@ -16,6 +16,7 @@ const readConstantPool = @import("../avm2/abc/pool.zig").readConstantPool;
 const reader = @import("../avm2/abc/reader.zig");
 const Reader = reader.Reader;
 const Rows = memory.Rows;
+const BodyDecoder = @import("../avm2/abc/code.zig").BodyDecoder;
 
 pub const Error = output.Error;
 
@@ -309,6 +310,62 @@ fn join(w: *Writer, items: anytype, start: u32, end: u32) Writer.Error!void {
 }
 
 /// The opcode table, one "opcode name layout flags" line per opcode.
+/// Decode every method body without types: "body B method M", then one
+/// "offset name a b c" line per reachable instruction (lookupswitch adds
+/// its case offsets), then "unreachable N" bytes, or "error N" if avmplus'
+/// verifier would reject it.
+pub fn codeDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const u8 {
+    const data = try padded(gpa, bytes);
+    const abc = try readAbc(gpa, gpa, data, @intCast(bytes.len), builtin);
+    var out: Output = try .init(gpa);
+    const w = out.writer();
+    if (abc.@"error" != 0) {
+        try w.print("error {d}", .{abc.@"error"});
+        return out.written();
+    }
+
+    var lines: Lines = .{ .w = w };
+    var decoder: BodyDecoder = try .init(gpa, abc, data, null, 0);
+    for (0..abc.bodyCount()) |b| {
+        const body: u32 = @intCast(b);
+        try lines.next();
+        try w.print("body {d} method {d}", .{ body, abc.bodyMethod.get(body) });
+        const code = try decoder.decode(body, null);
+        if (code.@"error" != 0) {
+            try lines.next();
+            try w.print("  error {d}", .{code.@"error"});
+            continue;
+        }
+
+        var decoded: u32 = 0;
+        for (0..code.count) |i| {
+            const opcode = code.opcode[i];
+            try lines.next();
+            try w.print("  {d} {s} {d} {d} {d}", .{ code.offset[i], ops.opcodeNames[opcode], code.a[i], code.b[i], code.c[i] });
+            if (opcode == ops.OP_lookupswitch) {
+                try w.writeAll(" [");
+                var j = code.c[i];
+                while (j <= code.c[i] + code.b[i]) : (j += 1) {
+                    if (j > code.c[i]) {
+                        try w.writeByte(',');
+                    }
+
+                    try w.print("{d}", .{code.cases[j]});
+                }
+
+                try w.writeByte(']');
+            }
+
+            decoded += code.next[i] - code.offset[i];
+        }
+
+        try lines.next();
+        try w.print("  unreachable {d}", .{abc.bodyCodeLength.get(body) - decoded});
+    }
+
+    return out.written();
+}
+
 pub fn opcodeTable(gpa: Allocator) Error![]const u8 {
     var out: Output = try .init(gpa);
     const w = out.writer();

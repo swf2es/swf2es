@@ -132,9 +132,10 @@ async function zigBytes(file: string, name: string): Promise<number[]> {
 
 test("the Zig tests' ABCs are the ones tests/parity builds", async () => {
   assert.deepEqual(await zigBytes("abc.zig", "rich_abc"), [...richAbc(true)]);
-  const { builtin, user, failing, wide } = linkAbcs();
+  const { builtin, user, failing, wide, created } = linkAbcs();
   assert.deepEqual(await zigBytes("domain.zig", "link_builtin"), [...builtin]);
   assert.deepEqual(await zigBytes("domain.zig", "link_user"), [...user]);
   assert.deepEqual(await zigBytes("domain.zig", "link_failing"), [...failing]);
   assert.deepEqual(await zigBytes("domain.zig", "link_wide"), [...wide]);
+  assert.deepEqual(await zigBytes("domain.zig", "link_created"), [...created]);
 });

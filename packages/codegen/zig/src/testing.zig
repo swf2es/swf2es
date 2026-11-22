@@ -171,6 +171,22 @@ export fn domainTraitsCount() i32 {
     };
 }
 
+export fn codeDump(bytes: [*]const u8, len: u32, is_builtin: bool) usize {
+    return root.handOut(abc.codeDump(root.gpa(), bytes[0..len], is_builtin) catch |err| return root.failWriting(err));
+}
+
+export fn domainVerifyAll() usize {
+    return root.handOut(avm2.changed(domain.domainVerifyAll, .{root.gpa()}) catch |err| return root.fail(err));
+}
+
+export fn domainIr(body: u32) usize {
+    return root.handOut(avm2.changed(domain.domainIr, .{ root.gpa(), body }) catch |err| return root.fail(err));
+}
+
+export fn domainCheckIr() usize {
+    return root.handOut(avm2.changed(domain.domainCheckIr, .{root.gpa()}) catch |err| return root.fail(err));
+}
+
 /// How many reads past the end of a namespace set the calls since the last
 /// asked made (see domain.zig's `unspecified`), for the parity harness to
 /// take their cases as unspecified.

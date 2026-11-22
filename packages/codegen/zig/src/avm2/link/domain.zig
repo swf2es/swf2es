@@ -19,6 +19,7 @@ const output = @import("../../output.zig");
 const Abc = @import("../abc/abc.zig").Abc;
 const C = @import("../abc/constants.zig");
 const ConstantPool = @import("../abc/pool.zig").ConstantPool;
+const BodyDecoder = @import("../abc/code.zig").BodyDecoder;
 const readAbc = @import("../abc/parse.zig").readAbc;
 const PADDING = @import("../abc/reader.zig").PADDING;
 const classes = @import("classes.zig");
@@ -127,6 +128,8 @@ pub const Change = struct {
     pub fn begin(change: *Change, dom: *Domain, arena: *memory.Arena) void {
         // One Change at a time: a nested one would take the outer's journal.
         std.debug.assert(dom.undo == null);
+        // A decoder of an earlier call is in what its arena gave back.
+        dom.decoder = null;
         change.* = .{ .saved = dom.*, .mark = arena.mark() };
         change.saved.undo = null;
         dom.undo = &change.undo;
@@ -192,6 +195,8 @@ pub const Domain = struct {
     scratch: Allocator,
     /// The journal of the call changing the domain, if one is.
     undo: ?*Undo = null,
+    /// The call's body decoder (code.bodyDecoder), in its arena.
+    decoder: ?*BodyDecoder = null,
 
     /// The version of user ABCs' public namespaces, whose series is the domain's.
     apiVersion: u8 = API_LatestFP,

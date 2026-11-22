@@ -321,6 +321,12 @@ test {
         @import("avm2/link/types.zig"),
         @import("avm2/link/signatures.zig"),
         @import("avm2/link/lifetime.zig"),
+        @import("avm2/ir/ir.zig"),
+        @import("avm2/abc/code.zig"),
+        @import("avm2/abc/targets.zig"),
+        @import("avm2/abc/verify.zig"),
+        @import("avm2/abc/typing.zig"),
+        @import("avm2/abc/properties.zig"),
     }) |file| {
         std.testing.refAllDecls(file);
         inline for (comptime std.meta.declarations(file)) |name| {

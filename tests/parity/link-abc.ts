@@ -3,9 +3,10 @@
 // bytes, which a unit test checks against these): a builtin one with
 // Object, Class and Function, an interface, and classes with slots, a
 // constant, methods, accessors and overrides; a user one extending its
-// class across ABCs; one that fails to link, extending Class; and a wide
-// one, whose strings, namespaces and members each outgrow an id table's
-// first 64 slots in the one call that links it.
+// class across ABCs; one that fails to link, extending Class; a wide one,
+// whose strings, namespaces and members each outgrow an id table's first
+// 64 slots in the one call that links it; and the user one creating its
+// class, for the verifier.
 import { abc, tables, u30 } from "../unit/codegen/abc-builder.ts";
 import { classes, GETTER, METHOD, mn, OVERRIDE, SETTER, SLOT } from "../unit/codegen/link-cases.ts";
 
@@ -18,6 +19,7 @@ export function linkAbcs(): {
   user: Uint8Array;
   failing: Uint8Array;
   wide: Uint8Array;
+  created: Uint8Array;
 } {
   const builtin = classes([
     { name: mn("Object") },
@@ -46,7 +48,7 @@ export function linkAbcs(): {
       ],
     },
   ]);
-  const user = classes([
+  const userClasses = [
     {
       name: mn("Error"),
       base: mn("B"),
@@ -55,9 +57,12 @@ export function linkAbcs(): {
         { name: mn("prototype"), kind: SLOT, index: mn("B") },
       ],
     },
-  ]);
+  ];
+  const user = classes(userClasses);
   const failing = classes([{ name: mn("Missing"), base: mn("Class") }]);
-  return { builtin, user, failing, wide: wideAbc(80) };
+  // The user ABC again, its script creating its class, which the verifier then resolves and captures.
+  const created = classes(userClasses, true);
+  return { builtin, user, failing, wide: wideAbc(80), created };
 }
 
 /**
