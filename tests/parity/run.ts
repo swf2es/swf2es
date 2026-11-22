@@ -182,6 +182,17 @@ function libraries(c: Compiler, r: Results, version: number, list: [string, Uint
   }
 }
 
+const MODULE_EXPORTS = [
+  "domainModule",
+  "domainModuleBytes",
+  "domainModuleMoreBytes",
+  "domainModuleDone",
+  "domainSourceMap",
+  "domainModuleEntries",
+  "domainEmitEach",
+  "domainPartBudget",
+];
+
 const AVM1_EXPORTS = [
   "actionsModuleBytes",
   "actionsModuleEntries",
@@ -1448,6 +1459,43 @@ function emitLast(c: Compiler, r: Results, name: string, count: number): void {
 }
 
 /**
+ * The module the last ABC added compiles to, a part at a time and kept,
+ * its source map and entries, each entry's body compiled alone again, and
+ * the module whole with hashes, linked only; parts of `budget` bytes.
+ */
+function moduleLast(c: Compiler, r: Results, name: string, budget: number): void {
+  linked(c, r, `${name}: module`, () => {
+    c.domainPartBudget(budget);
+    const parts = [handed(c, c.domainModuleBytes("", -1, true, false))];
+    while (!c.domainModuleDone()) {
+      parts[parts.length - 1] = parts[parts.length - 1].slice();
+      parts.push(handed(c, c.domainModuleMoreBytes()));
+    }
+
+    c.domainPartBudget(0);
+    return r.blob(`${name}: module`, Buffer.concat(parts));
+  });
+  linked(c, r, `${name}: source map`, () =>
+    r.blob(`${name}: source map`, Buffer.from(c.domainSourceMap())),
+  );
+  let bodies = "";
+  linked(c, r, `${name}: entries`, () => {
+    const entries: string = c.domainModuleEntries();
+    bodies = [...entries.matchAll(/(\d+)\u0001/g)].map((m) => m[1]).join(",");
+    return r.blob(`${name}: entries`, Buffer.from(entries));
+  });
+  linked(c, r, `${name}: each`, () =>
+    r.blob(`${name}: each`, Buffer.from(c.domainEmitEach(bodies, budget % 2 === 0))),
+  );
+  linked(c, r, `${name}: linked only`, () =>
+    r.blob(
+      `${name}: linked only`,
+      Buffer.from(c.domainModule("own\nfirst\nsecond", -1, false, true)),
+    ),
+  );
+}
+
+/**
  * Each SWF's ABCs added into a child of the root, as linkSwfs adds them,
  * each verified (or what `each` does) after it is added; the domain made
  * again every 40 SWFs.
@@ -2023,6 +2071,47 @@ const SUITES: Suite[] = [
       ]);
       verifySwfs(c, r, base, cases, 8, emitLast);
     },
+  },
+  {
+    name: "modules-tests",
+    build: "testing",
+    needs: [...LINK_EXPORTS, ...MODULE_EXPORTS],
+    run: (c, r) =>
+      verifySwfs(
+        c,
+        r,
+        PLAYER,
+        linkSeeds().map(([name, bytes]) => [name, [[name, bytes]]]),
+        4096,
+        moduleLast,
+      ),
+  },
+  {
+    name: "modules-swfs",
+    build: "testing",
+    needs: [...LINK_EXPORTS, ...MODULE_EXPORTS],
+    run: (c, r) => verifySwfs(c, r, PLAYER, bySwf(swfAbcs()), 65536, moduleLast),
+  },
+  {
+    name: "modules-oracle",
+    build: "testing",
+    needs: [...LINK_EXPORTS, ...MODULE_EXPORTS],
+    unavailable: () => (existsSync(oracleDir()) ? null : "no oracle cache"),
+    run: (c, r) => verifySwfs(c, r, SHELL, oracleAbcs(), 1 << 20, moduleLast),
+  },
+  {
+    name: "modules-mutated",
+    build: "testing",
+    needs: [...LINK_EXPORTS, ...MODULE_EXPORTS],
+    run: (c, r) =>
+      verifySwfs(
+        c,
+        r,
+        PLAYER,
+        mutatedCode(3000).map(([name, bytes]) => [name, [[name, bytes]]]),
+        2048,
+        moduleLast,
+      ),
   },
   {
     name: "libraries",
