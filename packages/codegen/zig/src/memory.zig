@@ -602,6 +602,25 @@ pub fn Rows(comptime T: type) type {
             return self.len - 1;
         }
 
+        /// No rows, the shelves kept for the rows that come next.
+        pub fn clearRetainingCapacity(self: *Self) void {
+            self.len = 0;
+        }
+
+        /// The shelves and the directory given back, as an arena takes them:
+        /// the directories it outgrew stay, for a state saved before.
+        pub fn deinit(self: *Self, gpa: Allocator) void {
+            for (0..self.shelves) |shelf| {
+                gpa.free(self.directory[shelf][0..shelfSize(@intCast(shelf))]);
+            }
+
+            if (self.capacity > 0) {
+                gpa.free(self.directory[0..self.capacity]);
+            }
+
+            self.* = .{};
+        }
+
         pub fn save(self: *const Self) State {
             return .{ .directory = self.directory, .capacity = self.capacity, .shelves = self.shelves, .len = self.len };
         }
@@ -658,20 +677,21 @@ pub fn arenas() void {
     }
 }
 
-/// A new domain's arena, freed whole with `deinit`.
-pub fn domainArena() Arena {
+/// A new arena for what outlives calls, freed whole with `deinit`: a
+/// domain's, a module kept for its entries, a SWF held for its units.
+pub fn lastingArena() Arena {
     return .init(moduleAllocator(false));
 }
 
 const testing = std.testing;
 
-/// Pages over a region of their own, as the module's memory but smaller.
-const TestPages = struct {
+/// Pages over a region of their own, as the module's memory but smaller, for tests.
+pub const TestPages = struct {
     region: []align(chunk_size) u8,
     bits: []u64,
     pages: Pages,
 
-    fn init(len: usize) !*TestPages {
+    pub fn init(len: usize) !*TestPages {
         const self = try testing.allocator.create(TestPages);
         self.region = try std.heap.page_allocator.alignedAlloc(u8, .fromByteUnits(chunk_size), len);
         self.bits = try testing.allocator.alloc(u64, len / chunk_size / 64 + 1);
@@ -679,7 +699,7 @@ const TestPages = struct {
         return self;
     }
 
-    fn deinit(self: *TestPages) void {
+    pub fn deinit(self: *TestPages) void {
         std.heap.page_allocator.free(self.region);
         testing.allocator.free(self.bits);
         testing.allocator.destroy(self);
