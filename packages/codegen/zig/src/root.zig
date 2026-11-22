@@ -341,6 +341,7 @@ test {
         @import("avm2/emit/instructions.zig"),
         @import("avm2/emit/objects.zig"),
         @import("avm2/emit/memory.zig"),
+        @import("avm2/emit/module.zig"),
     }) |file| {
         std.testing.refAllDecls(file);
         inline for (comptime std.meta.declarations(file)) |name| {
