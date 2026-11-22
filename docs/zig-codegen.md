@@ -392,7 +392,7 @@ two compilers' dump text on every ABC it has.
 | # | Stage | AssemblyScript (lines) | Checked before the next by |
 |---|---|---|---|
 | 0 | Scaffold: `build.zig`, `memory.zig` (page allocator, arenas, segmented lists), `panic.zig`, `root.zig`, `src/zig.ts`, the switch, the parity harness with nothing to compare | new | the harness runs both builds; the wasm imports only `env.abort` (the unit test that checks `codegen.wasm`'s imports) |
-| 1 | AVM1, from `experiment/zig-avm1` rebased on dev: `output`, `dtoa`, `avm1/**` | 3,791 + 308 | `actions*` bytes on the corpus's and the repository's AVM1 SWFs; `tests/fuzz/avm1.ts`; `determinism-avm1.ts`; `avm1*.test.ts` |
+| 1 | AVM1, from `experiment/zig-avm1` rebased on dev: `output`, `dtoa`, `avm1/**` | 3,791 + 308 | `actions*` bytes on the corpus's and the repository's AVM1 SWFs; `tests/fuzz/avm1.ts`; `determinism-avm1.ts`; `avm1*.test.ts`; the dumps (`avm1Dump`, `avm1Check`, `avm1Action`, `avm1Opcodes`) through the parity harness; `atEveryMemorySize` over every entry |
 | 2 | ABC reading: `reader`, `pool` (from `experiment/zig-abc`), `constants`, `opcodes`, `parse`, `methods`, `classes`, `traits`, `bodies`, `abc` | 1,750 | `poolDump`, `abcDump`, `readAll` and the error number on every ABC and on `tests/fuzz/abc.ts`'s malformed ones; `reader`, `pool`, `abc`, `opcodes` tests |
 | 3 | Linking: `table`, `namespaces`, `domain`, `classes`, `typenames`, `traits`, `bindings`, `types`, `signatures`, and `lifetime` without the rebuild | 5,500 | `domainSummary`, `domainTraits`, `domainSlotTypes`, `domainResolve`, `domainFind` and link errors, over libraries, Tamarin and the corpus's ABCs added in the player's order; `domain`, `library-versions` tests; the call arena's reserve measured (section 2); a name that is not valid UTF-8 decoded and interned again as AssemblyScript does (section 6); `atEveryMemorySize` over `domainAdd` |
 | 4 | Verifying and the IR: `code`, `verify`, `typing`, `properties`, `targets`, `ir` | 3,800 | `codeDump`, `domainIr`, `domainCheckIr`, `domainVerifyAll` and VerifyError numbers; `code`, `verify`, `typed`, `ir` tests; the ABC fuzz |
@@ -496,12 +496,13 @@ From the AVM1 slice, already in `experiment/zig-avm1`:
 
 - **Printing a double.** `Output.double` writes integers below 2^53
   itself and everything else with `f64.toString`, AssemblyScript's
-  Grisu2. `dtoa.zig` is that algorithm, including its fault: `genDigits`
-  reads past the ten entries of `POWERS10` into the static data after
-  it in about 45% of non-integer prints. The slice copied the values it
-  finds there (`tools/powers10.ts`). They are a property of one
-  AssemblyScript binary's layout; the port freezes them as of the
-  oracle build, and section 10 asks whether to correct them after.
+  Grisu2. `dtoa.zig` is that algorithm as the repository's patch to
+  AssemblyScript has it (`patches/assemblyscript@0.28.20.patch`, since
+  the slice): where `genDigits` read past the ten entries of `POWERS10`
+  into whatever static data followed, it multiplies by 0, which leaves
+  the last digit unrounded, as every build printed it. The slice's
+  copied over-read values (`tools/powers10.ts`) are gone; section 10's
+  fourth question is answered by the patch.
 - **Parsing an integer.** `i32.parse` and `I32.parseInt`: signs,
   whitespace, digits after garbage, wrapping. AVM2 uses them in
   `compile.ts` on the body list of `domainEmitEach` and on
@@ -796,10 +797,9 @@ For the user to decide:
    live ABCs again (#1185's save and load, or the player's journal where
    the dead instance can't be read), at a rebuild's cost, and the load
    that panicked fails as a VerifyError would.
-4. **`POWERS10`.** Keep the frozen over-read values for good, so that
-   doubles print as they do now, or correct Grisu2 after the swap,
-   which changes some modules' bytes (never their values) and moves
-   `COMPILER_VERSION`?
+4. **`POWERS10`.** Answered: the repository patched AssemblyScript to
+   read no further than the table, printing what every build printed;
+   `dtoa.zig` does the same.
 5. **Size limit.** What may the wasm weigh before ReleaseSafe gives way
    to Small for cold code: twice today's gzipped size, as proposed?
 6. **M2 at all, and when?** If M1 alone brings the 300-load session

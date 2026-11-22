@@ -197,7 +197,8 @@ node packages/codegen/zig/build.ts [--update | --verify]   # the compiler in Zig
                               # fresh caches and writes zig/digests.json, --verify fails where they
                               # differ (CI's zig job)
 node tests/parity/run.ts [suite...]   # the compiler in Zig's results against AssemblyScript's,
-                              # byte for byte, and its 0xAA build's against its own (CI's zig job)
+                              # byte for byte, and its 0xAA build's against its own (CI's zig job);
+                              # SWF2ES_PRIVATE=file.swf ... adds SWFs reported only as "private"
 SWF2ES_COMPILER=zig ...       # the CLI and the tests (tests/compiler.ts: unit tests, conformance,
                               # determinism, fuzzers, Chrome pages) on the compiler in Zig, as far as
                               # it is ported; as, the default; any other value is refused
