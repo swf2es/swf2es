@@ -36,10 +36,18 @@ export class FullScreen {
   }
 
   set mouseLock(locked: boolean) {
+    if (this.onMouseLock) {
+      this.onMouseLock(locked);
+    } else {
+      this.setMouseLocked(locked);
+    }
+  }
+
+  /** The coordinate system changes when the canvas acquires or releases the lock. */
+  setMouseLocked(locked: boolean): void {
     if (locked !== this.locked) {
       this.s.pointer?.mouseLockChanged();
       this.locked = locked;
-      this.onMouseLock?.(locked);
     }
   }
 

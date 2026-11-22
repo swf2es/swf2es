@@ -1,13 +1,16 @@
 import type { FullScreen } from "../scripting/full-screen.js";
 
+// A pending browser grant belongs to the canvas even if the player bound to it changed.
+const bindings = new WeakMap<HTMLCanvasElement, () => void>();
+
 /** Bind Stage.mouseLock to this canvas, including Escape and loss of window focus. */
 export function bindMouseLock(canvas: HTMLCanvasElement, stage: FullScreen): () => void {
   const doc = canvas.ownerDocument;
-  const root = canvas.getRootNode() as Document | ShadowRoot;
-  const owns = () => root.pointerLockElement === canvas;
+  // Hosts may bind input before inserting the canvas in its document or shadow root.
+  const owns = () => (canvas.getRootNode() as Document | ShadowRoot).pointerLockElement === canvas;
   let bound = true;
   let pending = false;
-  let held = false;
+  let wanted = false;
   let needsClick = false;
   let releasing = false;
 
@@ -21,22 +24,23 @@ export function bindMouseLock(canvas: HTMLCanvasElement, stage: FullScreen): () 
     stage.mouseLock = false;
   };
   const changed = () => {
-    const locked = owns();
-    if (!locked && releasing) {
+    if (owns()) {
+      if (!wanted) {
+        release();
+      } else if (!releasing) {
+        stage.setMouseLocked(true);
+      }
+    } else if (releasing) {
       releasing = false;
-      if (stage.mouseLock) {
+      if (wanted) {
         void request();
       }
-    } else if (!locked && held) {
+    } else if (stage.mouseLock) {
       lost();
-    }
-    held = locked;
-    if (held && !stage.mouseLock) {
-      release();
     }
   };
   const request = async () => {
-    if (pending || owns()) {
+    if (pending || releasing || owns()) {
       return;
     }
 
@@ -71,11 +75,16 @@ export function bindMouseLock(canvas: HTMLCanvasElement, stage: FullScreen): () 
           );
         });
       }
-      if (!bound || !stage.mouseLock) {
-        release();
+      if (owns()) {
+        const current = bindings.get(canvas);
+        if (current) {
+          current();
+        } else {
+          release();
+        }
       }
     } catch (error) {
-      if (bound && stage.mouseLock) {
+      if (bound && wanted) {
         // Entering DOM fullscreen consumes the gesture. A SWF may request lock on
         // its next frame: complete that request on the next click inside its canvas.
         if (
@@ -98,20 +107,32 @@ export function bindMouseLock(canvas: HTMLCanvasElement, stage: FullScreen): () 
     }
   };
   const set = (locked: boolean) => {
+    wanted = locked;
+    stage.setMouseLocked(locked && owns() && !releasing);
     if (locked) {
-      void request();
+      if (!needsClick) {
+        void request();
+      }
     } else {
       needsClick = false;
       release();
     }
   };
+  bindings.set(canvas, changed);
   stage.onMouseLock = set;
   doc.addEventListener("pointerlockchange", changed);
   canvas.addEventListener("pointerdown", click, true);
   doc.defaultView?.addEventListener("blur", lost);
   set(stage.mouseLock);
   return () => {
+    if (!bound) {
+      return;
+    }
+
     bound = false;
+    if (bindings.get(canvas) === changed) {
+      bindings.delete(canvas);
+    }
     stage.onMouseLock = null;
     stage.mouseLock = false;
     release();

@@ -1950,9 +1950,7 @@ test("pointer targets cover the translated viewport, including negative stage co
   equal(pointerTarget(stage, -12, -12, 192, 144), null);
 });
 
-test("a locked mouse delivers screen deltas to Stage at a stationary cursor", {
-  skip,
-}, async () => {
+async function mouseLockPlayer() {
   const wasm = await WebAssembly.compile(
     await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
   );
@@ -1967,6 +1965,13 @@ test("a locked mouse delivers screen deltas to Stage at a stationary cursor", {
   await player.start();
   const pointer = player.pointer;
   assert.ok(pointer);
+  return { player, s, pointer, lines };
+}
+
+test("a locked mouse delivers screen deltas to Stage at a stationary cursor", {
+  skip,
+}, async () => {
+  const { s, pointer, lines } = await mouseLockPlayer();
   const point = { x: 20, y: 35 };
 
   pointer.handle("move", point);
@@ -2001,4 +2006,44 @@ test("a locked mouse delivers screen deltas to Stage at a stationary cursor", {
     "mouseWheel stage 0 0 0 0 0 0 0 0",
     "mouseMove box 22 35 22 35 0 0 22 35",
   ]);
+});
+
+test("moves hit a child until the host confirms the lock", { skip }, async () => {
+  const { s, pointer, lines } = await mouseLockPlayer();
+  const point = { x: 20, y: 35, movementX: 2, movementY: 4 };
+  const requests: boolean[] = [];
+  s.fullScreen.onMouseLock = (wanted) => requests.push(wanted);
+  s.fullScreen.mouseLock = true;
+  assert.deepEqual(requests, [true]);
+  pointer.handle("move", point);
+  s.fullScreen.setMouseLocked(true);
+  pointer.handle("move", point);
+  assert.deepEqual(lines, [
+    "mouseMove box 20 35 20 35 0 0 20 35",
+    "mouseMove stage 0 0 0 0 2 4 2 4",
+  ]);
+});
+
+test("a queued move can unlock the mouse before the wheel picks a target", { skip }, async () => {
+  const { player, s, pointer, lines } = await mouseLockPlayer();
+  const point = { x: 20, y: 35 };
+  s.fullScreen.hostChanged(true);
+  s.fullScreen.mouseLock = true;
+  s.rt.setProperty(player.root.object, s.rt.publicName("unlockOnMove"), true);
+  pointer.post({ ...point, movementX: 2, movementY: 4 });
+  assert.equal(pointer.wheel(point, 1), true);
+  assert.equal(s.fullScreen.mouseLock, false);
+  assert.deepEqual(lines, [
+    "mouseMove stage 0 0 0 0 2 4 2 4",
+    "mouseMove box 20 35 20 35 0 0 20 35",
+    "mouseWheel box 20 35 20 35 0 0 20 35",
+  ]);
+});
+
+test("a locked wheel is taken when its only listener removes itself", { skip }, async () => {
+  const { player, s, pointer } = await mouseLockPlayer();
+  s.fullScreen.mouseLock = true;
+  s.rt.setProperty(player.root.object, s.rt.publicName("lastWheel"), true);
+  assert.equal(pointer.wheel({ x: 20, y: 35 }, 1), true);
+  assert.equal(pointer.wheel({ x: 20, y: 35 }, 1), false);
 });

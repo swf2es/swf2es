@@ -510,28 +510,33 @@ export class PointerInput implements Pointer {
    */
   wheel(p: PointerState, delta: number): boolean {
     const s = this.scripting;
+    // The queued move's listener may release the lock or leave fullscreen.
     if (s.fullScreen.mouseLock) {
       this.flush();
-      s.mouseStageX = s.mouseStageY = 0;
-      if (delta !== 0) {
-        this.handled++;
-        this.send("mouseWheel", this.stage, { ...p, x: 0, y: 0 }, this.held, true, null, delta);
-      }
-      return !!this.stage.object && heard(this.stage.object, "mouseWheel");
+    }
+    if (!s.fullScreen.mouseLock) {
+      this.handle("move", p);
     }
 
-    this.handle("move", p);
-    const found = pointerTarget(
-      this.stage,
-      p.x,
-      p.y,
-      s.stageViewportWidth || s.stageWidth,
-      s.stageViewportHeight || s.stageHeight,
-      undefined,
-      s.stageViewportX,
-      s.stageViewportY,
-    );
-    const target = found ?? (this.held && this.stage.object ? this.stage : null);
+    let target: DisplayObject | null;
+    if (s.fullScreen.mouseLock) {
+      s.mouseStageX = s.mouseStageY = 0;
+      p = { ...p, x: 0, y: 0 };
+      target = this.stage;
+    } else {
+      const found = pointerTarget(
+        this.stage,
+        p.x,
+        p.y,
+        s.stageViewportWidth || s.stageWidth,
+        s.stageViewportHeight || s.stageHeight,
+        undefined,
+        s.stageViewportX,
+        s.stageViewportY,
+      );
+      target = found ?? (this.held && this.stage.object ? this.stage : null);
+    }
+
     if (!target?.object) {
       return false;
     }
