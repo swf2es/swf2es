@@ -53,7 +53,201 @@ pub const Output = struct {
         std.mem.copyForwards(u8, w.buffer[at .. w.end - n], w.buffer[at + n .. w.end]);
         w.end -= n;
     }
+
+    // AssemblyScript's Output's own methods, which its AVM2 emitters call,
+    // so that they translate call for call. byte and text go through the
+    // writer's own writeByte and writeAll, which are shared: writing into
+    // the buffer at each call site instead, grown first, made the source
+    // map's writer twice the size (measured at stage 5).
+
+    /// Room for `more` bytes past the end.
+    pub fn reserve(self: *Output, more: u32) Allocator.Error!void {
+        try self.allocating.ensureUnusedCapacity(more);
+    }
+
+    /// Nothing written, the room kept.
+    pub fn reset(self: *Output) void {
+        self.allocating.writer.end = 0;
+    }
+
+    /// The `n` bytes of `from` from offset `at`, appended.
+    pub fn append(self: *Output, from: *const Output, at: u32, n: u32) Allocator.Error!void {
+        try self.reserve(n);
+        const w = &self.allocating.writer;
+        @memcpy(w.buffer[w.end..][0..n], from.written()[at..][0..n]);
+        w.end += n;
+    }
+
+    pub fn byte(self: *Output, b: u8) Allocator.Error!void {
+        self.allocating.writer.writeByte(b) catch return error.OutOfMemory;
+    }
+
+    /// Text of the emitter's own, all ASCII.
+    pub fn text(self: *Output, s: []const u8) Allocator.Error!void {
+        self.allocating.writer.writeAll(s) catch return error.OutOfMemory;
+    }
+
+    pub fn int(self: *Output, n: i64) Allocator.Error!void {
+        if (n < 0) {
+            try self.byte('-');
+        }
+
+        try self.uint(@abs(n));
+    }
+
+    pub fn uint(self: *Output, n: u64) Allocator.Error!void {
+        var digits: [20]u8 = undefined;
+        var at: usize = digits.len;
+        var rest = n;
+        while (true) {
+            at -= 1;
+            digits[at] = @intCast('0' + rest % 10);
+            rest /= 10;
+            if (rest == 0) {
+                break;
+            }
+        }
+
+        try self.text(digits[at..]);
+    }
+
+    /// A JavaScript number literal for a double: exact, and valid for NaN, infinities and -0.
+    pub fn double(self: *Output, d: f64) Allocator.Error!void {
+        if (std.math.isNan(d)) {
+            try self.text("NaN");
+        } else if (std.math.isInf(d)) {
+            try self.text(if (d > 0) "Infinity" else "-Infinity");
+        } else if (d == 0 and std.math.signbit(d)) {
+            try self.text("-0");
+        } else if (d == @floor(d) and @abs(d) < 9007199254740992) {
+            try self.int(@intFromFloat(d));
+        } else {
+            // Every double round-trips through 17 significant digits.
+            var buffer: [dtoa.max_length]u8 = undefined;
+            try self.text(dtoa.dtoa(&buffer, d));
+        }
+    }
+
+    /// UTF-8 bytes, such as a string in the ABC, as a JavaScript string
+    /// literal of the string avmplus reads from them (output.ts tells how:
+    /// ASCII alone, escaped, the rest as \u escapes, read leniently).
+    pub fn string(self: *Output, bytes: []const u8) Allocator.Error!void {
+        try self.reserve(@intCast(bytes.len + 2));
+        try self.byte('"');
+        try self.chars(bytes);
+        try self.byte('"');
+    }
+
+    /// What string() writes between the quotes, for a literal made of several strings.
+    pub fn chars(self: *Output, bytes: []const u8) Allocator.Error!void {
+        try self.reserve(@intCast(bytes.len));
+        var i: usize = 0;
+        while (i < bytes.len) {
+            const b = bytes[i];
+            if (b < 0x80) {
+                if (b == '"' or b == '\\') {
+                    try self.byte('\\');
+                    try self.byte(b);
+                } else if (b < 0x20 or b == 0x7f) {
+                    try self.text("\\x");
+                    try self.hex(b);
+                } else {
+                    try self.byte(b);
+                }
+
+                i += 1;
+                continue;
+            }
+
+            const n = wellFormed(bytes[i..]);
+            if (n == 0) {
+                i += try self.lenient(bytes[i..]);
+            } else {
+                try self.point(codePoint(bytes[i..], n));
+                i += n;
+            }
+        }
+    }
+
+    /// What avmplus reads at the start of `p`, where the bytes are not
+    /// well-formed UTF-8, as \u escapes: a sequence by its shape alone, a
+    /// surrogate's or one past U+10FFFF among them, else the byte itself.
+    /// How many bytes it took.
+    pub fn lenient(self: *Output, p: []const u8) Allocator.Error!u32 {
+        const c: u32 = p[0];
+        const left = p.len;
+        switch (c >> 4) {
+            12, 13 => if (left >= 2 and follows(p[1])) {
+                const ch = ((c & 0x1f) << 6) | (p[1] & 0x3f);
+                if (ch >= 0x80) {
+                    try self.unit(ch);
+                    return 2;
+                }
+            },
+            14 => if (left >= 3 and follows(p[1]) and follows(p[2])) {
+                const ch = ((c & 0x0f) << 12) | (@as(u32, p[1] & 0x3f) << 6) | (p[2] & 0x3f);
+                if (ch >= 0x800) {
+                    try self.unit(ch);
+                    return 3;
+                }
+            },
+            15 => if (left >= 4 and follows(p[1]) and follows(p[2]) and follows(p[3])) {
+                const ch = ((c & 0x07) << 18) | (@as(u32, p[1] & 0x3f) << 12) | (@as(u32, p[2] & 0x3f) << 6) | (p[3] & 0x3f);
+                if (ch >= 0x10000) {
+                    try self.point(ch);
+                    return 4;
+                }
+            },
+            else => {},
+        }
+
+        try self.unit(c);
+        return 1;
+    }
+
+    /// A code point as \u escapes, two surrogates' past U+FFFF.
+    pub fn point(self: *Output, c: u32) Allocator.Error!void {
+        if (c > 0xffff) {
+            try self.unit((((c - 0x10000) >> 10) & 0x3ff) + 0xd800);
+            try self.unit(((c - 0x10000) & 0x3ff) + 0xdc00);
+        } else {
+            try self.unit(c);
+        }
+    }
+
+    /// A UTF-16 code unit as a \u escape: its low 16 bits, as AssemblyScript's two hex bytes.
+    pub fn unit(self: *Output, u: u32) Allocator.Error!void {
+        try self.text("\\u");
+        try self.hex(@truncate(u >> 8));
+        try self.hex(@truncate(u));
+    }
+
+    pub fn hex(self: *Output, b: u8) Allocator.Error!void {
+        const digits = "0123456789abcdef";
+        try self.byte(digits[b >> 4]);
+        try self.byte(digits[b & 15]);
+    }
 };
+
+test "the AVM2 emitters' methods write as AssemblyScript's Output does" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    var out: Output = try .init(arena.allocator());
+    try out.text("x=");
+    try out.int(-1234567890123);
+    try out.byte(' ');
+    try out.uint(0);
+    try out.byte(' ');
+    try out.double(0.1);
+    try out.byte(' ');
+    try out.double(-0.0);
+    try out.byte(' ');
+    try out.double(1e21);
+    try out.byte(' ');
+    try out.string("a\"\\\n\xc3\xa9\xed\xa0\x80\xf0\x9f\x98\x80\xff");
+    try std.testing.expectEqualStrings("x=-1234567890123 0 0.1 -0 1e+21 \"a\\\"\\\\\\x0a\\u00e9\\ud800\\ud83d\\ude00\\u00ff\"", out.written());
+}
 
 /// A JavaScript number literal for a double: exact, and valid for NaN,
 /// infinities and -0; an integer as std.fmt writes it, any other as AS's
