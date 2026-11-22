@@ -336,6 +336,20 @@ export class PointerInput implements Pointer {
       this.flush();
     }
 
+    const s = this.scripting;
+    // A move with the left button up can be the first news of a release outside
+    // the window. Under lock, keep this move's relative motion after the release.
+    if (type === "move" && this.held && p.buttons !== undefined && !(p.buttons & 1)) {
+      const locked = s.fullScreen.mouseLock;
+      this.handle("up", { ...p, button: 0 });
+      if (!locked && !this.pick(p)) {
+        this.handle("leave", p);
+      }
+      if (!locked || !s.fullScreen.mouseLock) {
+        return;
+      }
+    }
+
     if (this.scripting.fullScreen.mouseLock) {
       if (type !== "leave") {
         this.lockedInput(type, p);
@@ -352,19 +366,6 @@ export class PointerInput implements Pointer {
         this.redraws += this.scripting.avm1Input?.leave(p) ?? 0;
         this.leave(p);
         this.updateCursor();
-      }
-
-      return;
-    }
-
-    const s = this.scripting;
-    // A release the host never sent, as one outside the browser, or the left
-    // button's let go while another stays down, which Chrome tells as a move:
-    // the release it was, there, and the leave after it where that is outside.
-    if (type === "move" && this.held && p.buttons !== undefined && !(p.buttons & 1)) {
-      this.handle("up", { ...p, button: 0 });
-      if (!this.pick(p)) {
-        this.handle("leave", p);
       }
 
       return;
@@ -400,8 +401,8 @@ export class PointerInput implements Pointer {
    * the event's movementX/Y, but zero for its local and stage coordinates. */
   private lockedInput(type: "move" | "down" | "up", p: PointerState): void {
     const s = this.scripting;
-    const dx = p.movementX ?? 0;
-    const dy = p.movementY ?? 0;
+    const dx = type === "move" ? (p.movementX ?? 0) : 0;
+    const dy = type === "move" ? (p.movementY ?? 0) : 0;
     if (type === "move" && !dx && !dy) {
       return;
     }

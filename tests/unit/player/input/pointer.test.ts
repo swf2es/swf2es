@@ -1976,7 +1976,10 @@ test("a locked mouse delivers screen deltas to Stage at a stationary cursor", {
   pointer.flush();
   pointer.post({ ...point, movementX: 30, movementY: 3 });
   pointer.handle("down", { ...point, button: 0, buttons: 1 });
-  pointer.handle("up", { ...point, button: 0, buttons: 0 });
+  assert.equal(pointer.captured, true);
+  // The physical release happened while the window was unfocused.
+  pointer.handle("move", { ...point, buttons: 0, movementX: 7, movementY: -3 });
+  assert.equal(pointer.captured, false);
   pointer.handle("down", { ...point, button: 2 });
   pointer.wheel(point, 1);
   // Leaving before the next frame discards the last locked sample.
@@ -1993,6 +1996,7 @@ test("a locked mouse delivers screen deltas to Stage at a stationary cursor", {
     "mouseDown stage 0 0 0 0 0 0 0 0",
     "mouseUp stage 0 0 0 0 0 0 0 0",
     "click stage 0 0 0 0 0 0 0 0",
+    "mouseMove stage 0 0 0 0 7 -3 7 -3",
     "rightMouseDown stage 0 0 0 0 0 0 0 0",
     "mouseWheel stage 0 0 0 0 0 0 0 0",
     "mouseMove box 22 35 22 35 0 0 22 35",
