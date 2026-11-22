@@ -180,6 +180,10 @@ const AVM1_EXPORTS = [
  */
 function avm1(c: Compiler, r: Results, swf: Avm1Swf): void {
   const { name, bytes, offsets, lengths, version } = swf;
+  // AssemblyScript's runtime collects only when asked, as the wrapper asks
+  // after its calls: unasked, a corpus's garbage takes its memory past
+  // 2 GiB, where asc's glue cannot take a pointer back.
+  c.__collect();
   const all = Array.from(offsets, (_, k) => k).join(",");
   r.case(`${name}: module`, () =>
     r.blob(
@@ -209,7 +213,11 @@ function avm1(c: Compiler, r: Results, swf: Avm1Swf): void {
     .map((item) => item.split("\u0001"))
     .filter((parts) => parts.length === 4)
     .map(([key, numbers]) => [key, numbers.split(",").map(Number)] as const);
-  for (const [key, [at, end, bound, five]] of keys) {
+  for (const [i, [key, [at, end, bound, five]]] of keys.entries()) {
+    if (i % 64 === 63) {
+      c.__collect();
+    }
+
     r.case(`${name}: unit ${key}`, () => {
       const code = r.blob(
         `${name}: unit ${key}`,
@@ -226,7 +234,11 @@ function avm1(c: Compiler, r: Results, swf: Avm1Swf): void {
   r.case(`${name}: held blocks`, () =>
     r.blob(`${name}: held blocks`, handed(c, c.actionsHeldEmitEachBytes(7, version, all))),
   );
-  for (const [key, [at, end, bound, five]] of keys) {
+  for (const [i, [key, [at, end, bound, five]]] of keys.entries()) {
+    if (i % 64 === 63) {
+      c.__collect();
+    }
+
     r.case(`${name}: held unit ${key}`, () => {
       const code = r.blob(
         `${name}: held unit ${key}`,
@@ -236,6 +248,7 @@ function avm1(c: Compiler, r: Results, swf: Avm1Swf): void {
     });
   }
 
+  c.__collect();
   r.case(`${name}: released`, () => {
     c.actionsRelease(7);
     return `${c.actionsHeldCount()} ${c.actionsHeldUnitBytes(7, version, 0, 0, 0, false)}`;
