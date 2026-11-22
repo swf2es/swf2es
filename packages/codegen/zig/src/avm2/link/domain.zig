@@ -195,24 +195,36 @@ pub fn changed(dom: *Domain, arena: *memory.Arena, comptime change: anytype, arg
 }
 
 /// Add the ABC `bytes` to application domain `appDomain`, copied with
-/// PADDING into `arena`, the domain's: 0, or the VerifyError it was
-/// rejected with. One that does not parse leaves nothing: its bytes and
-/// tables are the last the arena took.
+/// PADDING into an arena of its own (Domain.parseAbc): 0, or the
+/// VerifyError it was rejected with. One that does not parse leaves
+/// nothing; one that fails to link keeps its arena with the domain, as the
+/// strings it interned point into its bytes.
 pub fn addAbc(dom: *Domain, arena: *memory.Arena, bytes: []const u8, builtin: bool, appDomain: u32) Allocator.Error!i32 {
-    const mark = arena.mark();
-    const buffer = try memory.allocZeroed(dom.gpa, u8, @as(u32, @intCast(bytes.len)) + PADDING);
-    @memcpy(buffer[0..bytes.len], bytes);
-    const abc = try readAbc(dom.gpa, dom.scratch, buffer, @intCast(bytes.len), builtin);
+    _ = arena;
+    const parsed = try dom.parseAbc(bytes, builtin);
+    const owner = parsed.owner;
+    errdefer dom.dropAbcArena(owner);
+    const abc = parsed.abc;
     const err = abc.@"error";
     if (err != 0) {
         // The error read first: the ABC is in what is given back.
-        arena.restore(mark);
+        dom.dropAbcArena(owner);
         return err;
     }
 
-    _ = try dom.attach(abc, buffer, appDomain);
+    if (!try dom.attach(abc, parsed.buffer, appDomain, owner)) {
+        try dom.rejected.push(dom.gpa, owner);
+    }
+
     return abc.@"error";
 }
+
+/// An ABC parsed into an arena of its own, with its bytes.
+pub const Parsed = struct {
+    abc: *Abc,
+    buffer: []u8,
+    owner: *memory.Arena,
+};
 
 /// A log entry as it was before a truncation (Domain.keepTruncated).
 pub const Truncated = struct {
@@ -416,15 +428,25 @@ pub const Domain = struct {
     deadWeight: u64 = 0,
     /// The weight of the log entries kept for evicted domains, which no rebuild frees.
     keptWeight: u64 = 0,
+    /// What each ABC's arena, which holds its bytes and parsed tables, is
+    /// taken from; each ABC's arena, null for one let go of; and the arenas
+    /// of ABCs that failed to link, whose bytes interned strings point into.
+    /// A rebuild hands the live ABCs' arenas to the new domain rather than
+    /// parse them again, as AssemblyScript's hands it its Abc objects.
+    abcSource: Allocator,
+    abcArena: Rows(?*memory.Arena) = .{},
+    rejected: Rows(*memory.Arena) = .{},
 
     /// The namespace the last getOwnBinding found its binding in.
     foundNs: i32 = -1,
 
-    /// A new domain, its rows in `gpa`, with the root application domain.
-    pub fn init(gpa: Allocator, scratch: Allocator) Allocator.Error!Domain {
+    /// A new domain, its rows in `gpa` and its ABCs in arenas from
+    /// `source`, with the root application domain.
+    pub fn init(gpa: Allocator, scratch: Allocator, source: Allocator) Allocator.Error!Domain {
         var dom: Domain = .{
             .gpa = gpa,
             .scratch = scratch,
+            .abcSource = source,
             .strings = try .init(gpa),
             .namespaces = try .init(gpa),
             .bindings = try .init(gpa),
@@ -490,7 +512,64 @@ pub const Domain = struct {
     /// application domain `domain`, as the next ABC; false after recording
     /// the error, and then it is not added. Its rows are rolled back as
     /// AssemblyScript's are: the strings it interned stay, with its bytes.
-    pub fn attach(self: *Domain, abc: *Abc, buffer: []const u8, domain: u32) Allocator.Error!bool {
+    /// A new arena for an ABC, from abcSource.
+    pub fn newAbcArena(self: *Domain) Allocator.Error!*memory.Arena {
+        const owner = try self.abcSource.create(memory.Arena);
+        owner.* = .init(self.abcSource);
+        return owner;
+    }
+
+    pub fn dropAbcArena(self: *Domain, owner: *memory.Arena) void {
+        owner.deinit();
+        self.abcSource.destroy(owner);
+    }
+
+    /// `bytes` copied with PADDING and parsed, into an arena of their own;
+    /// the caller drops it if it keeps neither.
+    pub fn parseAbc(self: *Domain, bytes: []const u8, isBuiltin: bool) Allocator.Error!Parsed {
+        const owner = try self.newAbcArena();
+        errdefer self.dropAbcArena(owner);
+        const a = owner.allocator();
+        const buffer = try memory.allocZeroed(a, u8, @as(u32, @intCast(bytes.len)) + PADDING);
+        @memcpy(buffer[0..bytes.len], bytes);
+        const abc = try readAbc(a, self.scratch, buffer, @intCast(bytes.len), isBuiltin);
+        return .{ .abc = abc, .buffer = buffer, .owner = owner };
+    }
+
+    /// The ABCs' arenas this domain owns given back: when it is let go of.
+    pub fn freeAbcs(self: *Domain) void {
+        for (0..self.abcArena.len) |i| {
+            if (self.abcArena.get(@intCast(i))) |owner| {
+                self.dropAbcArena(owner);
+            }
+        }
+
+        for (0..self.rejected.len) |i| {
+            self.dropAbcArena(self.rejected.get(@intCast(i)));
+        }
+
+        self.abcArena.truncate(0);
+        self.rejected.truncate(0);
+    }
+
+    /// The ABCs' arenas `fresh`, a rebuild of this domain, holds too, now
+    /// its own: this domain no longer gives them back.
+    pub fn handOver(self: *Domain, fresh: *const Domain) void {
+        for (0..@min(self.abcArena.len, fresh.abcArena.len)) |i_| {
+            const i: u32 = @intCast(i_);
+            if (fresh.abcArena.get(i) != null and fresh.abcArena.get(i) == self.abcArena.get(i)) {
+                self.abcArena.set(i, null);
+            }
+        }
+    }
+
+    /// Forget the ABCs' arenas this domain holds but does not own (a failed
+    /// rebuild's, whose ABCs are the old domain's still).
+    pub fn forgetBorrowed(self: *Domain) void {
+        self.abcArena.truncate(0);
+    }
+
+    pub fn attach(self: *Domain, abc: *Abc, buffer: []const u8, domain: u32, owner: ?*memory.Arena) Allocator.Error!bool {
         const gpa = self.gpa;
         const index = self.abcs.len;
         const before = self.rows();
@@ -498,6 +577,7 @@ pub const Domain = struct {
         try self.abcDomain.push(gpa, domain);
         try self.abcBase.push(gpa, buffer.ptr);
         try self.abcBuffer.push(gpa, buffer);
+        try self.abcArena.push(gpa, owner);
         try self.abcVerified.push(gpa, 0);
         self.loads += 1;
         try self.abcOwner.push(gpa, self.loads);
@@ -521,6 +601,7 @@ pub const Domain = struct {
             self.abcs.truncate(index);
             self.abcBase.truncate(index);
             self.abcBuffer.truncate(index);
+            self.abcArena.truncate(index);
             self.abcVerified.truncate(index);
             self.abcString.truncate(index);
             self.abcNs.truncate(index);

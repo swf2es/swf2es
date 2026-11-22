@@ -90,6 +90,7 @@ fn leave(dom: *Domain, domain: u32, state: u8) void {
 /// Only bytes it adopts stay in `arena`, the domain's: a host gives an
 /// evicted domain's ABCs back at each revival, held ones included.
 pub fn restore(dom: *Domain, arena: *memory.Arena, index: u32, bytes: []const u8) Allocator.Error!i32 {
+    _ = arena;
     if (index >= dom.abcs.len or dom.domainState.get(dom.abcDomain.get(index)) != DOMAIN_Evicted) {
         return -1;
     }
@@ -98,22 +99,20 @@ pub fn restore(dom: *Domain, arena: *memory.Arena, index: u32, bytes: []const u8
         return 0;
     }
 
-    const mark = arena.mark();
     const length: u32 = @intCast(bytes.len);
-    const buffer = try memory.allocZeroed(dom.gpa, u8, length + PADDING);
-    @memcpy(buffer[0..bytes.len], bytes);
-    const abc = try readAbc(dom.gpa, dom.scratch, buffer, length, false);
-    const err = abc.@"error";
+    const parsed = try dom.parseAbc(bytes, false);
+    const err = parsed.abc.@"error";
     if (err != 0) {
         // The error read first: the ABC is in what is given back.
-        arena.restore(mark);
+        dom.dropAbcArena(parsed.owner);
         return err;
     }
 
     // Rows of an ABC let go of, which only a rebuild's vacate added, never one from before it: raw writes.
-    dom.abcs.set(index, abc);
-    dom.abcBase.set(index, buffer.ptr);
-    dom.abcBuffer.set(index, buffer);
+    dom.abcs.set(index, parsed.abc);
+    dom.abcBase.set(index, parsed.buffer.ptr);
+    dom.abcBuffer.set(index, parsed.buffer);
+    dom.abcArena.set(index, parsed.owner);
     dom.abcWeight.set(index, @intCast(@min(domain_.ABC_Weight * length, 0xffffffff)));
     return 0;
 }
@@ -313,6 +312,7 @@ fn vacate(dom: *Domain, domain: u32) Allocator.Error!void {
     try dom.abcDomain.push(gpa, domain);
     try dom.abcBase.push(gpa, &no_bytes);
     try dom.abcBuffer.push(gpa, &no_bytes);
+    try dom.abcArena.push(gpa, null);
     try dom.abcVerified.push(gpa, 0);
     try dom.abcWeight.push(gpa, 0);
     dom.loads += 1;
@@ -470,12 +470,9 @@ fn reattach(dom: *Domain, fresh: *Domain, index: u32) Allocator.Error!bool {
         return true;
     }
 
-    // The old domain's tables go with its arena: its bytes and tables are
-    // made again in the new one's, as parsing them again makes them alike.
-    const old = dom.abcBuffer.get(index);
-    const buffer = try fresh.gpa.dupe(u8, old);
-    const again = try readAbc(fresh.gpa, fresh.scratch, buffer, abc.length, abc.builtin);
-    if (again.@"error" != 0 or !try fresh.attach(again, buffer, dom.abcDomain.get(index))) {
+    // Its bytes and parsed tables, in an arena of their own, are the new
+    // domain's too, and its alone once the rebuild is done (handOver).
+    if (!try fresh.attach(abc, dom.abcBuffer.get(index), dom.abcDomain.get(index), dom.abcArena.get(index))) {
         return false;
     }
 
@@ -686,6 +683,7 @@ pub fn loadDomain(loaded: *Loaded, words: []const u8) Allocator.Error!bool {
         try loaded.flags.append(gpa, @truncate(reader.next()));
         try loaded.lengths.append(gpa, reader.next());
         try dom.abcBuffer.push(gpa, &no_bytes);
+        try dom.abcArena.push(gpa, null);
         try dom.abcBase.push(gpa, &no_bytes);
     }
 
@@ -773,17 +771,16 @@ pub fn loadAbc(loaded: *Loaded, index: u32, bytes: []const u8) Allocator.Error!i
         return -1;
     }
 
-    const length: u32 = @intCast(bytes.len);
-    const buffer = try memory.allocZeroed(dom.gpa, u8, length + PADDING);
-    @memcpy(buffer[0..bytes.len], bytes);
-    const abc = try readAbc(dom.gpa, dom.scratch, buffer, length, loaded.flags.items[index] & SAVED_Builtin != 0);
-    if (abc.@"error" != 0) {
-        return abc.@"error";
+    const parsed = try dom.parseAbc(bytes, loaded.flags.items[index] & SAVED_Builtin != 0);
+    if (parsed.abc.@"error" != 0) {
+        dom.dropAbcArena(parsed.owner);
+        return parsed.abc.@"error";
     }
 
-    dom.abcs.set(index, abc);
-    dom.abcBase.set(index, buffer.ptr);
-    dom.abcBuffer.set(index, buffer);
+    dom.abcs.set(index, parsed.abc);
+    dom.abcBase.set(index, parsed.buffer.ptr);
+    dom.abcBuffer.set(index, parsed.buffer);
+    dom.abcArena.set(index, parsed.owner);
     return 0;
 }
 

@@ -244,7 +244,7 @@ pub const BodyDecoder = struct {
     pub fn init(gpa: Allocator, abc: *Abc, data: []const u8, domain: ?*Domain, index: u32) Error!BodyDecoder {
         const dom = domain orelse stand: {
             const d = try gpa.create(Domain);
-            d.* = try .init(gpa, gpa);
+            d.* = try .init(gpa, gpa, gpa);
             break :stand d;
         };
         return .{

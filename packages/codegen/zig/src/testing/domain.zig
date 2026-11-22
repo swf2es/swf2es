@@ -922,6 +922,10 @@ fn hashField(h: *std.hash.Wyhash, dom: *const Domain, comptime name: []const u8)
         // Addresses into the ABCs' bytes, which abcBuffer has by content.
         std.mem.eql(u8, name, "abcBase") or
         std.mem.eql(u8, name, "truncated") or
+        // Where each ABC's bytes and tables are, which abcBuffer has by content.
+        std.mem.eql(u8, name, "abcSource") or
+        std.mem.eql(u8, name, "abcArena") or
+        std.mem.eql(u8, name, "rejected") or
         std.mem.startsWith(u8, name, "memo");
     if (comptime std.mem.eql(u8, name, "stringPtr")) {
         h.update(std.mem.asBytes(&dom.stringPtr.len));
@@ -992,7 +996,8 @@ test "the link ABCs are tests/parity/link-abc.ts's, and link as AssemblyScript l
 test "a name that is not valid UTF-8 is looked up as AssemblyScript decodes and encodes it again" {
     var arena: memory.Arena = .init(testing.allocator);
     defer arena.deinit();
-    var dom: Domain = try .init(arena.allocator(), arena.allocator());
+    var dom: Domain = try .init(arena.allocator(), arena.allocator(), testing.allocator);
+    defer dom.freeAbcs();
     const lone = try dom.internString("\xc3");
     const tail = try dom.internString("a\xc3");
     const surrogate = try dom.internString("\xed\xa0\x80b");
@@ -1137,7 +1142,8 @@ fn linkAll(source: Allocator) !void {
     var scratch: memory.Arena = .init(source);
     defer scratch.deinit();
     const dom = try arena.allocator().create(Domain);
-    dom.* = try .init(arena.allocator(), scratch.allocator());
+    dom.* = try .init(arena.allocator(), scratch.allocator(), source);
+    defer dom.freeAbcs();
     const steps = struct {
         fn run(d: *Domain, a: *memory.Arena, step: u32) !void {
             switch (step) {
@@ -1265,7 +1271,8 @@ fn linkLife(source: Allocator) !u64 {
     var scratch: memory.Arena = .init(source);
     defer scratch.deinit();
     const dom = try arena.allocator().create(Domain);
-    dom.* = try .init(arena.allocator(), scratch.allocator());
+    dom.* = try .init(arena.allocator(), scratch.allocator(), source);
+    defer dom.freeAbcs();
     for (0..life_steps) |step| {
         if (step == life_steps - 1) {
             lifetime.evict(dom, 1);
@@ -1315,14 +1322,20 @@ const Made = struct {
     fn init(self: *Made, source: Allocator) !void {
         self.arena = .init(source);
         self.scratch = .init(source);
-        errdefer self.deinit();
+        errdefer {
+            self.scratch.deinit();
+            self.arena.deinit();
+        }
+
         self.dom = try self.arena.allocator().create(Domain);
-        self.dom.* = try .init(self.arena.allocator(), self.scratch.allocator());
+        self.dom.* = try .init(self.arena.allocator(), self.scratch.allocator(), source);
+        errdefer self.dom.freeAbcs();
         try testing.expectEqual(0, try domain_.changed(self.dom, &self.arena, domain_.addAbc, .{ &self.arena, &link_builtin, true, 0 }));
         try testing.expectEqual(0, try domain_.changed(self.dom, &self.arena, domain_.addAbc, .{ &self.arena, &link_contested, false, 0 }));
     }
 
     fn deinit(self: *Made) void {
+        self.dom.freeAbcs();
         self.scratch.deinit();
         self.arena.deinit();
     }
@@ -1446,7 +1459,8 @@ test "bytes restore does not adopt stay out of the domain's arena" {
     var scratch: memory.Arena = .init(testing.allocator);
     defer scratch.deinit();
     const dom = try arena.allocator().create(Domain);
-    dom.* = try .init(arena.allocator(), scratch.allocator());
+    dom.* = try .init(arena.allocator(), scratch.allocator(), testing.allocator);
+    defer dom.freeAbcs();
     try testing.expectEqual(0, try domain_.changed(dom, &arena, domain_.addAbc, .{ &arena, &link_builtin, true, 0 }));
     try testing.expectEqual(1, try domain_.changed(dom, &arena, Domain.childDomain, .{0}));
     try testing.expectEqual(0, try domain_.changed(dom, &arena, domain_.addAbc, .{ &arena, &link_user, false, 1 }));
@@ -1465,6 +1479,11 @@ test "bytes restore does not adopt stay out of the domain's arena" {
 
     // One a rebuild let go of: bytes that do not parse leave nothing; its own are adopted.
     dom.abcs.set(1, &lifetime.no_abc);
+    if (dom.abcArena.get(1)) |owner| {
+        dom.dropAbcArena(owner);
+    }
+
+    dom.abcArena.set(1, null);
     try testing.expectEqual(1107, try domain_.changed(dom, &arena, lifetime.restore, .{ &arena, 1, big[0..3] }));
     try testing.expectEqual(mark, arena.mark());
     try testing.expectEqual(0, try domain_.changed(dom, &arena, lifetime.restore, .{ &arena, 1, &link_user }));

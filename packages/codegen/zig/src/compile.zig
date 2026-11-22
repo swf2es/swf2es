@@ -44,13 +44,14 @@ fn make(apiVersion: u8) Allocator.Error!*Box {
     errdefer pages.destroy(box);
     box.arena = .init(pages);
     errdefer box.arena.deinit();
-    box.dom = try .init(box.arena.allocator(), memory.call.allocator());
+    box.dom = try .init(box.arena.allocator(), memory.call.allocator(), pages);
     box.dom.apiVersion = apiVersion;
     return box;
 }
 
 /// Domain `box` and everything of it given back.
 fn unmake(box: *Box) void {
+    box.dom.freeAbcs();
     box.arena.deinit();
     memory.pages().allocator().destroy(box);
 }
@@ -1146,8 +1147,10 @@ fn newRebuild(from: *Domain, source: ?*Box) Allocator.Error!*Rebuilding {
     return r;
 }
 
-/// A rebuild's new domain, and the loaded one it built from, given back.
+/// A rebuild's new domain, and the loaded one it built from, given back:
+/// the new one's ABCs are the domain's it built from still.
 fn freeRebuild(r: *Rebuilding) void {
+    r.box.dom.forgetBorrowed();
     unmake(r.box);
     if (r.source) |source| {
         unmake(source);
@@ -1223,6 +1226,8 @@ fn rebuilt(r: *Rebuilding) bool {
     // does once for its first method: the new domain has none found yet.
     forgetVerified();
     forgetModules();
+    // The live ABCs' arenas go to the new domain; the dead ones' with the old.
+    r.rebuild.dom.handOver(&r.box.dom);
     const old = current;
     current = r.box;
     current.?.dom.decoder = null;
