@@ -1242,6 +1242,58 @@ function nestedAbc(n: number): Uint8Array {
   );
 }
 
+/**
+ * An ABC whose script initializer nests `n` ifs, each a merge its
+ * dominator's code is a labelled block for: structured code as deep as
+ * the emitter goes, to MAX_NESTING, and past it the dispatcher.
+ */
+function nestedIfsAbc(n: number): Uint8Array {
+  const code: number[] = [];
+  for (let k = 0; k < n; k++) {
+    const offset = 6 * n - 6 * k - 5;
+    code.push(0x26, 0x12, offset & 0xff, (offset >> 8) & 0xff, (offset >> 16) & 0xff);
+  }
+
+  for (let k = 0; k <= n; k++) {
+    code.push(0x02);
+  }
+
+  code.push(0x47);
+  return abcOf(
+    { strings: [], namespaces: [], multinames: [] },
+    tables({
+      methods: [{}],
+      scripts: [{ init: 0, traits: [] }],
+      bodies: [{ method: 0, code }],
+    }),
+  );
+}
+
+/** Body 0 of a deep ABC compiled alone, in a fresh instance; for Zig, how deep its stack went. */
+async function deepEmit(
+  r: Results,
+  fresh: () => Promise<Compiler>,
+  name: string,
+  bytes: Uint8Array,
+): Promise<void> {
+  const c = await fresh();
+  r.case(`${name}: emit`, () => {
+    c.domainReset(API_VERSION);
+    const error = c.domainAdd(bytes, false, 0);
+    if (error !== 0) {
+      return `add ${error}`;
+    }
+
+    c.stackPaint?.();
+    const text: string = c.domainEmit(0);
+    if (c.stackDeepest) {
+      console.log(`    ${name}: ${r.compiler}'s stack reached ${c.stackDeepest()} bytes`);
+    }
+
+    return r.blob(`${name}: emit`, Buffer.from(`${/L\d+: \{/.test(text) ? "structured" : "dispatched"}\n${text}`));
+  });
+}
+
 /** A deep case, alone in a fresh instance: AssemblyScript's may trap on it. */
 async function deep(
   r: Results,
@@ -1893,6 +1945,17 @@ const SUITES: Suite[] = [
 
       for (const n of [100, 2000, 8000, 20000]) {
         await deep(r, fresh, `TypeNames nested ${n}`, nestedAbc(n), [builtinLibrary], 0);
+      }
+    },
+  },
+  {
+    name: "emit-deep",
+    build: "testing",
+    needs: [...LINK_EXPORTS, "domainEmit"],
+    asStackLimit: true,
+    run: async (_, r, fresh) => {
+      for (const n of [10, 100, 200, 240, 248, 249, 250, 251, 300, 2000, 20000]) {
+        await deepEmit(r, fresh, `ifs nested ${n}`, nestedIfsAbc(n));
       }
     },
   },
