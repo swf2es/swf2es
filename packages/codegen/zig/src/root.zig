@@ -268,6 +268,40 @@ pub export fn domainSourceMap() usize {
     return handOut(avm2.domainSourceMap(gpa()) catch |err| return fail(err));
 }
 
+pub export fn domainContext(index: i32, after: i32, upTo: i32) usize {
+    return handOut(avm2.domainContext(gpa(), index, after, upTo) catch |err| return fail(err));
+}
+
+pub export fn domainKeyHeaderBytes(index: i32) usize {
+    const bytes = avm2.domainKeyHeaderBytes(gpa(), index) catch |err| return fail(err);
+    return if (bytes) |b| handOut(b) else handOutNone();
+}
+
+pub export fn domainKeyFork(appDomain: i32) i32 {
+    return orFailed(i32, avm2.domainKeyFork(appDomain));
+}
+
+pub export fn domainKeyLogBytes(appDomain: i32, after: i32, from: i32, to: i32, block: i32, filled: i32) usize {
+    const bytes = avm2.domainKeyLogBytes(gpa(), appDomain, after, from, to, block, filled) catch |err| return fail(err);
+    return if (bytes) |b| handOut(b) else handOutNone();
+}
+
+pub export fn domainRevision() usize {
+    return handOut(avm2.domainRevision(gpa()) catch |err| return fail(err));
+}
+
+pub export fn domainLogMark() i32 {
+    return orFailed(i32, avm2.domainLogMark());
+}
+
+pub export fn domainLogSince(mark: i32, index: i32) usize {
+    return handOut(avm2.domainLogSince(gpa(), mark, index) catch |err| return fail(err));
+}
+
+pub export fn domainReplay(log: [*]const u8, log_len: u32, index: i32) bool {
+    return orFailed(bool, avm2.domainReplay(gpa(), staged(u8, log, log_len), index));
+}
+
 pub export fn domainUsage() usize {
     return handOut(avm2.domainUsage(gpa()) catch |err| return fail(err));
 }

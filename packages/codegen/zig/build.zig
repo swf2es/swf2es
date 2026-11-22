@@ -51,6 +51,14 @@ const exports = [_][]const u8{
     "domainModuleDone",
     "domainModuleEntries",
     "domainSourceMap",
+    "domainContext",
+    "domainKeyHeaderBytes",
+    "domainKeyFork",
+    "domainKeyLogBytes",
+    "domainRevision",
+    "domainLogMark",
+    "domainLogSince",
+    "domainReplay",
 };
 
 /// What the test build exports beside them.
