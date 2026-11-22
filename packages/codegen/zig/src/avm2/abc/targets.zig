@@ -4,13 +4,11 @@
 // the same depths and its values merged, and the targets whose entry state
 // changed walked again.
 //
-// AssemblyScript's target and throwsAt call each other: a backward edge
-// makes its target a loop header, whose handlers are reached from it, and
-// a handler's target before the instruction is a backward edge again, as
-// deep as the input's handlers make it. Here the two are one loop over a
-// stack of frames in the call's arena, which does what the recursion did
-// in its order, the saved values of the block being walked kept in the one
-// buffer AssemblyScript's recursion shares too.
+// A backward edge makes its target a loop header, whose handlers are
+// reached from it (throwsAt). A handler's target is past its range
+// (checkHandlers rejects one before its end), so after the instruction
+// that throws: never a backward edge, never a loop header. The recursion
+// is at most target, throwsAt, target, as in AssemblyScript.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Error = Allocator.Error;
@@ -68,18 +66,35 @@ fn requeue(bd: *BodyDecoder, t: u32) void {
 const Head = union(enum) {
     failed,
     done,
-    header: struct { t: u32, stack: u32, scope: u32 },
+    header: u32,
 };
 
 /// As Verifier::checkTarget and mergeState: stay in the code, back edges need
 /// a label or known target, and every path into a block has the same stack
 /// and scope depths, whose values merge.
 pub fn target(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!bool {
-    return switch (try head(bd, from, to, stack, scope)) {
-        .failed => false,
-        .done => true,
-        .header => |h| run(bd, .{ .header = .{ .t = h.t, .stack = h.stack, .scope = h.scope } }),
+    const t = switch (try head(bd, from, to, stack, scope)) {
+        .failed => return false,
+        .done => return true,
+        .header => |t| t,
     };
+
+    if (!bd.typed) {
+        return throwsAt(bd, t);
+    }
+
+    // Its handlers are reached with the state it is entered with.
+    try saveCurrent(bd);
+    loadEntry(bd, t);
+    const stackNow = bd.stack;
+    const scopeNow = bd.scope;
+    bd.stack = stack;
+    bd.scope = scope;
+    const reached = try throwsAt(bd, t);
+    bd.stack = stackNow;
+    bd.scope = scopeNow;
+    restoreCurrent(bd);
+    return reached;
 }
 
 /// target up to where it reaches a new loop header's handlers.
@@ -144,135 +159,31 @@ fn head(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!Head
     // handlers covering it, even when the back edge is found after its block.
     if (to <= from and bd.loopHeader[t] == 0) {
         bd.loopHeader[t] = 1;
-        return .{ .header = .{ .t = t, .stack = stack, .scope = scope } };
+        return .{ .header = t };
     }
 
     return .done;
 }
 
+/// An edge to a handler's target: forward, so never a loop header.
+fn handlerEdge(bd: *BodyDecoder, pc: u32, to: u32) Error!bool {
+    return switch (try head(bd, pc, to, 1, 0)) {
+        .failed => false,
+        .done => true,
+        .header => unreachable,
+    };
+}
+
 /// Edges from `pc` to every handler covering it. A handler starts with the
 /// locals as they are, no scopes, and just the exception on the stack.
 pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!bool {
-    return run(bd, .{ .throws = .{ .pc = pc } });
-}
-
-/// What a frame waits for: a loop header's handlers reached from its
-/// entry state, after which the block's own state comes back; or the
-/// handlers covering `pc`, one at a time from `next`, one target edge
-/// out at a time, with what that edge changed to put back.
-const Frame = union(enum) {
-    header: struct {
-        t: u32,
-        stack: u32,
-        scope: u32,
-        stack_now: u32 = 0,
-        scope_now: u32 = 0,
-        started: bool = false,
-    },
-    throws: struct {
-        pc: u32,
-        next: u32 = 0,
-        /// The handler whose edge a child frame is following, and what to put back.
-        waiting: ?Waiting = null,
-    },
-};
-
-const Waiting = struct {
-    handler: u32,
-    typed: bool,
-    stack: u32 = 0,
-    scope: u32 = 0,
-    first_type: i32 = 0,
-    first_flags: u8 = 0,
-    first_origin: i32 = 0,
-};
-
-/// The frames from `first` until it returns, as the recursion would.
-fn run(bd: *BodyDecoder, first: Frame) Error!bool {
-    var frames: std.ArrayList(Frame) = .empty;
-    try frames.append(bd.gpa, first);
-    // What the frame just ended returned to the one under it.
-    var returned: ?bool = null;
-    while (frames.items.len > 0) {
-        const frame = &frames.items[frames.items.len - 1];
-        switch (frame.*) {
-            .header => |*h| {
-                if (!h.started) {
-                    h.started = true;
-                    if (bd.typed) {
-                        // Its handlers are reached with the state it is entered with.
-                        try saveCurrent(bd);
-                        loadEntry(bd, h.t);
-                        h.stack_now = bd.stack;
-                        h.scope_now = bd.scope;
-                        bd.stack = h.stack;
-                        bd.scope = h.scope;
-                    }
-
-                    try frames.append(bd.gpa, .{ .throws = .{ .pc = h.t } });
-                    continue;
-                }
-
-                const reached = returned.?;
-                if (bd.typed) {
-                    bd.stack = h.stack_now;
-                    bd.scope = h.scope_now;
-                    restoreCurrent(bd);
-                }
-
-                _ = frames.pop();
-                returned = reached;
-            },
-            .throws => |*f| {
-                if (f.waiting) |w| {
-                    // The edge to handler w's target came back.
-                    f.waiting = null;
-                    const reached = returned.?;
-                    if (w.typed) {
-                        bd.stack = w.stack;
-                        bd.scope = w.scope;
-                        const base = bd.stackBase();
-                        bd.setValue(base, w.first_type, w.first_flags);
-                        bd.origin[base] = w.first_origin;
-                        if (!reached) {
-                            _ = frames.pop();
-                            returned = false;
-                            continue;
-                        }
-
-                        bd.handlerMerged[w.handler] = bd.localsVersion;
-                    } else if (!reached) {
-                        _ = frames.pop();
-                        returned = false;
-                        continue;
-                    }
-                }
-
-                const result = try throwsStep(bd, f, &frames);
-                if (result) |value| {
-                    _ = frames.pop();
-                    returned = value;
-                }
-            },
-        }
-    }
-
-    return returned.?;
-}
-
-/// The handlers covering the frame's pc from `next` on, until one's edge
-/// is a new loop header (a frame pushed for it: null) or they are done
-/// (true) or one failed (false).
-fn throwsStep(bd: *BodyDecoder, f: anytype, frames: *std.ArrayList(Frame)) Error!?bool {
-    const pc = f.pc;
     if (bd.emitPass or pc < bd.tryFrom or pc >= bd.tryTo) {
         return true;
     }
 
     const abc = bd.abc;
-    while (f.next < bd.handlerCount) {
-        const i = f.next;
-        f.next += 1;
+    for (0..bd.handlerCount) |i_| {
+        const i: u32 = @intCast(i_);
         const h = bd.handlerFirst + i;
         if (pc < abc.exceptionFrom.get(h) or pc >= abc.exceptionTo.get(h)) {
             continue;
@@ -285,15 +196,11 @@ fn throwsStep(bd: *BodyDecoder, f: anytype, frames: *std.ArrayList(Frame)) Error
 
         const to = abc.exceptionTarget.get(h);
         if (!bd.typed) {
-            switch (try head(bd, pc, to, 1, 0)) {
-                .failed => return false,
-                .done => continue,
-                .header => |hd| {
-                    f.waiting = .{ .handler = i, .typed = false };
-                    try frames.append(bd.gpa, .{ .header = .{ .t = hd.t, .stack = hd.stack, .scope = hd.scope } });
-                    return null;
-                },
+            if (!try handlerEdge(bd, pc, to)) {
+                return false;
             }
+
+            continue;
         }
 
         // The same locals as when last merged into the handler change
@@ -302,32 +209,22 @@ fn throwsStep(bd: *BodyDecoder, f: anytype, frames: *std.ArrayList(Frame)) Error
             continue;
         }
 
+        const stack = bd.stack;
+        const scope = bd.scope;
         const base = bd.stackBase();
-        const waiting: Waiting = .{
-            .handler = i,
-            .typed = true,
-            .stack = bd.stack,
-            .scope = bd.scope,
-            .first_type = bd.valueType[base],
-            .first_flags = bd.valueFlags[base],
-            .first_origin = bd.origin[base],
-        };
+        const firstType = bd.valueType[base];
+        const firstFlags = bd.valueFlags[base];
+        const firstOrigin = bd.origin[base];
         const ty = bd.handlerType.items[i];
         bd.setValue(base, ty, if (bd.domain.typeNotNull(ty)) NOT_NULL else 0);
         bd.stack = 1;
         bd.scope = 0;
-        const edge = try head(bd, pc, to, 1, 0);
-        if (edge == .header) {
-            f.waiting = waiting;
-            try frames.append(bd.gpa, .{ .header = .{ .t = edge.header.t, .stack = edge.header.stack, .scope = edge.header.scope } });
-            return null;
-        }
-
-        bd.stack = waiting.stack;
-        bd.scope = waiting.scope;
-        bd.setValue(base, waiting.first_type, waiting.first_flags);
-        bd.origin[base] = waiting.first_origin;
-        if (edge == .failed) {
+        const reached = try handlerEdge(bd, pc, to);
+        bd.stack = stack;
+        bd.scope = scope;
+        bd.setValue(base, firstType, firstFlags);
+        bd.origin[base] = firstOrigin;
+        if (!reached) {
             return false;
         }
 
