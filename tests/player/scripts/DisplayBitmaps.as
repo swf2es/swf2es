@@ -3,7 +3,7 @@
 // still layers: on the left the bitmap, on the right the same art drawn as
 // vectors. The bitmap takes the stage's width and a height in proportion,
 // each layer drawn through a matrix that fits it, its own colour transform
-// and a clip of the bitmap's size. On frame 2 a grid of its pixels is
+// and a clip of the bitmap's size. Thirty frames on a grid of its pixels is
 // traced, which reads it back, and a marker filled: what scripts see of it
 // at its size, and how it shows after.
 package
@@ -66,7 +66,7 @@ package
 		private function onFrame(e:Event):void
 		{
 			_frame++;
-			if (_frame != 1)
+			if (_frame != 30)
 			{
 				return;
 			}

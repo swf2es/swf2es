@@ -343,15 +343,15 @@ export class BitmapStore {
   private opaqueVersion = -1;
   disposed = false;
   /**
-   * Texels a pixel the GPU copy keeps the store's draws at: more than 1
-   * only under the renderer's display-resolution option (RenderViewOptions'
-   * `bitmapResolution`), for a store whose every change so far was a draw
-   * of display objects on the GPU or a fill. Scripts see the store at its
-   * size: the first read brings it back at 1 texel a pixel (`hiresRefused`).
+   * Whether the renderer keeps the store's draws at the display's resolution
+   * rather than a texel a pixel (RenderViewOptions' `bitmapResolution`): only
+   * a store made of one colour and since drawn into on the GPU and filled.
+   * Scripts see the store at its size: its first read brings it back at a
+   * texel a pixel (`displayRefused`).
    */
-  hires = 1;
+  atDisplay = false;
   /** Whether the store was read, written on the CPU or lost at display resolution, and stays at Flash's. */
-  hiresRefused = false;
+  displayRefused = false;
   /**
    * The Bitmaps showing the store, told of each change so the renderer
    * looks at them; held weakly, so a Bitmap taken off the display list
@@ -383,6 +383,21 @@ export class BitmapStore {
     if (width * height > LAZY_PIXELS) {
       this.made();
     }
+  }
+
+  /**
+   * A store of `pixel`, premultiplied as a store keeps it, as one made of
+   * its colour is: a store at display resolution drawn again (DisplayBitmaps).
+   */
+  static filled(width: number, height: number, transparent: boolean, pixel: number): BitmapStore {
+    const store = new BitmapStore(width, height, transparent, 0);
+    if (store.solid !== null) {
+      store.solid = pixel;
+    } else {
+      store.cpu.fill(pixel);
+    }
+
+    return store;
   }
 
   /** The pixels made of the one colour the store is, where they were not. */
@@ -661,7 +676,11 @@ export class BitmapStore {
       return;
     }
 
-    const pixel = this.premultiplied(argb);
+    this.fillPixel(c, this.premultiplied(argb));
+  }
+
+  /** `c`, within the store, set to `pixel`, premultiplied as the store keeps it: fillRect's fill. */
+  fillPixel(c: PixelRect, pixel: number): void {
     if (this.onGpu((copy) => copy.fill(c, pixel))) {
       return;
     }

@@ -68,6 +68,14 @@ fetch-electron` does so ahead, for the tests.
   Buffer and texture byte allowances follow the shared backend's AIR-backed
   limits, with separate host budgets for target attachments. Supported
   formats and remaining gaps are in [Context3D](../../packages/context3d/README.md).
+- **Sharp bitmaps.** View › Sharp Bitmaps keeps vector art a SWF draws
+  into a BitmapData at the screen's resolution rather than Flash's (the
+  player's `bitmapResolution: "display"`), so a map flattened into a bitmap
+  the stage's size stays sharp in a maximised window. Scripts read the
+  pixels Flash would have made either way. It is off until chosen; the app
+  remembers the choice in `settings.json` (`sharpBitmaps`) and restarts the
+  current movie when it changes, and `--bitmap-resolution=display` or
+  `--bitmap-resolution=stage` sets it for one run, till the menu is used.
 - **Theme.** View › Theme is System, the default, Light or Dark: the app's
   pages, the element's performance meter and context menu, and the URL
   dialog follow it, as `prefers-color-scheme`, and so do the title bar and

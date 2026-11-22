@@ -123,12 +123,17 @@ export interface LibraryState {
  */
 export type ApiVersion = "latest" | "root" | number;
 
+/** The resolution BitmapData.draw keeps vector art at, as the renderer's bitmapResolution takes it. */
+export type BitmapResolution = "stage" | "display";
+
 /** What the page starts from: the libraries, and the SWF to play, if one is open. */
 export interface StartState {
   /** The user's opt-in; changing it restarts the page. */
   stage3D: boolean;
   /** --api-version's, for this run. */
   apiVersion: ApiVersion;
+  /** View › Sharp Bitmaps', or --bitmap-resolution's for this run; changing it restarts the page. */
+  bitmapResolution: BitmapResolution;
   libraries: LibraryState;
   movie: OpenedMovie | null;
   /** The app's build, a short commit, for the context menu's About item; null where unknown. */

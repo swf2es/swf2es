@@ -50,6 +50,26 @@ test("Stage3D's choice is saved only when made, and survives other settings upda
   }
 });
 
+test("Sharp Bitmaps is off unless the View menu turned it on", () => {
+  const directory = mkdtempSync(join(tmpdir(), "swf2es-settings-"));
+  try {
+    assert.equal(new SettingsFile(directory).bitmapResolution, "stage");
+    for (const value of [undefined, null, "true", 1, false]) {
+      writeFileSync(join(directory, "settings.json"), JSON.stringify({ sharpBitmaps: value }));
+      assert.equal(new SettingsFile(directory).bitmapResolution, "stage", `${value}`);
+    }
+
+    const settings = new SettingsFile(directory);
+    assert.equal(settings.setSharpBitmaps(true), true);
+    settings.opened("example.swf");
+    assert.equal(new SettingsFile(directory).bitmapResolution, "display");
+    assert.equal(settings.setSharpBitmaps(false), true);
+    assert.equal(new SettingsFile(directory).bitmapResolution, "stage");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("a chosen playerglobal is kept until the app's own is chosen again", () => {
   const directory = mkdtempSync(join(tmpdir(), "swf2es-settings-"));
   try {

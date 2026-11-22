@@ -4,8 +4,10 @@
 // what opens an AIR application's WebSockets, each said on stderr as the
 // app starts; --no-http-cache;
 // --flashvars and --param, the SWF's embedding (embedding.ts); --software-gl;
-// --api-version (api-version.ts); and --theme (theme.ts).
+// --api-version (api-version.ts); --bitmap-resolution (bitmap-resolution.ts); and --theme
+// (theme.ts).
 import { apiVersionArgument } from "./api-version.ts";
+import { bitmapResolutionArgument } from "./bitmap-resolution.ts";
 import { embeddingArguments } from "./embedding.ts";
 import { Network } from "./network.ts";
 import { policyIgnoredHosts, policyIgnoredNotice, unverifiedHosts } from "./network-rules.ts";
@@ -36,6 +38,24 @@ if ("error" in versioned) {
 }
 
 export const apiVersion = versioned.apiVersion;
+
+/**
+ * --bitmap-resolution=display|stage: whether vector art drawn into a BitmapData is kept at the
+ * screen's resolution for this run, over View › Sharp Bitmaps' till that is chosen
+ * (`bitmapResolutionChosen`); one that does not read stops the app.
+ */
+const bitmaps = bitmapResolutionArgument(own.slice(1));
+if ("error" in bitmaps) {
+  process.stderr.write(`swf2es: ${bitmaps.error}\n`);
+  process.exit(2);
+}
+
+export let bitmapResolutionOverride = bitmaps.bitmapResolution;
+
+/** View › Sharp Bitmaps chosen: its choice from now on, over --bitmap-resolution's. */
+export function bitmapResolutionChosen(): void {
+  bitmapResolutionOverride = null;
+}
 
 /**
  * --theme=system|light|dark: the app's look for this run, over View › Theme's, which it leaves

@@ -75,7 +75,11 @@ function drawObject(
   if (
     !colour &&
     blend === "normal" &&
-    drawer.drawInto(store, d, placed, x0, y0, x1 - x0, y1 - y0, samples)
+    drawer.drawInto(store, d, placed, x0, y0, x1 - x0, y1 - y0, samples, {
+      matrix: m,
+      color: c,
+      clip: r,
+    })
   ) {
     return;
   }

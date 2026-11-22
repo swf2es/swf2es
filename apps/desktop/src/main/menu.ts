@@ -4,7 +4,7 @@ import { capturing, stopCapture } from "./capture.ts";
 import { chooseLibrary, refuse, resetLibrary, showOpenDialog, showUrlDialog } from "./dialogs.ts";
 import { closeMovie, current, openEntry, reloadMovie } from "./open.ts";
 import { httpCache, settings, window } from "./state.ts";
-import { network } from "./switches.ts";
+import { bitmapResolutionChosen, bitmapResolutionOverride, network } from "./switches.ts";
 import { type Theme, themeMenu } from "./theme.ts";
 
 /** View › Theme's choice: the look from now on, over --theme's, and kept for the next run. */
@@ -116,6 +116,23 @@ export function buildMenu(): void {
               refuse(
                 "The settings could not be saved.",
                 "The Stage3D choice holds until you quit.",
+              );
+            }
+
+            window?.webContents.reload();
+          },
+        },
+        {
+          id: "sharp-bitmaps",
+          label: "Sharp &Bitmaps",
+          type: "checkbox",
+          checked: (bitmapResolutionOverride ?? settings.bitmapResolution) === "display",
+          click: (item) => {
+            bitmapResolutionChosen();
+            if (!settings.setSharpBitmaps(item.checked)) {
+              refuse(
+                "The settings could not be saved.",
+                "The Sharp Bitmaps choice holds until you quit.",
               );
             }
 

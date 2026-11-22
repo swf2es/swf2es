@@ -50,8 +50,6 @@ export interface PlayerJob {
   draw?: boolean;
   /** getTimer and timers by the wall clock, as a benchmark times itself, not by the frames. */
   realTime?: boolean;
-  /** The renderer's BitmapData.draw resolution (RenderViewOptions' `bitmapResolution`). */
-  bitmapResolution?: "stage" | "display";
 }
 
 /** How to run jobs: a time each job's scripts may take, a listener for each result, and more directories to serve. */
@@ -377,7 +375,6 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
               apiVersion: job.apiVersion,
               draw: job.draw,
               realTime: job.realTime,
-              bitmapResolution: job.bitmapResolution,
             })})`,
           );
           // The timeout stops a script that runs on, not one awaiting what never comes.
@@ -717,6 +714,7 @@ export interface PlayResult {
   gpu: string;
   parallel: boolean;
   census: Record<string, number>[];
+  displayBytes: number;
   error: string | null;
 }
 
@@ -738,6 +736,8 @@ export function playPlayer(
     census?: boolean;
     /** False hides WEBGL_multi_draw, as BenchOptions.multiDraw. */
     multiDraw?: boolean;
+    /** The renderer's bitmapResolution (RenderViewOptions'). */
+    bitmapResolution?: "stage" | "display";
   } = {},
 ): Promise<PlayResult> {
   const {
@@ -747,6 +747,7 @@ export function playPlayer(
     cpuProfilePath,
     census = false,
     multiDraw = true,
+    bitmapResolution = "stage",
   } = options;
   return withPage(
     "playSwf",
@@ -768,7 +769,7 @@ export function playPlayer(
       }
 
       const { value, exception } = await evaluate<PlayResult>(
-        `playSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${resolution}, ${!!cpuProfilePath}, ${census})`,
+        `playSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${resolution}, ${!!cpuProfilePath}, ${census}, "${bitmapResolution}")`,
       );
       if (value && !value.error && written) {
         await written;
@@ -787,6 +788,7 @@ export function playPlayer(
           gpu: "",
           parallel: false,
           census: [],
+          displayBytes: 0,
           error: exception ?? "no result",
         }
       );

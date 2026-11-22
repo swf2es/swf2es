@@ -207,6 +207,77 @@ that alone holds what was drawn; after a lost context, every texture is
 added again as it is drawn, and what only a lost texture held is lost
 with it. Without a renderer, as in node, a store is the CPU's alone.
 
+## Bitmaps at the display's resolution
+
+Content often flattens vector art: it draws still layers into a BitmapData
+the stage's size and shows that through a Bitmap, often unsmoothed, in
+the layers' place. Flash stretches those pixels when the stage is shown
+larger, and so does the renderer by default, so on a large or dense
+screen the art turns blocky beside vectors drawn directly. With
+`bitmapResolution: "display"` (RenderViewOptions, the element's
+`configure`, the desktop app's View › Sharp Bitmaps), off by default, the
+renderer keeps such a store at the screen's resolution instead
+(`scene/display-bitmaps.ts`).
+
+A store made of one colour is promoted on its first GPU draw of a display
+object (`drawInto`): its texture is made at the screen's pixels a stage
+pixel, exactly (2.7 stays 2.7) and at most 4, as many texels as that makes
+of the store's pixels, the last partly covered. A draw at display resolution
+renders the object as the stage would at that scale: lines, filters and text
+at that many units a pixel, hairlines a texel wide, at the draw's own 4 × 4
+samples, in tiles of at most 4096 / samples texels a side, so the samples'
+layer never outgrows what a draw at a texel a pixel already takes. An identity
+colour transform counts as none, so a layer drawn with its own
+`transform.colorTransform` stays on the GPU. `fillRect` fills the texels
+under the rectangle, its edges rounded. A Bitmap on the stage shows the
+texture through a quad of its texels, each 1/zoom of a pixel. Where that
+places texels one for one on the screen's pixels (a Bitmap the stage's size
+at its scale), the quad goes onto whole pixels and is read unsmoothed, which
+gives the pixels a stage drawing the same art would. Elsewhere it is smoothed,
+whatever the Bitmap's `smoothing`.
+
+Scripts never see the difference. While a store is at display resolution,
+the renderer records its colour and every fill and draw since, each draw with
+`pickWork.changes` once drawn: `DisplayObject.invalidate` stamps each change
+of an object with that count (`changedAt`), so a draw would draw the same
+again while nothing in its object's subtree is stamped later, none of the
+stores its fills sample changed version, and nothing in it hangs on what lies
+outside the subtree or changes unseen (a mask, 3D, a shader, a video). The
+first operation that reads the store's pixels or writes them on the CPU
+(getPixel, getPixels, copyPixels in or out, a draw with a colour transform or
+blend, setPixel, scroll, applyFilter, encode, hit tests and the rest) goes
+through `BitmapStore.readable`, which reads the GPU copy back. For a store at
+display resolution, that read replays the record at a texel a pixel into a
+texture of its own, the fills as fills and each draw as `drawInto` would
+have drawn it then, and reads that back: Flash's pixels, as the store would
+have held them with the option off. Where the record cannot be replayed (an
+object changed, a draw inside a walk, more than 256 steps without a fill of
+the whole store, which starts it again), the texture is averaged down by
+area instead, which matches but for lines thinner than a pixel, lighter there
+than Flash's pixel-wide ones. Either way the store then stays at a texel a
+pixel. The display keeps its sharper texture till the store next changes. A
+store's texture sampled by anything but a Bitmap on the stage (a bitmap fill,
+drawTriangles, a displacement map, a BitmapData.draw of something showing it)
+is read back so first; a draw from a script brings back the stores its
+subtree samples before it walks (`settle`), so that only fills sampled during
+the stage's own walk are averaged down.
+
+When the screen's scale moves by more than 2 % and holds for eight rendered
+frames (a window resized or maximised, or moved to a screen of another
+density), a store whose record still replays is drawn again at the new scale
+into a new texture, which takes the old one's place only once all of it drew;
+one whose record no longer does keeps its scale and is shown resampled.
+
+What it costs: a store's texture takes zoom² times the memory, at most 64 MB
+(16M texels), and the stores at display resolution 256 MB together by default
+(`bitmapResolutionBudget`; less where `navigator.deviceMemory` says 4 GB or
+less, 32 MB a GB, and 128 MB on a touch-only device), past which new stores
+stay at a texel a pixel. A draw renders zoom² times the pixels, in more tiles
+for a large store, and the record holds the objects drawn till the store is
+read, disposed or collected. Each promotion, draw and replay is done by the GPU
+path a draw takes anyway: nothing is read back while scripts only draw, fill
+and show.
+
 ## A SWF's bitmaps
 
 A SWF's bitmap characters are `DefineBits` with
