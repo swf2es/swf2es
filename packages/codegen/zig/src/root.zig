@@ -56,7 +56,7 @@ pub fn fail(err: Allocator.Error) usize {
 
 /// Start a call: all the last call held given back, and room for `size`
 /// bytes of its arrays and strings, 8-aligned; 0 if memory cannot grow.
-export fn input(size: u32) usize {
+pub export fn input(size: u32) usize {
     memory.arenas();
     failure = 0;
     handed_length = 0;
@@ -66,21 +66,21 @@ export fn input(size: u32) usize {
 }
 
 /// How many bytes the last call that handed some out gave.
-export fn outputLength() u32 {
+pub export fn outputLength() u32 {
     return handed_length;
 }
 
 /// Why the last call failed: 0 if it did not, 1 out of memory.
-export fn codegenError() u32 {
+pub export fn codegenError() u32 {
     return failure;
 }
 
-export fn compilerVersion() usize {
+pub export fn compilerVersion() usize {
     return handOut(compiler_version);
 }
 
 /// The version at the start of an ABC block, major << 16 | minor; -1 if it is too short.
-export fn abcVersion(abc: [*]const u8, length: u32) i32 {
+pub export fn abcVersion(abc: [*]const u8, length: u32) i32 {
     if (length < 4) {
         return -1;
     }
@@ -123,29 +123,29 @@ pub fn failWriting(err: output.Error) usize {
 
 // The AVM1 compiler (avm1/compile.zig), as assembly/avm1/compile.ts exports it.
 
-export fn actionsModuleBytes(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, keep: bool) usize {
+pub export fn actionsModuleBytes(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, keep: bool) usize {
     const s = swfOf(swf, swf_len, offsets, offsets_len, lengths, lengths_len) catch |err| return fail(err);
     return handOut(avm1.moduleBytes(gpa(), memory.pages().allocator(), s, version, keep) catch |err| return failWriting(err));
 }
 
-export fn actionsModuleEntries() usize {
+pub export fn actionsModuleEntries() usize {
     return handOut(avm1.moduleEntries(gpa()) catch |err| return failWriting(err));
 }
 
-export fn actionsModuleUnits() usize {
+pub export fn actionsModuleUnits() usize {
     return handOut(avm1.moduleUnits(gpa()) catch |err| return failWriting(err));
 }
 
-export fn actionsEmitEach(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, blocks: [*]const u8, blocks_len: u32, reuse: bool) usize {
+pub export fn actionsEmitEach(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, blocks: [*]const u8, blocks_len: u32, reuse: bool) usize {
     return actionsEmitEachBytes(swf, swf_len, offsets, offsets_len, lengths, lengths_len, version, blocks, blocks_len, reuse);
 }
 
-export fn actionsEmitEachBytes(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, blocks: [*]const u8, blocks_len: u32, reuse: bool) usize {
+pub export fn actionsEmitEachBytes(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, blocks: [*]const u8, blocks_len: u32, reuse: bool) usize {
     const s = swfOf(swf, swf_len, offsets, offsets_len, lengths, lengths_len) catch |err| return fail(err);
     return handOut(avm1.emitEach(gpa(), s, version, staged(u8, blocks, blocks_len), reuse) catch |err| return failWriting(err));
 }
 
-export fn actionsHold(handle: i32, swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32) void {
+pub export fn actionsHold(handle: i32, swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32) void {
     const s = swfOf(swf, swf_len, offsets, offsets_len, lengths, lengths_len) catch |err| {
         _ = fail(err);
         return;
@@ -155,33 +155,33 @@ export fn actionsHold(handle: i32, swf: [*]const u8, swf_len: u32, offsets: [*]c
     };
 }
 
-export fn actionsRelease(handle: i32) void {
+pub export fn actionsRelease(handle: i32) void {
     avm1.release(handle);
 }
 
-export fn actionsHeldCount() i32 {
+pub export fn actionsHeldCount() i32 {
     return @intCast(avm1.heldCount());
 }
 
-export fn actionsHeldEmitEachBytes(handle: i32, version: i32, blocks: [*]const u8, blocks_len: u32) usize {
+pub export fn actionsHeldEmitEachBytes(handle: i32, version: i32, blocks: [*]const u8, blocks_len: u32) usize {
     const text = avm1.heldEmitEach(gpa(), handle, version, staged(u8, blocks, blocks_len)) catch |err| return failWriting(err);
     return if (avm1.heldAt(handle) == null) handOutNone() else handOut(text);
 }
 
-export fn actionsHeldUnitBytes(handle: i32, version: i32, at: i32, end: i32, bound: i32, five: bool) usize {
+pub export fn actionsHeldUnitBytes(handle: i32, version: i32, at: i32, end: i32, bound: i32, five: bool) usize {
     const key: units.UnitKey = .{ .at = at, .end = end, .bound = bound, .five = five };
     const code = avm1.heldUnitBytes(gpa(), handle, version, key) catch |err| return failWriting(err);
     return if (code) |text| handOut(text) else handOutNone();
 }
 
-export fn actionsUnitBytes(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, at: i32, end: i32, bound: i32, five: bool) usize {
+pub export fn actionsUnitBytes(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, at: i32, end: i32, bound: i32, five: bool) usize {
     const s = swfOf(swf, swf_len, offsets, offsets_len, lengths, lengths_len) catch |err| return fail(err);
     const key: units.UnitKey = .{ .at = at, .end = end, .bound = bound, .five = five };
     return handOut(avm1.unitBytes(gpa(), s, version, key) catch |err| return failWriting(err));
 }
 
 /// Where the high and reach of the unit compiled last are, two f64s.
-export fn actionsUnitLimits() usize {
+pub export fn actionsUnitLimits() usize {
     return @intFromPtr(&avm1.unit_limits);
 }
 
@@ -220,6 +220,7 @@ test {
     _ = memory;
     _ = output;
     _ = @import("dtoa.zig");
+    _ = @import("parse.zig");
     _ = @import("avm1/actions/opcodes.zig");
     _ = @import("avm1/actions/offsets.zig");
     _ = @import("avm1/actions/decode.zig");

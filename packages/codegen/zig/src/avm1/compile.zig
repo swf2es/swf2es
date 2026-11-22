@@ -3,6 +3,7 @@
 // unit alone. Nothing is kept from one SWF to the next but the module whose
 // entries are asked for next, and the SWFs held for their units.
 const std = @import("std");
+const parseI32 = @import("../parse.zig").parseI32;
 const Allocator = std.mem.Allocator;
 const memory = @import("../memory.zig");
 const output = @import("../output.zig");
@@ -35,7 +36,7 @@ const Written = struct {
 var written: ?Written = null;
 
 /// Lets go of the module kept last, if one is.
-fn forget() void {
+pub fn forget() void {
     if (written) |*w| {
         w.arena.deinit();
         written = null;
@@ -152,6 +153,16 @@ pub fn release(handle: i32) void {
     }
 }
 
+/// Every SWF held let go, and the list of them with it, for a test that
+/// resets the arena the list is in.
+pub fn releaseAll() void {
+    for (held.items) |*h| {
+        h.arena.deinit();
+    }
+
+    held = .empty;
+}
+
 pub fn heldCount() u32 {
     return @intCast(held.items.len);
 }
@@ -209,88 +220,6 @@ pub fn emitEach(gpa: Allocator, swf: Swf, version: i32, blocks: []const u8, reus
     }
 
     return entries.written();
-}
-
-/// AS QUIRK, KEPT AS IS: AssemblyScript's i32.parse (strtol) of ASCII: a
-/// sign, a radix prefix, digits up to the first that is not one, wrapping as
-/// i32 arithmetic does.
-pub fn parseI32(s: []const u8) i32 {
-    var p: usize = 0;
-    var len = s.len;
-    while (p < s.len and isSpace(s[p])) {
-        p += 1;
-        len -= 1;
-    }
-
-    if (len == 0) {
-        return 0;
-    }
-
-    var sign: i32 = 1;
-    if (s[p] == '-' or s[p] == '+') {
-        len -= 1;
-        if (len == 0) {
-            return 0;
-        }
-
-        if (s[p] == '-') {
-            sign = -1;
-        }
-        p += 1;
-    }
-
-    var radix: u32 = 10;
-    if (s[p] == '0' and len > 2) {
-        switch (s[p + 1] | 32) {
-            'b' => radix = 2,
-            'o' => radix = 8,
-            'x' => radix = 16,
-            else => {},
-        }
-
-        if (radix != 10) {
-            p += 2;
-            len -= 2;
-        }
-    }
-
-    var num: i32 = 0;
-    const initial = len;
-    while (len > 0) : (len -= 1) {
-        var code: u32 = s[p];
-        if (code -% '0' < 10) {
-            code -= '0';
-        } else if (code -% 'A' <= 'Z' - 'A') {
-            code -= 'A' - 10;
-        } else if (code -% 'a' <= 'z' - 'a') {
-            code -= 'a' - 10;
-        }
-
-        if (code >= radix) {
-            if (len == initial) {
-                return 0;
-            }
-            break;
-        }
-
-        num = num *% @as(i32, @intCast(radix)) +% @as(i32, @intCast(code));
-        p += 1;
-    }
-
-    return sign *% num;
-}
-
-fn isSpace(c: u8) bool {
-    return c == 0x20 or (c >= 0x09 and c <= 0x0d);
-}
-
-test "indices parse as AssemblyScript's i32.parse reads them" {
-    try std.testing.expectEqual(12, parseI32("12"));
-    try std.testing.expectEqual(-3, parseI32("-3"));
-    try std.testing.expectEqual(0, parseI32("x"));
-    try std.testing.expectEqual(7, parseI32("7x"));
-    try std.testing.expectEqual(255, parseI32("0xff"));
-    try std.testing.expectEqual(0, parseI32("4294967296"));
 }
 
 /// A SWF of the tests' block, the block alone.
