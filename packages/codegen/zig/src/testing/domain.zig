@@ -1304,6 +1304,134 @@ test "a call that ran out of memory anywhere, made again, leaves the domain as o
     }
 }
 
+/// A domain over `source` with builtin and the contested ABC added, whose
+/// functions' scope chains verifying makes: its arenas, and it.
+const Made = struct {
+    arena: memory.Arena,
+    scratch: memory.Arena,
+    dom: *Domain,
+
+    fn init(self: *Made, source: Allocator) !void {
+        self.arena = .init(source);
+        self.scratch = .init(source);
+        errdefer self.deinit();
+        self.dom = try self.arena.allocator().create(Domain);
+        self.dom.* = try .init(self.arena.allocator(), self.scratch.allocator());
+        try testing.expectEqual(0, try domain_.changed(self.dom, &self.arena, domain_.addAbc, .{ &self.arena, &link_builtin, true, 0 }));
+        try testing.expectEqual(0, try domain_.changed(self.dom, &self.arena, domain_.addAbc, .{ &self.arena, &link_contested, false, 0 }));
+    }
+
+    fn deinit(self: *Made) void {
+        self.scratch.deinit();
+        self.arena.deinit();
+    }
+};
+
+/// domainEmitEach's bodies compiled three times on a domain over `source`,
+/// each call that runs out of memory checked to leave the domain as it
+/// was and made again: the texts' and the domain's digest.
+fn emitRetried(source: Allocator) !u64 {
+    compile.forgetVerified();
+    defer compile.forgetVerified();
+    var made: Made = undefined;
+    try made.init(source);
+    defer made.deinit();
+    const dom = made.dom;
+    var digest: u64 = 0;
+    for (0..3) |round| {
+        const before = fingerprint(dom);
+        const index = dom.abcs.len - 1;
+        const text = compile.emitEachOn(dom, &made.arena, dom.scratch, "0,1,2,3,4", round == 1, index) catch |err| retry: {
+            try testing.expectEqual(error.OutOfMemory, err);
+            try testing.expectEqual(before, fingerprint(dom));
+            break :retry try compile.emitEachOn(dom, &made.arena, dom.scratch, "0,1,2,3,4", round == 1, index);
+        };
+        digest = digest *% 31 +% std.hash.Wyhash.hash(0, text);
+    }
+
+    return digest +% fingerprint(dom);
+}
+
+test "domainEmitEach that ran out of memory anywhere, made again, verifies again and compiles alike" {
+    memory.arenas();
+    var counting: FailOnce = .{ .backing = testing.allocator, .fail_at = std.math.maxInt(usize) };
+    const want = try emitRetried(counting.allocator());
+    var at: usize = 0;
+    while (at < counting.count) : (at += 1) {
+        var once: FailOnce = .{ .backing = testing.allocator, .fail_at = at };
+        const got = emitRetried(once.allocator()) catch |err| {
+            // The domain could not be made: no call to check.
+            try testing.expectEqual(error.OutOfMemory, err);
+            continue;
+        };
+        try testing.expectEqual(want, got);
+    }
+}
+
+/// A module of the contested ABC written as the exports write it, a call a
+/// part, each part its own change with the emitter's scratch made anew; a
+/// part that runs out of memory checked to leave the domain as the parts
+/// before it left it, the module then abandoned and written again from
+/// the start: its text's digest.
+fn partsRetried(source: Allocator) !u64 {
+    var made: Made = undefined;
+    try made.init(source);
+    defer made.deinit();
+    const dom = made.dom;
+    const index = dom.abcs.len - 1;
+    var attempt: u32 = 0;
+    while (true) : (attempt += 1) {
+        try testing.expect(attempt < 2);
+        var persist: memory.Arena = .init(source);
+        defer persist.deinit();
+        const emitter = try persist.allocator().create(ModuleEmitter);
+        emitter.* = try .init(persist.allocator(), dom.scratch, dom, index);
+        const parts = struct {
+            fn first(_: *Domain, e: *ModuleEmitter) Allocator.Error!bool {
+                try e.begin(&.{ "own", "first" }, false);
+                return e.step(1, false);
+            }
+
+            fn next(_: *Domain, e: *ModuleEmitter) Allocator.Error!bool {
+                return e.step(1, false);
+            }
+        };
+        var before = fingerprint(dom);
+        var done = domain_.changed(dom, &made.arena, parts.first, .{emitter}) catch |err| {
+            try testing.expectEqual(error.OutOfMemory, err);
+            try testing.expectEqual(before, fingerprint(dom));
+            continue;
+        };
+        const ran_out = while (!done) {
+            try emitter.prepare(dom.scratch);
+            before = fingerprint(dom);
+            done = domain_.changed(dom, &made.arena, parts.next, .{emitter}) catch |err| {
+                try testing.expectEqual(error.OutOfMemory, err);
+                try testing.expectEqual(before, fingerprint(dom));
+                break true;
+            };
+        } else false;
+        if (!ran_out) {
+            return std.hash.Wyhash.hash(0, emitter.out().written());
+        }
+    }
+}
+
+test "a module written a part a call, that ran out of memory anywhere, is written again alike" {
+    memory.arenas();
+    var counting: FailOnce = .{ .backing = testing.allocator, .fail_at = std.math.maxInt(usize) };
+    const want = try partsRetried(counting.allocator());
+    var at: usize = 0;
+    while (at < counting.count) : (at += 1) {
+        var once: FailOnce = .{ .backing = testing.allocator, .fail_at = at };
+        const got = partsRetried(once.allocator()) catch |err| {
+            try testing.expectEqual(error.OutOfMemory, err);
+            continue;
+        };
+        try testing.expectEqual(want, got);
+    }
+}
+
 test "bytes restore does not adopt stay out of the domain's arena" {
     var arena: memory.Arena = .init(testing.allocator);
     defer arena.deinit();

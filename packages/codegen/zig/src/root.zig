@@ -247,11 +247,13 @@ pub export fn domainModule(hashes: [*]const u8, hashes_len: u32, index: i32, kee
 }
 
 pub export fn domainModuleBytes(hashes: [*]const u8, hashes_len: u32, index: i32, keep: bool, linkedOnly: bool) usize {
-    return handOut(avm2.domainModuleBytes(gpa(), staged(u8, hashes, hashes_len), index, keep, linkedOnly) catch |err| return fail(err));
+    const bytes = avm2.domainModuleBytes(gpa(), staged(u8, hashes, hashes_len), index, keep, linkedOnly) catch |err| return fail(err);
+    return if (bytes) |b| handOut(b) else handOutNone();
 }
 
 pub export fn domainModuleMoreBytes() usize {
-    return handOut(avm2.domainModuleMoreBytes(gpa()) catch |err| return fail(err));
+    const bytes = avm2.domainModuleMoreBytes(gpa()) catch |err| return fail(err);
+    return if (bytes) |b| handOut(b) else handOutNone();
 }
 
 pub export fn domainModuleDone() bool {

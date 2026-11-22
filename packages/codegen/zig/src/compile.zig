@@ -58,6 +58,12 @@ pub fn callStarts() void {
     if (current) |dom| {
         dom.decoder = null;
     }
+
+    // A module neither kept nor pending was handed out by the last call,
+    // which the host has copied by now.
+    if (written == null and pending == null) {
+        forgetModules();
+    }
 }
 
 /// The domain given back, as when the module starts, for the tests.
@@ -282,6 +288,7 @@ var pending_rows: u64 = 0;
 /// them one at a time; another ABC added, or a new domain, starts over.
 var verified: ?[]i32 = null;
 var verified_index: u32 = 0;
+var verified_domain: ?*const Domain = null;
 
 /// Leave the module being written a part at a time, as the domain changes
 /// under it; its rows are weighed to its ABC as a finished module's are
@@ -306,7 +313,8 @@ fn forgetModules() void {
     }
 }
 
-fn forgetVerified() void {
+/// The bodies domainEmitEach verified, let go of.
+pub fn forgetVerified() void {
     if (verified) |results| {
         memory.pages().allocator().free(results);
         verified = null;
@@ -349,10 +357,11 @@ pub fn domainModule(gpa: Allocator, hashes: []const u8, index: i32, keep: bool, 
         return "";
     }
 
+    const list = try splitHashes(gpa, hashes);
     const persist = moduleArena();
     const emitter = try persist.create(ModuleEmitter);
     emitter.* = try .init(persist, gpa, dom, @intCast(at));
-    changed(writeModule, .{ emitter, try splitHashes(gpa, hashes), linkedOnly }) catch |err| {
+    changed(writeModule, .{ emitter, list, linkedOnly }) catch |err| {
         forgetModules();
         return err;
     };
@@ -371,16 +380,22 @@ fn writeModule(dom: *Domain, emitter: *ModuleEmitter, hashes: []const []const u8
 
 /// domainModule's module a part at a time (compile.ts tells why): its first
 /// part, and domainModuleDone false while there is more, which
-/// domainModuleMoreBytes hands out, a call each.
-pub fn domainModuleBytes(gpa: Allocator, hashes: []const u8, index: i32, keep: bool, linkedOnly: bool) Allocator.Error![]const u8 {
+/// domainModuleMoreBytes hands out, a call each; null, nothing handed out,
+/// if there is no such ABC.
+///
+/// All or nothing holds for each call, not for the module: a part that
+/// runs out of memory leaves the domain as the parts before it left it,
+/// and the module is abandoned, as one the domain changed under is.
+pub fn domainModuleBytes(gpa: Allocator, hashes: []const u8, index: i32, keep: bool, linkedOnly: bool) Allocator.Error!?[]const u8 {
     const dom = try domain();
     abandon();
     forgetModules();
     const at = abcIndex(dom, index);
     if (at < 0) {
-        return "";
+        return null;
     }
 
+    const list = try splitHashes(gpa, hashes);
     const persist = moduleArena();
     const emitter = try persist.create(ModuleEmitter);
     emitter.* = try .init(persist, gpa, dom, @intCast(at));
@@ -388,7 +403,8 @@ pub fn domainModuleBytes(gpa: Allocator, hashes: []const u8, index: i32, keep: b
     pending_index = @intCast(at);
     pending_keep = keep;
     pending_rows = dom.rows();
-    changed(startModule, .{ emitter, try splitHashes(gpa, hashes), linkedOnly }) catch |err| {
+    changed(startModule, .{ emitter, list, linkedOnly }) catch |err| {
+        abandon();
         forgetModules();
         return err;
     };
@@ -412,14 +428,18 @@ fn stepModule(dom: *Domain, emitter: *ModuleEmitter, fresh: bool) Allocator.Erro
     }
 }
 
-/// The next part of the module domainModuleBytes started; none once it is done.
-pub fn domainModuleMoreBytes(gpa: Allocator) Allocator.Error![]const u8 {
+/// The next part of the module domainModuleBytes started; null, nothing
+/// handed out, once it is done.
+pub fn domainModuleMoreBytes(gpa: Allocator) Allocator.Error!?[]const u8 {
     _ = try domain();
-    const emitter = pending orelse return "";
+    const emitter = pending orelse return null;
     // A module kept keeps all its text, for its source map and entries.
     const from = if (pending_keep) emitter.out().len() else 0;
     try emitter.prepare(gpa);
     changed(stepModule, .{ emitter, !pending_keep }) catch |err| {
+        // The parts before this one changed the domain: weighed as an
+        // abandoned module's are.
+        abandon();
         forgetModules();
         return err;
     };
@@ -471,7 +491,22 @@ pub fn domainEmitEach(gpa: Allocator, bodies: []const u8, reuse: bool, abc: i32)
         return "";
     }
 
-    return changed(emitEach, .{ gpa, bodies, reuse, @as(u32, @intCast(at)) });
+    return emitEachOn(dom, arena(), gpa, bodies, reuse, @intCast(at));
+}
+
+/// domainEmitEach on domain `dom`, whose arena is `a`, changed all or
+/// nothing; what it verifies kept for the next only once the change is.
+pub fn emitEachOn(dom: *Domain, a: *memory.Arena, gpa: Allocator, bodies: []const u8, reuse: bool, index: u32) Allocator.Error![]const u8 {
+    const cached = verified != null and verified_domain == dom and verified_index == index;
+    return domain_.changed(dom, a, emitEach, .{ gpa, bodies, reuse, index }) catch |err| {
+        // Verified in the change rolled back: what it fixed in the domain is
+        // gone, so a retry verifies again.
+        if (!cached) {
+            forgetVerified();
+        }
+
+        return err;
+    };
 }
 
 fn emitEach(dom: *Domain, gpa: Allocator, bodies: []const u8, reuse: bool, index: u32) Allocator.Error![]const u8 {
@@ -521,7 +556,7 @@ fn emitEach(dom: *Domain, gpa: Allocator, bodies: []const u8, reuse: bool, index
 /// The bodies of ABC `index` verified, kept from the last call that asked.
 fn verifiedBodies(dom: *Domain, index: u32) Allocator.Error![]i32 {
     if (verified) |results| {
-        if (verified_index == index) {
+        if (verified_domain == dom and verified_index == index) {
             return results;
         }
     }
@@ -532,6 +567,7 @@ fn verifiedBodies(dom: *Domain, index: u32) Allocator.Error![]i32 {
     forgetVerified();
     verified = kept;
     verified_index = index;
+    verified_domain = dom;
     return kept;
 }
 
