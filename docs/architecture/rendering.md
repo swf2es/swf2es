@@ -161,16 +161,26 @@ is, for the bounds and the bitmaps its fills take as the SWF has them
 then, and again when it is first drawn; the SWF's bytes, which its
 sounds and placements keep, are there to read it from. Its paths, its
 fills' contours and its lines', are let go of again once nothing has
-read them for 120 frames (`display/tag-shapes.ts`), and read from the
-tag again when next asked for: past a shape's first draw only lines
-stroked at a new scale, a hit test, a geometry expired or lost, or
-`readGraphicsData` read them, and each of those that goes on reads them
-every frame. A long session of busy real content that loads about 300
-SWFs had drawn 26,600 of its 43,500 shapes, whose paths, 251 MB of a
-1.27 GB heap, it held for as long as their SWFs were loaded. The layers,
-their fills and lines and paints, stay, and stay the same objects: the
-renderer keeps a layer's triangles and stroked lines by it, so a shape
-drawn on with its paths let go of is not tessellated again.
+read them for 5 seconds (`display/tag-shapes.ts`; time, as every player
+and extra render passes frames, and a hidden page that plays none lets
+none go), and read from the tag again when next asked for. Past a
+shape's first draw only lines stroked at a new scale, a hit test, a
+geometry expired or lost, scale-9 slicing, readGraphicsData and the look
+for fills that do not overlap (`Parts.lateArea`) read them, and each of
+those that goes on reads them every frame; the first frame of a resize, a
+zoom or a change of quality reads the stroked shapes on the screen again.
+A shape test reads none of a shape whose paths' box, kept as they come
+and go, is far from the point, as a script's or AVM1's test of a
+container asks every shape in it. A long session of busy real content
+that loads about 300 SWFs had drawn 26,600 of its 43,500 shapes, whose
+paths, 251 MB of a 1.27 GB heap, it held for as long as their SWFs were
+loaded. The layers, their fills and lines and paints, stay, and stay the
+same objects: the renderer keeps a layer's triangles and stroked lines
+by it, so a shape drawn on with its paths let go of is not tessellated
+again. What a drawn shape keeps is those (a small object for each fill
+and line), its bitmaps' map, a weak reference, and its tag's bytes, or
+its SWF's where it is filled with a bitmap; a scale-9 object's sliced
+copies keep their own moved paths, which are not let go of.
 A morph shape (DefineMorphShape, DefineMorphShape2) is two shapes whose
 edges pair in order; a `MorphShape` shows their blend at the ratio its
 placements give (`display/morph.ts`), a shape like any other, so it draws,
