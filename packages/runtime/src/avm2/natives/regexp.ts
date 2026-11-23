@@ -57,7 +57,7 @@ export function regexpNatives(rt: Runtime): Natives {
       }
 
       const m = re.exec(rt.toString(s));
-      return m ? matchArray(rt, m) : null;
+      return m ? matchArray(rt, m, this.$source) : null;
     }
   }
 
@@ -66,11 +66,19 @@ export function regexpNatives(rt: Runtime): Natives {
 }
 
 /** A match as AS3 gives it: an Array of the match and its groups, with its index and input. */
-export function matchArray(rt: Runtime, m: RegExpMatchArray): AsObject {
+export function matchArray(rt: Runtime, m: RegExpMatchArray, source: string): AsObject {
   const a = rt.array(Array.from(m));
   if (m.index !== undefined) {
     a.$d.set("index", m.index);
     a.$d.set("input", m.input);
+  }
+
+  // avmshell exposes names when the pattern contains "(?P<". An unmatched
+  // named group is the empty string even when its numbered slot is undefined.
+  if (m.groups && source.includes("(?P<")) {
+    for (const [name, capture] of Object.entries(m.groups)) {
+      rt.setProperty(a, rt.publicName(name), capture ?? "");
+    }
   }
 
   return a;

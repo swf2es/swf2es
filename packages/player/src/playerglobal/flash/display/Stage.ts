@@ -230,7 +230,6 @@ export function stageNatives(s: Scripting): avm2.Natives {
       return "unsupported";
     }
 
-    // Kept while in full screen, which alone allows it and whose end clears it; the pointer is not locked.
     get mouseLock(): boolean {
       return s.fullScreen.mouseLock;
     }

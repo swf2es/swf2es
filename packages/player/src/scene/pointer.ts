@@ -7,6 +7,7 @@ import type { PointerState } from "../input/pointer.js";
 import type { TouchState } from "../input/touch.js";
 import type { Player } from "../player.js";
 import { bindContextMenu } from "./context-menu.js";
+import { bindMouseLock } from "./mouse-lock.js";
 
 /** The part of the stage the canvas shows, read as each event comes, as the view may be zoomed. */
 export interface ShownStage {
@@ -28,6 +29,8 @@ export function bindCanvasPointer(
   shown: ShownStage,
 ): () => void {
   const page = canvas.ownerDocument.defaultView as Window;
+  const fullScreen = player.scripting?.fullScreen;
+  const unbindLock = fullScreen && bindMouseLock(canvas, fullScreen);
   // Live: read once, it follows the element's style as the page changes it.
   const style = page.getComputedStyle(canvas);
   // A point on the stage, a touch's size there, and whether it is over the canvas's pixels.
@@ -51,10 +54,8 @@ export function bindCanvasPointer(
     // listeners see as the target.
     at[4] =
       e.composedPath()[0] === canvas &&
-      cx >= 0 &&
-      cy >= 0 &&
-      cx < canvas.width &&
-      cy < canvas.height;
+      ((fullScreen?.mouseLock && (e as PointerEvent).pointerType === "mouse") ||
+        (cx >= 0 && cy >= 0 && cx < canvas.width && cy < canvas.height));
     return at;
   };
 
@@ -136,6 +137,10 @@ export function bindCanvasPointer(
       time: e.timeStamp,
     };
     if (type === "move" && player.pointer) {
+      if (fullScreen?.mouseLock && e.pointerType === "mouse") {
+        p.movementX = e.movementX;
+        p.movementY = e.movementY;
+      }
       player.pointer.post(p);
       flushSoon();
       return;
@@ -282,6 +287,7 @@ export function bindCanvasPointer(
   }
 
   return () => {
+    unbindLock?.();
     unbindMenu();
     if (pointer) {
       pointer.onCursor = null;

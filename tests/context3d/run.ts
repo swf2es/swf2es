@@ -143,6 +143,7 @@ for (const name of [
     name === "AGALStandard" ||
     name === "TextureFormats" ||
     name === "MultipleTargets" ||
+    name === "RenderTargets" ||
     name === "BackBuffer" ||
     name === "BackBufferConstrained" ||
     name === "BestResolution" ||
