@@ -237,12 +237,12 @@ pub const MethodEmitter = struct {
     readLow: i32 = std.math.maxInt(i32),
     readHigh: i32 = -1,
 
-    pub fn init(gpa: Allocator, domain: *Domain, index: u32) Error!MethodEmitter {
+    pub fn init(persist: Allocator, scratch: Allocator, domain: *Domain, index: u32) Error!MethodEmitter {
         return .{
-            .gpa = gpa,
-            .out = try .init(gpa),
-            .map = .{ .gpa = gpa },
-            .heldText = try .init(gpa),
+            .gpa = scratch,
+            .out = try .init(persist),
+            .map = .{ .gpa = persist },
+            .heldText = try .init(scratch),
             .domain = domain,
             .index = index,
             .abc = domain.abcs.get(index),

@@ -242,7 +242,7 @@ pub fn domainEmit(dom: *Domain, gpa: Allocator, body: u32) Allocator.Error![]con
         return std.fmt.allocPrint(gpa, "error {d}", .{result.@"error"});
     }
 
-    var emitter: MethodEmitter = try .init(gpa, dom, index);
+    var emitter: MethodEmitter = try .init(gpa, gpa, dom, index);
     emitter.claims = decoder.claims.items;
     emitter.functionName = try stack_names.identifierOf(gpa, try stack_names.stackName(dom, gpa, index, global));
     try emitter.method(method, global, &decoder.ir);

@@ -73,9 +73,7 @@ pub const ModuleEmitter = struct {
     /// An emitter whose module, entries and source map last in `persist`,
     /// and whose scratch is in `scratch` until the next prepare.
     pub fn init(persist: Allocator, scratch: Allocator, domain: *Domain, index: u32) Error!ModuleEmitter {
-        var methods: MethodEmitter = try .init(scratch, domain, index);
-        methods.out = try .init(persist);
-        methods.map = .{ .gpa = persist };
+        const methods = try MethodEmitter.init(persist, scratch, domain, index);
         return .{ .persist = persist, .methods = methods, .domain = domain, .index = index };
     }
 
