@@ -538,6 +538,10 @@ pub const TraitsTable = struct {
     /// error ending every frame.
     pub fn resolve(self: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
         dom.changing();
+        if (self.resolved.get(t) != 0) {
+            return 0;
+        }
+
         const Frame = struct {
             t: u32,
             /// 0 before the base, 1 after it, 2 among the interfaces.
