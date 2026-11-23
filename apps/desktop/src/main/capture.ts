@@ -209,6 +209,12 @@ export function capturePermissions(session: Session): void {
       answer(false);
       return;
     }
+    if (permission === "pointerLock") {
+      answer(
+        !!current && details.isMainFrame && details.requestingUrl.startsWith(`${APP_ORIGIN}/`),
+      );
+      return;
+    }
     if (permission === "fullscreen") {
       answer(true);
       return;
@@ -227,6 +233,11 @@ export function capturePermissions(session: Session): void {
   session.setPermissionCheckHandler((contents, permission, _origin, details) => {
     if (contents !== window?.webContents || contents?.isCrashed()) {
       return false;
+    }
+    if (permission === "pointerLock") {
+      return (
+        !!current && details.isMainFrame && !!details.requestingUrl?.startsWith(`${APP_ORIGIN}/`)
+      );
     }
     if (permission === "fullscreen") {
       return true;

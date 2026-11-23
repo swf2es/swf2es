@@ -370,7 +370,11 @@ follow the host. A host that refuses throws SecurityError #2152, Flash
 Player's without allowFullScreen or outside a click or key, which adl
 never throws and could not show. `mouseLock` may be set only in full
 screen (Error #3707, even for false) and its end clears it, and the
-window's `restore()` and `minimize()` leave it first.
+window's `restore()` and `minimize()` leave it first. Mouse events use
+normal hit testing until the browser grants the canvas a pointer lock.
+A locked canvas sends mouse events to Stage with screen-space deltas in `movementX/Y`
+and zero local coordinates. Moves received before the next frame add their
+deltas. Escape, focus loss and leaving fullscreen release the pointer.
 
 The stage keeps its size in full screen but in noScale, where it is the
 screen's, and Event.RESIZE follows as for any change of its box: before
