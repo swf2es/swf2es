@@ -54,12 +54,6 @@ pub const Output = struct {
         w.end -= n;
     }
 
-    // AssemblyScript's Output's own methods, which its AVM2 emitters call,
-    // so that they translate call for call. byte and text go through the
-    // writer's own writeByte and writeAll, which are shared: writing into
-    // the buffer at each call site instead, grown first, made the source
-    // map's writer twice the size (measured at stage 5).
-
     /// Room for `more` bytes past the end.
     pub fn reserve(self: *Output, more: u32) Allocator.Error!void {
         try self.allocating.ensureUnusedCapacity(more);
@@ -83,8 +77,15 @@ pub const Output = struct {
     }
 
     /// Text of the emitter's own, all ASCII.
-    pub fn text(self: *Output, s: []const u8) Allocator.Error!void {
-        self.allocating.writer.writeAll(s) catch return error.OutOfMemory;
+    /// Share the append across emitters to keep their generated Wasm small.
+    pub noinline fn text(self: *Output, s: []const u8) Allocator.Error!void {
+        const w = &self.allocating.writer;
+        if (w.buffer.len - w.end < s.len) {
+            try self.allocating.ensureUnusedCapacity(s.len);
+        }
+
+        @memcpy(w.buffer[w.end..][0..s.len], s);
+        w.end += s.len;
     }
 
     pub fn int(self: *Output, n: i64) Allocator.Error!void {
@@ -228,6 +229,29 @@ pub const Output = struct {
         try self.byte(digits[b & 15]);
     }
 };
+
+test "text appends across growth and accepts an empty write to a full buffer" {
+    var out: Output = .{ .allocating = try .initCapacity(std.testing.allocator, 3) };
+    defer out.deinit();
+
+    try out.text("abc");
+    try out.text("");
+    try out.text("defg");
+    try std.testing.expectEqualStrings("abcdefg", out.written());
+}
+
+test "failed text growth leaves the prefix and remaining space usable" {
+    var storage: [4]u8 = undefined;
+    var fixed = std.heap.FixedBufferAllocator.init(&storage);
+    var out: Output = .{ .allocating = try .initCapacity(fixed.allocator(), storage.len) };
+    defer out.deinit();
+
+    try out.text("ab");
+    try std.testing.expectError(error.OutOfMemory, out.text("cde"));
+    try std.testing.expectEqualStrings("ab", out.written());
+    try out.text("cd");
+    try std.testing.expectEqualStrings("abcd", out.written());
+}
 
 test "the AVM2 emitters' methods write as AssemblyScript's Output does" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
