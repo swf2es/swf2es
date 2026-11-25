@@ -39,13 +39,13 @@ SOFTWARE.
 AssemblyScript
 ==============
 
-dist/codegen.wasm is compiled by AssemblyScript,
-https://github.com/AssemblyScript/assemblyscript, and holds its runtime
-and the parts of its standard library the compiler uses, under the Apache
-License 2.0 (LICENSE). swf2es changes one of them, its Grisu2 number
-formatting (std/assembly/util/number.ts), so that it reads no further than
-its table of powers of ten: the repository's
-patches/assemblyscript@0.28.20.patch. Its NOTICE:
+dist/codegen.wasm holds ports of two parts of AssemblyScript's standard
+library, https://github.com/AssemblyScript/assemblyscript, under the
+Apache License 2.0 (LICENSE), so that the compiler writes and reads
+numbers as it did when AssemblyScript compiled it: its Grisu2 number
+formatting (std/assembly/util/number.ts), ported to zig/src/dtoa.zig, and
+its integer parsing (strtol of std/assembly/util/string.ts), ported to
+zig/src/parse.zig. Its NOTICE:
 
 The following authors have all licensed their contributions to AssemblyScript
 under the licensing terms detailed in LICENSE:
@@ -145,7 +145,7 @@ the following terms:
 Zig
 ===
 
-dist/codegen-zig.wasm, the compiler in Zig, is compiled by Zig 0.17.0,
+dist/codegen.wasm is compiled by Zig 0.17.0,
 https://ziglang.org, and holds the parts of its standard library the
 compiler uses and compiler-rt's routines it calls (memcpy, memset), under
 the MIT License:

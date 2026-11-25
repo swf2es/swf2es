@@ -155,29 +155,125 @@ https://www.w3.org/Consortium/Legal/2015/copyright-software-and-document
   };
 }
 
+/** AssemblyScript's NOTICE, as its 0.28.20 package has it. */
+const ASSEMBLYSCRIPT_NOTICE = `The following authors have all licensed their contributions to AssemblyScript
+under the licensing terms detailed in LICENSE:
+
+* Daniel Wirtz <dcode@dcode.io>
+* Max Graey <maxgraey@gmail.com>
+* Igor Sbitnev <PinkaminaDianePie@gmail.com>
+* Norton Wang <me@nortonwang.com>
+* Alan Pierce <alangpierce@gmail.com>
+* Palmer <pengliao@live.cn>
+* Linus Unnebäck <linus@folkdatorn.se>
+* Joshua Tenner <tenner.joshua@gmail.com>
+* Nidin Vinayakan <01@01alchemist.com>
+* Aaron Turner <aaron@aaronthedev.com>
+* Willem Wyndham <willem@cs.umd.edu>
+* Bowen Wang <bowen@nearprotocol.com>
+* Emil Laine <laine.emil@gmail.com>
+* Stephen Paul Weber <stephen.weber@shopify.com>
+* Jay Phelps <hello@jayphelps.com>
+* jhwgh1968 <jhwgh1968@protonmail.com>
+* Jeffrey Charles <jeffreycharles@gmail.com>
+* Vladimir Tikhonov <reg@tikhonov.by>
+* Duncan Uszkay <duncan.uszkay@shopify.com>
+* Surma <surma@surma.dev>
+* Julien Letellier <letellier.julien@gmail.com>
+* Guido Zuidhof <me@guido.io>
+* ncave <777696+ncave@users.noreply.github.com>
+* Andrew Davis <pulpdrew@gmail.com>
+* Maël Nison <nison.mael@gmail.com>
+* Valeria Viana Gusmao <valeria.viana.gusmao@gmail.com>
+* Gabor Greif <ggreif@gmail.com>
+* Martin Fredriksson <martin.fredriksson@vikinganalytics.se>
+* forcepusher <bionitsoup@gmail.com>
+* Piotr Oleś <piotrek.oles@gmail.com>
+* Saúl Cabrera <saulecabrera@gmail.com>
+* Chance Snow <git@chancesnow.me>
+* Peter Salomonsen <petersalomonsen@runbox.com>
+* ookangzheng <git-ed@runbox.no>
+* yjhmelody <yjh465402634@gmail.com>
+* bnbarak <bn.barak@gmail.com>
+* Colin Eberhardt <colin.eberhardt@gmail.com>
+* Ryan Pivovar <ryanpivovar@gmail.com>
+* Roman F. <70765447+romdotdog@users.noreply.github.com>
+* Joe Pea <trusktr@gmail.com>
+* Felipe Gasper <FGasper@users.noreply.github.com>
+* Congcong Cai <congcongcai0907@163.com>
+* mooooooi <emwings@outlook.com>
+* Yasushi Ando <andyjpn@gmail.com>
+* Syed Jafri <syed@metalpay.co>
+* Peter Hayman <peteyhayman@gmail.com>
+* ApsarasX <apsarax@outlook.com>
+* Adrien Zinger <zinger.ad@gmail.com>
+* Ruixiang Chen <xiang19890319@gmail.com>
+* Daniel Salvadori <danaugrs@gmail.com>
+* Jairus Tanaka <me@jairus.dev>
+* CountBleck <Mr.YouKnowWhoIAm@protonmail.com>
+* Abdul Rauf <abdulraufmujahid@gmail.com>
+* Bach Le <bach@bullno1.com>
+* Xinquan Xu <xinquan0203@163.com>
+* Matt Johnson-Pint <mattjohnsonpint@gmail.com>
+* Fabián Heredia Montiel <fabianhjr@users.noreply.github.com>
+* Jonas Minnberg <sasq64@gmail.com>
+* Kam Chehresa <kaz.che@gmail.com>
+* Mopsgamer <79159094+Mopsgamer@users.noreply.github.com>
+* EDM115 <github@edm115.dev>
+* Weixie Cui <cuiweixie@gmail.com>
+
+Portions of this software are derived from third-party works licensed under
+the following terms:
+
+* TypeScript: https://github.com/Microsoft/TypeScript
+
+  Copyright (c) Microsoft Corporation
+  Apache License, Version 2.0 (https://opensource.org/licenses/Apache-2.0)
+
+* Binaryen: https://github.com/WebAssembly/binaryen
+
+  Copyright (c) WebAssembly Community Group participants
+  Apache License, Version 2.0 (https://opensource.org/licenses/Apache-2.0)
+
+* musl libc: http://www.musl-libc.org
+
+  Copyright (c) Rich Felker, et al.
+  The MIT License (https://opensource.org/licenses/MIT)
+
+* V8: https://developers.google.com/v8/
+
+  Copyright (c) the V8 project authors
+  The 3-Clause BSD License (https://opensource.org/licenses/BSD-3-Clause)
+
+* Arm Optimized Routines: https://github.com/ARM-software/optimized-routines
+
+  Copyright (c) Arm Limited
+  The MIT License (https://opensource.org/licenses/MIT)
+`;
+
 function assemblyScript(): Notice {
   return {
     title: "AssemblyScript",
     // Its NOTICE names parts of its standard library from musl and Arm (MIT) and V8 (BSD-3-Clause).
     spdx: ["MIT", "BSD-3-Clause"],
-    text: `dist/codegen.wasm is compiled by AssemblyScript,
-https://github.com/AssemblyScript/assemblyscript, and holds its runtime
-and the parts of its standard library the compiler uses, under the Apache
-License 2.0 (LICENSE). swf2es changes one of them, its Grisu2 number
-formatting (std/assembly/util/number.ts), so that it reads no further than
-its table of powers of ten: the repository's
-patches/assemblyscript@0.28.20.patch. Its NOTICE:
+    text: `dist/codegen.wasm holds ports of two parts of AssemblyScript's standard
+library, https://github.com/AssemblyScript/assemblyscript, under the
+Apache License 2.0 (LICENSE), so that the compiler writes and reads
+numbers as it did when AssemblyScript compiled it: its Grisu2 number
+formatting (std/assembly/util/number.ts), ported to zig/src/dtoa.zig, and
+its integer parsing (strtol of std/assembly/util/string.ts), ported to
+zig/src/parse.zig. Its NOTICE:
 
-${read("packages/codegen/node_modules/assemblyscript/NOTICE")}`,
+${ASSEMBLYSCRIPT_NOTICE}`,
   };
 }
 
-/** The standard library Zig compiles into the compiler in Zig, while it is ported (docs/zig-codegen.md). */
+/** The standard library Zig compiles into the compiler. */
 function zig(): Notice {
   return {
     title: "Zig",
     spdx: ["MIT"],
-    text: `dist/codegen-zig.wasm, the compiler in Zig, is compiled by Zig 0.17.0,
+    text: `dist/codegen.wasm is compiled by Zig 0.17.0,
 https://ziglang.org, and holds the parts of its standard library the
 compiler uses and compiler-rt's routines it calls (memcpy, memset), under
 the MIT License:
@@ -325,6 +421,7 @@ from the reference implementation of feTurbulence in Scalable Vector
 Graphics (SVG) 1.1 (Second Edition),
 https://www.w3.org/TR/SVG11/filters.html#feTurbulenceElement`),
         assemblyScript(),
+        zig(),
         native("The bundle holds @swf2es/native's modules, with their WebAssembly."),
         rspack(),
       ];

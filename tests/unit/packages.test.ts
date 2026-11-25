@@ -90,6 +90,7 @@ const MARKERS: [Origin, RegExp][] = [
   ["avmplus", /mozilla\.org\/MPL\/2\.0/],
   ["ruffle", /Ruffle[\s/*]*LLC/],
   ["w3c", /W3C®/],
+  ["assemblyscript", /Copyright the[\s/]*AssemblyScript[\s/]*authors/],
 ];
 
 function headerOrigins(dir: string): Set<Origin> {
@@ -114,13 +115,10 @@ function headerOrigins(dir: string): Set<Origin> {
   return found;
 }
 
-// codegen's assembly/ is compiled into codegen.wasm, and zig/ into codegen-zig.wasm, which it ships.
-const sourcesOf = (name: string) => [
-  `${root}packages/${name}/src`,
-  ...(name === "codegen"
-    ? [`${root}packages/codegen/assembly`, `${root}packages/codegen/zig/src`]
-    : []),
-];
+const sourcesOf = (name: string) => [`${root}packages/${name}/src`];
+// codegen's zig/ is compiled into codegen.wasm, which codegen and the
+// browser build ship; player-hosts' dist/thread/ holds codegen's modules alone.
+const shipsWasm = (name: string) => name === "codegen" || name === "swf2es";
 
 test("each package's notices cover what its files' headers say came from elsewhere", () => {
   // native's notices are its build's, which checks them against what it compiles.
@@ -133,7 +131,12 @@ test("each package's notices cover what its files' headers say came from elsewhe
         : name === "swf2es"
           ? others(BUNDLED_PACKAGES)
           : [name];
-    const found = new Set(held.flatMap(sourcesOf).flatMap((dir) => [...headerOrigins(dir)]));
+    const dirs = held.flatMap(sourcesOf);
+    if (shipsWasm(name)) {
+      dirs.push(`${root}packages/codegen/zig/src`);
+    }
+
+    const found = new Set(dirs.flatMap((dir) => [...headerOrigins(dir)]));
     for (const origin of found) {
       assert.ok(origins(name).includes(origin), `${name} holds ${origin}'s code but no notice`);
     }
