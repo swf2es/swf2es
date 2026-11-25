@@ -1297,6 +1297,12 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         lost = true;
       }
 
+      // The player drops a domain from a FinalizationRegistry's callback,
+      // where a throw would go nowhere: a lost domain has none to drop.
+      if (lost && name === "dropDomain") {
+        return undefined;
+      }
+
       if (lost && !domainless) {
         throw new Error(
           `${name}: the compiler's domain was lost to a panic it could not recover from; reset it`,
@@ -1316,8 +1322,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         }
 
         if (!recover()) {
+          // A reset that panicked too: what the wrapper keeps of the domain
+          // (its ABCs, journal, checkpoint and API version) is the dead one's.
           fresh();
-          lost = name !== "reset";
+          lost = true;
           throw new Error(
             `${name}: ${error.message}; the compiler went on in a new instance, its domain lost`,
           );
