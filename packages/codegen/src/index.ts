@@ -730,7 +730,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // a fresh instance, which is the same domain by determinism and takes
   // the dead one's place; the call that panicked is left out. If the replay
   // panics too, or a compile's log cannot be replayed, there is no second
-  // attempt: the compiler is dead, and every call throws.
+  // attempt: the domain is lost (see fresh).
   type Entry =
     | {
         kind: "add";
@@ -871,6 +871,9 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
             entry.abc = EMPTY_ABC;
           } else {
             journal.delete(entry);
+            if (entry.kind === "restore") {
+              restores.delete(entry.index);
+            }
           }
         }
       }
@@ -919,15 +922,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           break;
         }
         case "log": {
-          // Refused where its ABC's domain is not live (evicted since):
-          // nothing compiles against it until a revival, which a rebuild
-          // relinks from what it found. Any other refusal is a divergence.
+          // Any refusal is a divergence: recovery fails, and the domain is lost.
           const w = entry.words;
           for (let i = 0; i < w.length; i += 4) {
-            if (
-              !(into as RecoveryExports).replayEntry(w[i], w[i + 1], w[i + 2], w[i + 3]) &&
-              into.domainState(abcDomains[w[i + 1]] ?? -1) === 0
-            ) {
+            if (!(into as RecoveryExports).replayEntry(w[i], w[i + 1], w[i + 2], w[i + 3])) {
               throw new Error(`a compile's log did not replay for ABC ${w[i + 1]}`);
             }
           }
@@ -1115,13 +1113,9 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           if (error !== 0) {
             throw new Error(`ABC ${index}: not of an evicted domain, or rejected (${error})`);
           }
-          if (zig) {
-            // One restore an ABC: a revival retried gives its bytes again.
-            const known = restores.get(index);
-            if (known) {
-              journal.delete(known);
-            }
-
+          // One restore an ABC, the first: a revival retried gives its
+          // bytes again, which the compiler, holding them, does not take.
+          if (zig && !restores.has(index)) {
             const entry: Entry = { kind: "restore", index, bytes: owned };
             restores.set(index, entry);
             journaled(entry, abcDomains[index]);

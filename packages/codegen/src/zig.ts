@@ -10,9 +10,9 @@
  * starts. A call that ran out of memory hands out nothing and says so in
  * `codegenError`, and is thrown here, as asc's trap would be. A panic, a
  * failed safety check of the ReleaseSafe build, is the module's one import,
- * env.abort, and any other trap are thrown as a CodegenPanic, after which
- * the instance is dead and every call throws one, for the wrapper to start
- * another.
+ * env.abort, and it and any other trap are thrown as a CodegenPanic, after
+ * which the instance is dead, every call on it throwing one, and the
+ * wrapper (index.ts) recovers in another or loses its domain.
  *
  * An export the module does not have yet, as the port goes on stage by
  * stage, throws when called.
