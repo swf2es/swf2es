@@ -31,31 +31,21 @@ jobs:
           test "$(jq -r .scripts.test tests/player/package.json)" = "node run.ts && pnpm run test:other" ||
             { echo "tests/player's test runs more than its cases and test:other, which CI runs"; exit 1; }
       - run: pnpm --filter @swf2es/native build:wasm && git diff --exit-code -- packages/native/src/*/binary.ts packages/native/LICENSE.third-party
-  # The compiler in Zig while it is ported (docs/zig-codegen.md): its inline tests, its
-  # modules built again with fresh caches and held to packages/codegen/zig/digests.json, and
-  # the parity harness, which compares its results with the AssemblyScript compiler's.
-  zig:
+  # The compiler (docs/zig-codegen.md): its inline tests, its modules built again with fresh
+  # caches and held to packages/codegen/zig/digests.json, and the generated code held to
+  # tests/golden/digests.json, which the conformance cases ASC compiles are part of.
+  codegen:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
       - uses: ./.github/actions/setup
-      - run: node packages/codegen/zig/build.ts --verify
-      # Ruffle's corpus, whose AVM1 SWFs the harness compiles, as the corpus job keeps it.
-      - id: ruffle
-        run: |
-          commit=$(sed -n 's/^export const RUFFLE_COMMIT = "\(.*\)";$/\1/p' tests/player/corpus/ruffle.ts)
-          test -n "$commit"
-          echo "commit=$commit" >> "$GITHUB_OUTPUT"
-      - id: cache
-        uses: actions/cache/restore@v4
         with:
-          path: tests/player/corpus/ruffle
-          key: ruffle-corpus-${{ steps.ruffle.outputs.commit }}
-      - if: steps.cache.outputs.cache-hit != 'true'
-        run: node tests/player/corpus/fetch-ruffle.ts
-      - run: pnpm --filter ./tests/parity test
+          oracle: "true"
+          store: codegen
+      - run: node packages/codegen/zig/build.ts --verify
+      - run: pnpm --filter ./tests/golden test
   # pnpm test and pnpm test:checked, split into parts that run side by side: the
   # player's cases, a third each, the player's other checks, and the other test
   # packages in two groups.
@@ -93,8 +83,6 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           oracle: "true"
-          # pnpm determinism compiles in the checked build too.
-          checked: ${{ matrix.mode == 'checked' || matrix.part.determinism == true }}
           store: ${{ matrix.mode }}-${{ matrix.part.name }}
       - run: ${{ matrix.part.run }}
       # After the conformance and programs runners, whose ABCs it compiles again.
