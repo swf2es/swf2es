@@ -800,3 +800,33 @@ test("what resolved lazily resolves alike after a rebuild, though an ancestor de
     assert.equal(testing.domainSlotTypes(2, 0), "abc 1 class 0");
   }
 });
+
+test("an ABC rejected after it named a class leaves no class by that name to the next", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  testing.domainReset(SWF_31);
+  testing.domainAdd(builtin, true);
+  const child = testing.domainChild(0) as number;
+  // A is named, then B fails to link: it overrides nothing.
+  const rejected = classes([
+    { name: mn("A"), base: mn("Object") },
+    {
+      name: mn("B"),
+      base: mn("Object"),
+      traits: [{ name: mn("m"), kind: METHOD, attr: OVERRIDE }],
+    },
+  ]);
+  assert.equal(testing.domainAdd(rejected, false, child), 1053);
+  // The next ABC takes the rejected one's index: a finding of A as a type of it binds nothing.
+  assert.equal(
+    testing.domainAdd(classes([{ name: mn("F"), base: mn("Object") }]), false, child),
+    0,
+  );
+  const revision = testing.domainRevision();
+  testing.domainFound(child, NS_PUBLIC, "", "A", 1, true);
+  assert.equal(testing.domainRevision(), revision);
+  // Nor does a later ABC extend A.
+  assert.equal(testing.domainAdd(classes([{ name: mn("B"), base: mn("A") }]), false, child), 1014);
+  assert.equal(find("", "A"), "none");
+});

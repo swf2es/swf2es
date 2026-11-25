@@ -47,22 +47,41 @@ export class IdTable {
   }
 
   grow(): void {
+    this.rehash(<u32>this.ids.length * 2, 0xffffffff);
+  }
+
+  /**
+   * The ids from `limit` on taken out, as a link that fails leaves none of
+   * its rows behind: the others placed again, in tables of their own, as
+   * linear probing cannot empty a slot that an earlier id's probe passed.
+   */
+  forget(limit: u32): void {
+    for (let slot = 0; slot < this.ids.length; slot++) {
+      if (this.ids[slot] > limit) {
+        this.rehash(<u32>this.ids.length, limit);
+        return;
+      }
+    }
+  }
+
+  /** The ids below `limit` placed again in tables of `size` slots. */
+  rehash(size: u32, limit: u32): void {
     const ids = this.ids;
     const hashes = this.hashes;
-    this.ids = new StaticArray<u32>(ids.length * 2);
-    this.hashes = new StaticArray<u32>(ids.length * 2);
+    this.ids = new StaticArray<u32>(size);
+    this.hashes = new StaticArray<u32>(size);
     this.count = 0;
 
     // Re-inserting in slot order keeps equal hashes in insertion order.
-    const size = <u32>ids.length;
     let first: u32 = 0;
-    while (first < size && ids[first]) {
+    while (first < <u32>ids.length && ids[first]) {
       first++;
     }
 
-    for (let i: u32 = 1; i <= size; i++) {
-      const slot = (first + i) & (size - 1);
-      if (ids[slot]) {
+    const old = <u32>ids.length;
+    for (let i: u32 = 1; i <= old; i++) {
+      const slot = (first + i) & (old - 1);
+      if (ids[slot] && ids[slot] <= limit) {
         this.insert(hashes[slot], ids[slot] - 1);
       }
     }

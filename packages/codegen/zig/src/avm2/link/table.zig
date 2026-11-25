@@ -51,25 +51,42 @@ pub const IdTable = struct {
     }
 
     fn grow(self: *IdTable, gpa: Allocator) Allocator.Error!void {
+        try self.rehash(gpa, @intCast(self.ids.len * 2), std.math.maxInt(u32));
+    }
+
+    /// The ids from `limit` on taken out, as a link that fails leaves none
+    /// of its rows behind: the others placed again, in tables of their own,
+    /// as linear probing cannot empty a slot that an earlier id's probe
+    /// passed, and a Change rolled back takes the old tables back as they were.
+    pub fn forget(self: *IdTable, gpa: Allocator, limit: u32) Allocator.Error!void {
+        for (self.ids) |slot| {
+            if (slot > limit) {
+                return self.rehash(gpa, @intCast(self.ids.len), limit);
+            }
+        }
+    }
+
+    /// The ids below `limit` placed again in tables of `size` slots.
+    fn rehash(self: *IdTable, gpa: Allocator, size: u32, limit: u32) Allocator.Error!void {
         const ids = self.ids;
         const hashes = self.hashes;
-        const size: u32 = @intCast(ids.len);
+        const old: u32 = @intCast(ids.len);
         // Both taken before either replaces the old: running out of memory leaves the table as it was.
-        const new_ids = try memory.allocZeroed(gpa, u32, size * 2);
-        self.hashes = try memory.allocZeroed(gpa, u32, size * 2);
+        const new_ids = try memory.allocZeroed(gpa, u32, size);
+        self.hashes = try memory.allocZeroed(gpa, u32, size);
         self.ids = new_ids;
         self.count = 0;
 
         // Re-inserting in slot order keeps equal hashes in insertion order.
         var first: u32 = 0;
-        while (first < size and ids[first] != 0) {
+        while (first < old and ids[first] != 0) {
             first += 1;
         }
 
         var i: u32 = 1;
-        while (i <= size) : (i += 1) {
-            const slot = (first + i) & (size - 1);
-            if (ids[slot] != 0) {
+        while (i <= old) : (i += 1) {
+            const slot = (first + i) & (old - 1);
+            if (ids[slot] != 0 and ids[slot] <= limit) {
                 self.place(hashes[slot], ids[slot] - 1);
             }
         }

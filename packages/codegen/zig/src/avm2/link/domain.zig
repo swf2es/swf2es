@@ -526,6 +526,9 @@ pub const Domain = struct {
         try self.abcString.push(gpa, strings);
         try namespaces.addNamespaces(self, abc, buffer.ptr, strings);
         const traitsCount = self.traits.kind.len;
+        const classCount = self.classAbc.len;
+        const typeCount = self.typeNs.len;
+        const objectClass = self.objectClass;
         if (!try classes.link(self, index)) {
             self.abcs.truncate(index);
             self.abcBase.truncate(index);
@@ -543,6 +546,22 @@ pub const Domain = struct {
             self.methodAbcIndex.truncate(methodCount);
             self.traits.truncate(traitsCount);
             self.traits.truncateMethods(methodCount);
+            // Its classes and the names it gave them too: an ABC that takes
+            // its index next must find no class of this one's by it.
+            self.classAbc.truncate(classCount);
+            self.classInstance.truncate(classCount);
+            self.classBase.truncate(classCount);
+            self.classFlags.truncate(classCount);
+            self.classTraits.truncate(classCount);
+            self.classStatic.truncate(classCount);
+            self.typeDomain.truncate(typeCount);
+            self.typeNs.truncate(typeCount);
+            self.typeName.truncate(typeCount);
+            self.typeVersion.truncate(typeCount);
+            self.typeClass.truncate(typeCount);
+            self.typeOwner.truncate(typeCount);
+            try self.types.forget(gpa, typeCount);
+            self.objectClass = objectClass;
             self.clearBindingMemo();
             return false;
         }

@@ -349,6 +349,9 @@ export class Domain {
     this.abcString.push(strings);
     addNamespaces(this, abc, base, strings);
     const traitsCount = <u32>this.traits.kind.length;
+    const classCount = <u32>this.classAbc.length;
+    const typeCount = <u32>this.typeNs.length;
+    const objectClass = this.objectClass;
     if (!link(this, index)) {
       this.abcs.pop();
       this.abcBase.pop();
@@ -366,6 +369,22 @@ export class Domain {
       this.methodAbcIndex.length = methodCount;
       this.traits.truncate(traitsCount);
       this.traits.truncateMethods(methodCount);
+      // Its classes and the names it gave them too: an ABC that takes its
+      // index next must find no class of this one's by it.
+      this.classAbc.length = classCount;
+      this.classInstance.length = classCount;
+      this.classBase.length = classCount;
+      this.classFlags.length = classCount;
+      this.classTraits.length = classCount;
+      this.classStatic.length = classCount;
+      this.typeDomain.length = typeCount;
+      this.typeNs.length = typeCount;
+      this.typeName.length = typeCount;
+      this.typeVersion.length = typeCount;
+      this.typeClass.length = typeCount;
+      this.typeOwner.length = typeCount;
+      this.types.forget(typeCount);
+      this.objectClass = objectClass;
       this.clearBindingMemo();
       return false;
     }
