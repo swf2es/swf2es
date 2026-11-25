@@ -243,6 +243,12 @@ Then:
   weights (`weigh`, `addWeights`, `rows`), and the player's
   `compactSoon`. `Codegen.compact()` stays in the API as a function
   that returns false, until the hosts stop calling it.
+- **Left from stage 6 for M2.** The memory test accepts linear growth
+  of about 220 bytes a load (domain and ABC indices, `domain.test.ts`,
+  at most 512), which per-domain arenas should bound. Tables a call
+  replaces in the domain's arena (an `IdTable` grown or rehashed, a
+  `Rows` directory outgrown) stay there unweighed until the next
+  rebuild, so the weights undercount the dead.
 
 What still grows: the root. A SWF loaded into the main SWF's own
 application domain adds its ABC there for good, as Flash keeps its

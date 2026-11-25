@@ -492,7 +492,9 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // zig/src/root.zig), decoded before anything else calls in: the next
   // call may grow memory, and gives the last one's arena back.
   const handed = (address: number, length: number) =>
-    length === 0 ? "" : utf8.decode(new Uint8Array(wasm.memory.buffer, address, length));
+    length === 0 ? "" : utf8.decode(view(address, length));
+  // `length` bytes at `address` in codegen's memory, read inside the panic guard (see zig.ts).
+  const view = (address: number, length: number) => wasm.view(address, length);
   const stamps = WebAssembly.Module.customSections(module, "swf2es.build");
   const identity = stamps.length ? String.fromCharCode(...new Uint8Array(stamps[0])) : null;
   let epoch = 0;
@@ -508,9 +510,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     fork: (appDomain) => wasm.domainKeyFork(appDomain),
     log(appDomain, after, from, to, block, filled) {
       const address = wasm.domainKeyLogBytes(appDomain, after, from, to, block, filled);
-      return address === 0
-        ? null
-        : new Uint8Array(wasm.memory.buffer, address, wasm.outputLength());
+      return address === 0 ? null : view(address, wasm.outputLength());
     },
   });
   // Snapshot the inputs of a successful Zig rebuild. Recovery then repeats that same generation
@@ -522,12 +522,12 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   let checkpoint: Checkpoint | null = null;
   const saveCheckpoint = (): Checkpoint => {
     const at = wasm.domainSaveBytes();
-    const state = new Uint8Array(wasm.memory.buffer, at, wasm.outputLength()).slice();
+    const state = view(at, wasm.outputLength()).slice();
     const abcs = new Map<number, Uint8Array>();
     for (let i = 0; i < added; i++) {
       const at = wasm.domainSavedAbcBytes(i);
       if (at) {
-        abcs.set(i, new Uint8Array(wasm.memory.buffer, at, wasm.outputLength()).slice());
+        abcs.set(i, view(at, wasm.outputLength()).slice());
       }
     }
     return { state, abcs };
@@ -702,7 +702,8 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     }
     // Packed, a run of entries of one domain's ABCs to a journal entry, so
     // that a long session's logs take their words and little more.
-    const words = new Uint32Array(wasm.memory.buffer, at, count).slice();
+    const bytes = view(at, count * 4);
+    const words = new Uint32Array(bytes.buffer, bytes.byteOffset, count).slice();
     let start = 0;
     for (let i = 4; i <= count; i += 4) {
       const owner = abcDomains[words[start + 1]];
@@ -1175,9 +1176,14 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       }
 
       // The player drops a domain from a FinalizationRegistry's callback,
-      // where a throw would go nowhere: a lost domain has none to drop.
+      // and compacts from a timer, where a throw would go nowhere: a lost
+      // domain has nothing to drop, nor to compact.
       if (lost && name === "dropDomain") {
         return undefined;
+      }
+
+      if (lost && name === "compact") {
+        return false;
       }
 
       if (lost && !domainless) {

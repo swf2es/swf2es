@@ -18,6 +18,8 @@
 /** codegen.wasm's exports, bound. */
 export interface CodegenExports {
   readonly memory: WebAssembly.Memory;
+  /** `length` bytes at `address`, a call's output, viewed inside the panic guard. */
+  view(address: number, length: number): Uint8Array;
   compilerVersion(): string;
   abcVersion(abc: Uint8Array): number;
   actionsEmitEach(
@@ -142,7 +144,7 @@ export type Signature = readonly [
 
 /** Every export of codegen.wasm's, by its signature. */
 export const SIGNATURES: {
-  readonly [name in Exclude<keyof CodegenExports, "memory">]: Signature;
+  readonly [name in Exclude<keyof CodegenExports, "memory" | "view">]: Signature;
 } = {
   compilerVersion: ["", "str"],
   abcVersion: ["u8s", "i32"],
@@ -344,6 +346,10 @@ function bindInstance<T>(
       return exports.memory;
     },
     panicked: () => state.panic,
+    // What a call handed out, at an address it returned, read inside the
+    // guard: a view past memory's end marks the instance dead as a trap does.
+    view: (address: number, length: number) =>
+      guarded(() => new Uint8Array(exports.memory.buffer, address >>> 0, length)),
   };
   for (const [name, [spec, result]] of Object.entries(signatures)) {
     const call = exports[name] as ((...args: number[]) => number) | undefined;

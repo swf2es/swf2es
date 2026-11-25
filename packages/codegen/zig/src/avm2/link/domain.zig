@@ -233,6 +233,42 @@ pub const Truncated = struct {
     b: u32,
 };
 
+/// The fields the first builtin ABC's link sets (classes.zig), which a
+/// link that fails gives back.
+const builtin_fields = [_][]const u8{
+    "hasBuiltins",
+    "objectClass",
+    "classClass",
+    "functionClass",
+    "voidClass",
+    "transientName",
+    "versionName",
+    "nativeName",
+    "apiName",
+    "voidType",
+    "nullType",
+    "numberType",
+    "floatType",
+    "intType",
+    "uintType",
+    "booleanType",
+    "stringType",
+    "namespaceType",
+    "xmlType",
+    "xmlListType",
+    "qnameType",
+    "classType",
+    "vectorClass",
+    "vectorObjectType",
+    "vectorIntType",
+    "vectorUintType",
+    "vectorDoubleType",
+    "arrayType",
+    "functionType",
+    "mathStatic",
+    "builtinAbc",
+};
+
 pub const Domain = struct {
     /// The domain's arena, and the call's.
     gpa: Allocator,
@@ -528,7 +564,7 @@ pub const Domain = struct {
         const traitsCount = self.traits.kind.len;
         const classCount = self.classAbc.len;
         const typeCount = self.typeNs.len;
-        const objectClass = self.objectClass;
+        const builtins = self.saveBuiltins();
         if (!try classes.link(self, index)) {
             self.abcs.truncate(index);
             self.abcBase.truncate(index);
@@ -561,7 +597,9 @@ pub const Domain = struct {
             self.typeClass.truncate(typeCount);
             self.typeOwner.truncate(typeCount);
             try self.types.forget(gpa, typeCount);
-            self.objectClass = objectClass;
+            // The special classes and types, which the first builtin ABC's link
+            // sets before it may still fail: the next builtin finds them again.
+            self.restoreBuiltins(builtins);
             self.clearBindingMemo();
             return false;
         }
@@ -571,6 +609,23 @@ pub const Domain = struct {
         // The bytes three times: a copy, and the tables parsing made of them.
         try self.abcWeight.push(gpa, @intCast(@min(ABC_Weight * abc.length + self.rows() - before, 0xffffffff)));
         return true;
+    }
+
+    /// What builtin_fields hold, before a link that may fail.
+    fn saveBuiltins(self: *const Domain) [builtin_fields.len]i64 {
+        var saved: [builtin_fields.len]i64 = undefined;
+        inline for (builtin_fields, 0..) |name, k| {
+            const value = @field(self, name);
+            saved[k] = if (@TypeOf(value) == bool) @intFromBool(value) else value;
+        }
+
+        return saved;
+    }
+
+    fn restoreBuiltins(self: *Domain, saved: [builtin_fields.len]i64) void {
+        inline for (builtin_fields, 0..) |name, k| {
+            @field(self, name) = if (@TypeOf(@field(self, name)) == bool) saved[k] != 0 else @intCast(saved[k]);
+        }
     }
 
     /// Roughly the bytes the domain's tables hold, by their rows, for
