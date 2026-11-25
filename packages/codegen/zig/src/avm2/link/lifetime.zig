@@ -370,7 +370,7 @@ pub const Rebuild = struct {
     pub fn init(dom: *Domain, fresh: *Domain, arena: *memory.Arena, parsed_in_fresh: bool) Allocator.Error!Rebuild {
         const gpa = fresh.gpa;
         fresh.apiVersion = dom.apiVersion;
-        fresh.generation = dom.generation + 1;
+        fresh.generation = dom.generation +% 1;
         // AssemblyScript's shares these arrays with the old domain, whose
         // tree a rebuild under way never sees grow (leaveRebuild); the new
         // domain's own root goes for the old one's.
@@ -747,7 +747,21 @@ pub fn loadDomain(loaded: *Loaded, words: []const u8) Allocator.Error!bool {
         try dom.foundName.push(gpa, try reader.text(gpa));
     }
 
-    return !reader.failed and consistent(dom);
+    return !reader.failed and consistent(dom) and livesGiven(loaded);
+}
+
+/// Whether every ABC of a live application domain is one saveDomain named
+/// live, whose bytes it is then given: a live domain's ABCs are all linked.
+fn livesGiven(loaded: *const Loaded) bool {
+    const dom = loaded.dom;
+    for (0..dom.abcs.len) |i| {
+        const live = dom.domainState.get(dom.abcDomain.get(@intCast(i))) == DOMAIN_Live;
+        if (live and loaded.flags.items[i] & SAVED_Live == 0) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 /// Whether what a Rebuild indexes by a loaded Domain's numbers is in range, as saveDomain wrote them.
