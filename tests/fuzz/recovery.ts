@@ -1,10 +1,14 @@
 // Differential fuzz of createCodegen's recovery from a panic of the
-// compiler: A, the test build, with panics and stack overflows injected by
-// its marked ABCs; B, the same calls with none. Every answer of A's is
-// B's, a panicking load rejected as 1107, and the domain alike after.
+// compiler: A, the test build, with panics and stack overflows injected
+// (by its marked ABCs, in a compile, in reading a compile's log, and where
+// recovery itself fails); B, the same calls with none. Every answer of A's
+// is B's, a panicking load rejected as 1107, a panicking compile thrown,
+// and the domain alike after; a domain recovery cannot save is lost, and
+// both start again.
 //
 //   node tests/fuzz/recovery.ts [seeds, 20] [first seed, 1] [steps, 300]
-//   (COMPACT=1 compacts too; PANIC_RATE, VERBOSE=1, STOP=1, DUMP=dir)
+//   (COMPACT=1 compacts too, both at the same steps, TRANSIENT=1 with
+//   domains made, filled and let go of; PANIC_RATE, VERBOSE=1, STOP=1, DUMP=dir)
 import assert from "node:assert/strict";
 import * as dumpFs from "node:fs";
 import { readFileSync } from "node:fs";
@@ -29,6 +33,52 @@ const module = await WebAssembly.compile(
   readFileSync(`${TREE}/packages/codegen/dist-test/testing.wasm`),
 );
 const builtin = new Uint8Array(readFileSync(`${TREE}/oracle/avmplus/generated/builtin.abc`));
+
+// Every instance's exports, the ones a recovery makes too, with panics
+// injected where `inject` names an export, once; and under COMPACT a
+// rebuild wanted only where `compacting` says, and only in a spare
+// instance, so that A and B, whose memory differs after A's recoveries,
+// rebuild at the same steps: one in place must fit in memory already taken.
+let inject: string | null = null;
+let compacting = false;
+let refusals = 0;
+const wrapped = (instance: WebAssembly.Instance) => {
+  const raw = instance.exports as Record<string, (...args: number[]) => number>;
+  const exports: Record<string, unknown> = { ...instance.exports };
+  for (const name of ["domainModuleBytes", "journalBytes"]) {
+    exports[name] = (...args: number[]) => {
+      if (inject === name) {
+        inject = null;
+        raw.testingPanic();
+      }
+
+      return raw[name](...args);
+    };
+  }
+
+  if (COMPACT) {
+    // WANT_Spare always, WANT_Move when compacting, never in place.
+    exports.domainWantsCompact = (want: number) =>
+      want === 3 || (want === 2 && compacting) ? 1 : 0;
+  }
+
+  return { exports } as unknown as WebAssembly.Instance;
+};
+const instantiate = WebAssembly.instantiate;
+WebAssembly.instantiate = (async (module: WebAssembly.Module, imports: object) =>
+  wrapped((await instantiate(module, imports)) as WebAssembly.Instance)) as typeof instantiate;
+const Instance = WebAssembly.Instance;
+// A recovery's instance, made synchronously; refused `refusals` times, for the lost path.
+WebAssembly.Instance = new Proxy(Instance, {
+  construct(target, args) {
+    if (refusals > 0) {
+      refusals--;
+      throw new Error("refused for the fuzz");
+    }
+
+    return wrapped(Reflect.construct(target, args));
+  },
+});
 const PANIC = new TextEncoder().encode("\0panic");
 const OVERFLOW = new TextEncoder().encode("\0overflow");
 
@@ -91,15 +141,33 @@ function randomAbc(r: () => number): Uint8Array {
 
 type Codegen = Awaited<ReturnType<typeof createCodegen>>;
 
+/** A call's value, or how it threw: a panic recovered from, a domain lost, or a plain throw. */
 const outcome = <T>(call: () => T): { value?: T; error?: string } => {
   try {
     return { value: call() };
-  } catch {
-    return { error: "threw" };
+  } catch (error) {
+    const message = (error as Error).message;
+    return {
+      error: /its domain lost/.test(message)
+        ? "lost"
+        : /went on in a new instance/.test(message)
+          ? "panic"
+          : "threw",
+    };
   }
 };
 
-async function run(seed: number): Promise<{ panics: number; compactions: number; ops: number }> {
+interface Counts {
+  panics: number;
+  recovered: number;
+  /** Where recovery was made to fail. */
+  lost: number;
+  /** Where recovery could not replay, as after a compile cut short. */
+  unreplayable: number;
+  compactions: number;
+}
+
+async function run(seed: number): Promise<Counts> {
   const r = rng(seed);
   const pick = <T>(list: T[]) => list[Math.floor(r() * list.length)];
   const a: Codegen = await createCodegen(module);
@@ -138,13 +206,20 @@ async function run(seed: number): Promise<{ panics: number; compactions: number;
   };
 
   // The model.
-  const domains: { parent: number; state: number }[] = [{ parent: -1, state: 0 }];
-  const abcs: { domain: number; bytes: Uint8Array }[] = [];
+  let domains: { parent: number; state: number }[] = [];
+  let abcs: { domain: number; bytes: Uint8Array }[] = [];
   const logs = new Map<number, string>();
   const hashes = () => abcs.map((_, i) => `h${i}`);
   const liveDomains = () => domains.map((d, i) => (d.state === 0 ? i : -1)).filter((i) => i >= 0);
-  let panics = 0;
-  let compactions = 0;
+  const counts: Counts = { panics: 0, recovered: 0, lost: 0, unreplayable: 0, compactions: 0 };
+  const start = () => {
+    domains = [{ parent: -1, state: 0 }];
+    abcs = [];
+    logs.clear();
+    both("reset", (g) => g.reset());
+    both("add builtin", (g) => g.add(builtin, true));
+    abcs.push({ domain: 0, bytes: builtin });
+  };
 
   const check = (what: string) => {
     for (let i = 0; i < abcs.length; i++) {
@@ -157,12 +232,65 @@ async function run(seed: number): Promise<{ panics: number; compactions: number;
     }
   };
 
-  both("reset", (g) => g.reset());
-  both("add builtin", (g) => g.add(builtin, true));
-  abcs.push({ domain: 0, bytes: builtin });
-
+  start();
   for (let step = 0; step < steps; step++) {
     const x = r();
+    // A panic in a compile, or in reading its log, which recovery undoes.
+    if (x < PANIC_RATE / 3 && abcs.length > 1) {
+      const i = 1 + Math.floor(r() * (abcs.length - 1));
+      inject = r() < 0.5 ? "domainModuleBytes" : "journalBytes";
+      ops.push({ op: "panic-compile", i, at: inject });
+      const result = outcome(() => a.compileModuleLogged(hashes(), i));
+      say(`PANIC in compile ${i} (${inject}) -> ${JSON.stringify(result)}`);
+      const injected = inject === null;
+      inject = null;
+      if (!injected) {
+        continue;
+      }
+
+      counts.panics++;
+      // Not replayable since an earlier compile was cut short: lost by design.
+      if (result.error === "lost") {
+        counts.unreplayable++;
+        start();
+        continue;
+      }
+
+      assert.deepEqual(
+        result,
+        { error: "panic" },
+        `seed ${seed}: the panicking compile at step ${step}`,
+      );
+      counts.recovered++;
+      check(`after compile panic ${counts.panics} (step ${step})`);
+      continue;
+    }
+
+    // A panic recovery cannot undo: the domain is lost, and both start again.
+    if (x < PANIC_RATE / 2) {
+      refusals = 1;
+      ops.push({ op: "panic-lost" });
+      const result = outcome(() => a.add(PANIC, false, 0));
+      refusals = 0;
+      say(`PANIC, lost -> ${JSON.stringify(result)}`);
+      counts.panics++;
+      // A spare instance, made for a compaction, needs no new one: recovered.
+      if (result.value === 1107) {
+        counts.recovered++;
+        check(`after panic ${counts.panics} (step ${step})`);
+        continue;
+      }
+
+      assert.deepEqual(result, { error: "lost" }, `seed ${seed}: the lost panic at step ${step}`);
+      assert.deepEqual(
+        outcome(() => a.compileModule(hashes(), 0)),
+        { error: "threw" },
+      );
+      counts.lost++;
+      start();
+      continue;
+    }
+
     if (x < PANIC_RATE) {
       const marker = r() < 0.8 ? PANIC : OVERFLOW;
       const where = pick(liveDomains());
@@ -184,8 +312,9 @@ async function run(seed: number): Promise<{ panics: number; compactions: number;
         }
       }
       assert.deepEqual(result, { value: 1107 }, `seed ${seed}: the panicking add at step ${step}`);
-      panics++;
-      check(`after panic ${panics} (step ${step})`);
+      counts.panics++;
+      counts.recovered++;
+      check(`after panic ${counts.panics} (step ${step})`);
       continue;
     }
 
@@ -341,23 +470,34 @@ async function run(seed: number): Promise<{ panics: number; compactions: number;
           }
         }
 
-        if (r() < 2) {
+        if (r() < 0.5) {
           ops.push({ op: "drop", d: made });
           both("transient drop", (g) => g.dropDomain(made as number));
           domains[made as number].state = 2;
         } else {
+          ops.push({ op: "evict", d: made });
           both("transient evict", (g) => g.evictDomain(made as number));
           domains[made as number].state = 1;
         }
       }
     } else if (COMPACT) {
       ops.push({ op: "compact" });
-      const done = all.map((g) => outcome(() => g.compact()));
-      say(`compact -> ${JSON.stringify(done)}`);
-      if (done[0].value) {
-        compactions++;
+      // Each with a spare instance first, made between steps.
+      for (const g of all) {
+        g.compact();
       }
 
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      compacting = true;
+      const done = all.map((g) => outcome(() => g.compact()));
+      compacting = false;
+      say(`compact -> ${JSON.stringify(done)}`);
+      assert.deepEqual(done[0], done[1], `seed ${seed}: compact at step ${step}`);
+      if (done[0].value) {
+        counts.compactions++;
+      }
+
+      // A spare instance, which compact asks for, made between steps.
       await new Promise((resolve) => setImmediate(resolve));
     }
   }
@@ -368,17 +508,17 @@ async function run(seed: number): Promise<{ panics: number; compactions: number;
   }
 
   check("after the final compiles");
-  return { panics, compactions, ops: steps };
+  return counts;
 }
 
-let panics = 0;
-let compactions = 0;
+const total: Counts = { panics: 0, recovered: 0, lost: 0, unreplayable: 0, compactions: 0 };
 let failures = 0;
 for (let seed = first; seed < first + seeds; seed++) {
   try {
     const result = await run(seed);
-    panics += result.panics;
-    compactions += result.compactions;
+    for (const key of Object.keys(total) as (keyof Counts)[]) {
+      total[key] += result[key];
+    }
   } catch (error) {
     failures++;
     console.log(`FAIL ${(error as Error).message.slice(0, 4000)}`);
@@ -392,8 +532,14 @@ for (let seed = first; seed < first + seeds; seed++) {
 }
 
 console.log(
-  `${seeds} seeds from ${first}, ${steps} steps each: ${panics} panics, ${compactions} compactions, ${failures} failures`,
+  `${seeds} seeds from ${first}, ${steps} steps each: ${total.panics} panics injected, ` +
+    `${total.recovered} recovered, ${total.lost} lost as made to, ${total.unreplayable} lost as ` +
+    `not replayable, ${total.compactions} compactions, ${failures} failures`,
 );
+if (total.recovered + total.lost + total.unreplayable !== total.panics) {
+  console.log("not every injected panic was recovered from or lost by design");
+  process.exitCode = 1;
+}
 
 if (failures > 0) {
   process.exitCode = 1;

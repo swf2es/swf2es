@@ -14,6 +14,7 @@ import {
   toUtf8,
 } from "../../../packages/codegen/dist/zig.js";
 import { builtinLibrary } from "../../../packages/player/dist/playerglobal/libraries.js";
+import { Avm1Assembler } from "../../avm1-assembler.ts";
 import { script } from "./ir-cases.ts";
 import { linkAbcs } from "./link-abc.ts";
 import { richAbc } from "./rich-abc.ts";
@@ -124,6 +125,24 @@ test("arrays and strings must be given; a default only where left out", () => {
   assert.throws(() => release.abcVersion(undefined as unknown as Uint8Array), TypeError);
 });
 
+/** The next `count` instances made synchronously, as a recovery makes one, refused. */
+function refuseInstances(count: number): () => void {
+  const Instance = WebAssembly.Instance;
+  let refusals = count;
+  WebAssembly.Instance = new Proxy(Instance, {
+    construct(target, args) {
+      if (refusals-- > 0) {
+        throw new Error("refused for the test");
+      }
+
+      return Reflect.construct(target, args);
+    },
+  });
+  return () => {
+    WebAssembly.Instance = Instance;
+  };
+}
+
 /** Byte array `name` of a Zig source of the test build's. */
 async function zigBytes(file: string, name: string): Promise<number[]> {
   const source = await readFile(
@@ -178,29 +197,69 @@ test("a panic recovery cannot undo loses the domain, not the compiler: reset and
   const codegen = await createCodegen(await testingModule("testing"));
   codegen.reset();
   assert.equal(codegen.add(script([0x24, 7, 0x48])), 0);
+  const child = codegen.childDomain(0);
+  assert.equal(codegen.add(script([0x24, 9, 0x48]), false, child), 0);
   // The instance a recovery would replay into cannot be made, once: the
   // domain is lost, and a fresh instance takes the dead one's place.
-  const Instance = WebAssembly.Instance;
-  let refusals = 1;
-  WebAssembly.Instance = new Proxy(Instance, {
-    construct(target, args) {
-      if (refusals-- > 0) {
-        throw new Error("refused for the test");
-      }
-
-      return Reflect.construct(target, args);
-    },
-  });
+  const restore = refuseInstances(1);
   try {
     assert.throws(() => codegen.add(new TextEncoder().encode("\0panic")), /its domain lost/);
   } finally {
-    WebAssembly.Instance = Instance;
+    restore();
   }
 
   assert.throws(() => codegen.compileModule([], 0), /reset it/);
   assert.equal(codegen.context(0), null);
+  // The player drops a domain from a finalizer, where a throw goes nowhere.
+  codegen.dropDomain(child);
   assert.deepEqual(codegen.abcVersion(Uint8Array.of(16, 0, 46, 0)), { major: 46, minor: 16 });
   assert.equal(codegen.heldActions().held, 0);
+  const actions = new Avm1Assembler().push("hello").trace().stop().bytes();
+  const blocks = [{ offset: 0, length: actions.length }];
+  assert.match(codegen.compileActionsModule(actions, { version: 10, blocks }), /hello/);
+  codegen.reset();
+  assert.equal(codegen.add(script([0x24, 9, 0x48])), 0);
+  assert.ok(codegen.compileModule([], 0).length > 0);
+});
+
+test("a reset that panics past recovery leaves the domain lost until the next reset", async (t) => {
+  const module = await testingModule("testing");
+  let panicReset = false;
+  t.mock.method(WebAssembly, "instantiate", async (module: WebAssembly.Module, imports: object) => {
+    const instance = new WebAssembly.Instance(module, imports);
+    const raw = instance.exports as {
+      domainReset(version: number): void;
+      testingPanic(): void;
+    };
+    return {
+      exports: {
+        ...instance.exports,
+        domainReset(version: number) {
+          if (panicReset) {
+            panicReset = false;
+            raw.testingPanic();
+          }
+
+          raw.domainReset(version);
+        },
+      },
+    };
+  });
+
+  const codegen = await createCodegen(module);
+  codegen.reset();
+  assert.equal(codegen.add(script([0x24, 7, 0x48])), 0);
+  panicReset = true;
+  const restore = refuseInstances(1);
+  try {
+    assert.throws(() => codegen.reset(), /its domain lost/);
+  } finally {
+    restore();
+  }
+
+  // What the wrapper kept of the domain before is not taken for it.
+  assert.throws(() => codegen.compileModule([], 0), /reset it/);
+  assert.throws(() => codegen.add(script([0x24, 9, 0x48])), /reset it/);
   codegen.reset();
   assert.equal(codegen.add(script([0x24, 9, 0x48])), 0);
   assert.ok(codegen.compileModule([], 0).length > 0);

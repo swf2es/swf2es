@@ -1,6 +1,7 @@
 // Malformed saved domains given to the compiler's domainLoad, the ABCs and
-// a rebuild after: a bad save fails the move
-// cleanly, refused or a rebuild that fails, and never panics.
+// a rebuild after, then random calls on the domain rebuilt: a bad save
+// fails the move cleanly, refused or a rebuild that fails, and nothing
+// after a save that loads panics.
 //
 //   node tests/fuzz/saved.ts [cases, 2000] [seed, 1]
 import { fileURLToPath } from "node:url";
@@ -85,6 +86,18 @@ for (let n = 0; n < cases; n++) {
     words[w] = value;
   }
 
+  // The domains' states: words 4 + 4d + 2 after their count, word 3. Every
+  // live one evicted, or dropped, the root too, now and then.
+  if (r() < 0.1) {
+    const state = r() < 0.7 ? 1 : 2;
+    what.push(`every live domain ${state === 1 ? "evicted" : "dropped"}`);
+    for (let d = 0; d < words[3] && 6 + 4 * d < words.length; d++) {
+      if (words[6 + 4 * d] === 0) {
+        words[6 + 4 * d] = d === 0 || r() < 0.5 ? state : 1;
+      }
+    }
+  }
+
   const bytes =
     r() < 0.05
       ? new Uint8Array(words.buffer).subarray(0, Math.floor(r() * saved.length))
@@ -123,6 +136,35 @@ for (let n = 0; n < cases; n++) {
           }
 
           t.domainModule("", 1, false, false);
+          phase = "calls";
+          const calls = [
+            () => t.domainRevive(Math.floor(r() * 6), false),
+            () => t.domainEvict(Math.floor(r() * 6)),
+            () => t.domainDrop(1 + Math.floor(r() * 5)),
+            () => t.domainChild(Math.floor(r() * 6)),
+            () => t.domainAdd(script([0x24, 3, 0x48]), false, Math.floor(r() * 6)),
+            () => t.domainFound(Math.floor(r() * 6), 0, "", "A", Math.floor(r() * 6), r() < 0.5),
+            () => t.domainUsage(),
+            () => t.domainWantsCompact(Math.floor(r() * 4)),
+            () => t.domainRebuild(false),
+            () => t.domainSaveBytes(),
+            () => {
+              for (let i = 0; i < abcs.length; i++) {
+                const abc = abcs[i];
+                if (abc) {
+                  t.domainRestore(i, abc);
+                }
+              }
+            },
+            () => t.domainModule("", Math.floor(r() * 6), false, false),
+            () => t.domainState(Math.floor(r() * 6)),
+            () => t.domainContext(Math.floor(r() * 6), 0, -1),
+          ];
+          for (let k = 0; k < 12; k++) {
+            const j = Math.floor(r() * calls.length);
+            phase = `call ${j}`;
+            calls[j]();
+          }
         }
       }
     }

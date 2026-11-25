@@ -526,6 +526,9 @@ pub const Domain = struct {
         try self.abcString.push(gpa, strings);
         try namespaces.addNamespaces(self, abc, buffer.ptr, strings);
         const traitsCount = self.traits.kind.len;
+        const classCount = self.classAbc.len;
+        const typeCount = self.typeNs.len;
+        const objectClass = self.objectClass;
         if (!try classes.link(self, index)) {
             self.abcs.truncate(index);
             self.abcBase.truncate(index);
@@ -543,6 +546,22 @@ pub const Domain = struct {
             self.methodAbcIndex.truncate(methodCount);
             self.traits.truncate(traitsCount);
             self.traits.truncateMethods(methodCount);
+            // Its classes and the names it gave them too: an ABC that takes
+            // its index next must find no class of this one's by it.
+            self.classAbc.truncate(classCount);
+            self.classInstance.truncate(classCount);
+            self.classBase.truncate(classCount);
+            self.classFlags.truncate(classCount);
+            self.classTraits.truncate(classCount);
+            self.classStatic.truncate(classCount);
+            self.typeDomain.truncate(typeCount);
+            self.typeNs.truncate(typeCount);
+            self.typeName.truncate(typeCount);
+            self.typeVersion.truncate(typeCount);
+            self.typeClass.truncate(typeCount);
+            self.typeOwner.truncate(typeCount);
+            try self.types.forget(gpa, typeCount);
+            self.objectClass = objectClass;
             self.clearBindingMemo();
             return false;
         }
@@ -1288,11 +1307,18 @@ pub const Domain = struct {
     /// (see addFound): a binding, or as a type a class; -1 if none.
     pub fn findCached(self: *const Domain, ns: u32, name: u32, version: u8, domain: u32, asType: bool) i32 {
         const c = &self.cached;
-        var slot = c.start(hashPair(ns, name));
+        const hash = hashPair(ns, name);
+        var slot = c.start(hash);
         while (true) {
             const id = c.at(slot);
             if (id < 0) {
                 return -1;
+            }
+
+            // The slot's hash first: most slots a probe passes hold another key.
+            if (c.hashAt(slot) != hash) {
+                slot = c.next(slot);
+                continue;
             }
 
             const i: u32 = @intCast(id);

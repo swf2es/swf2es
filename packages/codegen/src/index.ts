@@ -647,7 +647,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // a fresh instance, which is the same domain by determinism and takes
   // the dead one's place; the call that panicked is left out. If the replay
   // panics too, or a compile's log cannot be replayed, there is no second
-  // attempt: the compiler is dead, and every call throws.
+  // attempt: the domain is lost (see fresh).
   type Entry =
     | {
         kind: "add";
@@ -784,6 +784,9 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
             entry.abc = EMPTY_ABC;
           } else {
             journal.delete(entry);
+            if (entry.kind === "restore") {
+              restores.delete(entry.index);
+            }
           }
         }
       }
@@ -832,15 +835,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           break;
         }
         case "log": {
-          // Refused where its ABC's domain is not live (evicted since):
-          // nothing compiles against it until a revival, which a rebuild
-          // relinks from what it found. Any other refusal is a divergence.
+          // Any refusal is a divergence: recovery fails, and the domain is lost.
           const w = entry.words;
           for (let i = 0; i < w.length; i += 4) {
-            if (
-              !into.replayEntry(w[i], w[i + 1], w[i + 2], w[i + 3]) &&
-              into.domainState(abcDomains[w[i + 1]] ?? -1) === 0
-            ) {
+            if (!into.replayEntry(w[i], w[i + 1], w[i + 2], w[i + 3])) {
               throw new Error(`a compile's log did not replay for ABC ${w[i + 1]}`);
             }
           }
@@ -1005,15 +1003,13 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           if (error !== 0) {
             throw new Error(`ABC ${index}: not of an evicted domain, or rejected (${error})`);
           }
-          // One restore an ABC: a revival retried gives its bytes again.
-          const known = restores.get(index);
-          if (known) {
-            journal.delete(known);
+          // One restore an ABC, the first: a revival retried gives its
+          // bytes again, which the compiler, holding them, does not take.
+          if (!restores.has(index)) {
+            const entry: Entry = { kind: "restore", index, bytes: owned };
+            restores.set(index, entry);
+            journaled(entry, abcDomains[index]);
           }
-
-          const entry: Entry = { kind: "restore", index, bytes: owned };
-          restores.set(index, entry);
-          journaled(entry, abcDomains[index]);
         }
 
         revived = wasm.domainRevive(appDomain, true);
@@ -1178,6 +1174,12 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         lost = true;
       }
 
+      // The player drops a domain from a FinalizationRegistry's callback,
+      // where a throw would go nowhere: a lost domain has none to drop.
+      if (lost && name === "dropDomain") {
+        return undefined;
+      }
+
       if (lost && !domainless) {
         throw new Error(
           `${name}: the compiler's domain was lost to a panic it could not recover from; reset it`,
@@ -1197,8 +1199,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         }
 
         if (!recover()) {
+          // A reset that panicked too: what the wrapper keeps of the domain
+          // (its ABCs, journal, checkpoint and API version) is the dead one's.
           fresh();
-          lost = name !== "reset";
+          lost = true;
           throw new Error(
             `${name}: ${error.message}; the compiler went on in a new instance, its domain lost`,
           );

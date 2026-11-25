@@ -724,9 +724,10 @@ revivals, findings, and for each compile the log entries it fixed
 (`domainLogMark` and `domainLogSince`, as `compileModuleLogged` takes
 them). A fresh instance replays it, adds then `domainReplay` for the
 compiles, and is the same domain by determinism; the load that panicked
-is left out. If the replay itself panics or traps, there is no second
-attempt: the compiler is dead for the page, and every call throws, as
-asc's compiler after a trap. Dropping a domain leaves placeholders for its ABC
+is left out. If the replay itself panics or traps, or a compile's log
+does not replay, there is no second attempt: the domain is lost, and a
+fresh instance goes on for a reset and the calls that read no domain,
+the domain's throwing until the next reset. Dropping a domain leaves placeholders for its ABC
 indices. Ancestor resolutions survive a child being dropped. A successful
 rebuild replaces the earlier journal with a checkpoint. Its retained
 bytes and the measured journal size are described in stage 6 below. Running out of memory is not a panic: it is
@@ -1035,8 +1036,8 @@ Stage 6 (the exports and lifetimes), as built:
   callable after a trap. A finding of an ABC outside the finder's chain,
   which the player never reports, is not journaled, as its replay can
   part from the compile (the compiler takes it unchecked, as
-  AssemblyScript's does); a compile's log entry against an ABC whose
-  domain has since been evicted is skipped on replay.
+  AssemblyScript's does). A compile's log entry that does not replay
+  fails the recovery, and the domain is lost.
 - *Writes outside put.* A stepped verifier truncates its log entry in a
   later call than the one that added it, and a push in the same call may
   write over that row: a rollback writes it back (`Domain.truncated`).
@@ -1051,8 +1052,10 @@ Stage 6 (the exports and lifetimes), as built:
   are packed, a run of one domain's ABCs to a typed array, so that a
   log entry takes its 16 bytes and about 9 more of JavaScript heap (the
   libraries' 8,023 entries: 0.07 MiB of heap), where the review measured
-  94 bytes an entry with an object each. A restore is kept once an ABC
-  however often a revival is retried. Memory shared in time by the old
+  94 bytes an entry with an object each. The 9 bytes are for one long
+  run; many short runs, as compiles that log a few entries each make,
+  cost a typed array and an object each. A restore is kept once an ABC,
+  the first, however often a revival is retried. Memory shared in time by the old
   and spare instances is separate.
 
 *Compaction pauses, measured* (after the review asked whether Zig's
