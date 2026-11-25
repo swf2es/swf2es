@@ -212,9 +212,9 @@ fn genDigits(s: *State, buffer: []u8, w_frc: u64, mp_frc: u64, mp_exp: i32, delt
         kappa -= 1;
         if (p2 < delta) {
             s.K += kappa;
-            // As the repository's patch to AssemblyScript reads it
-            // (patches/assemblyscript@0.28.20.patch): past the table's ten
-            // powers, 0, which leaves the last digit unrounded.
+            // As the repository patched AssemblyScript to read it (its
+            // patches/ at zig-last-parity): past the table's ten powers, 0,
+            // which leaves the last digit unrounded.
             const index = -kappa;
             wp_w_frc = if (index < 10) wp_w_frc *% POWERS10[@intCast(index)] else 0;
             grisuRound(buffer, len, delta, p2, one_frc, wp_w_frc);

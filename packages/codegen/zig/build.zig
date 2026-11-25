@@ -1,15 +1,15 @@
 // The compiler in Zig (docs/zig-codegen.md), built by build.ts with the
 // pinned Zig into zig-out/bin/:
 //
-//   - codegen-zig.wasm, the compiler, ReleaseSafe: every index, cast and
+//   - codegen.wasm, the compiler, ReleaseSafe: every index, cast and
 //     overflow checked, a failed check a panic (src/panic.zig);
-//   - testing-zig.wasm, the test build: the same with the tests' exports
-//     (src/testing.zig), as assembly/testing.ts is to assembly/index.ts;
-//   - testing-zig-poison.wasm, the test build filling every freed run and
+//   - testing.wasm, the test build: the same with the tests' exports
+//     (src/testing.zig);
+//   - testing-poison.wasm, the test build filling every freed run and
 //     rolled-back allocation with 0xAA, which must give the same output.
 //
 // `zig build test` runs every file's inline tests natively, once as each
-// build allocates; `zig build names` writes codegen-zig-names.wasm, the
+// build allocates; `zig build names` writes codegen-names.wasm, the
 // compiler with the name section, so that a trap's stack names functions.
 const std = @import("std");
 
@@ -124,15 +124,15 @@ pub fn build(b: *std.Build) void {
         .cpu_features_add = std.Target.wasm.featureSet(&.{ .bulk_memory, .nontrapping_fptoint, .sign_ext, .mutable_globals }),
     });
 
-    b.installArtifact(module(b, target, "codegen-zig", "src/root.zig", &exports, false, true));
-    b.installArtifact(module(b, target, "testing-zig", "src/testing.zig", &testing_exports, false, true));
-    b.installArtifact(module(b, target, "testing-zig-poison", "src/testing.zig", &testing_exports, true, true));
+    b.installArtifact(module(b, target, "codegen", "src/root.zig", &exports, false, true));
+    b.installArtifact(module(b, target, "testing", "src/testing.zig", &testing_exports, false, true));
+    b.installArtifact(module(b, target, "testing-poison", "src/testing.zig", &testing_exports, true, true));
 
     // The release build with probes reaching what later stages will reach from its exports, for measuring.
-    const probe = b.addInstallArtifact(module(b, target, "codegen-zig-probe", "src/probe.zig", &(exports ++ [_][]const u8{"probeVerify"}), false, true), .{});
+    const probe = b.addInstallArtifact(module(b, target, "codegen-probe", "src/probe.zig", &(exports ++ [_][]const u8{"probeVerify"}), false, true), .{});
     b.step("probe", "Build the release with probes, to measure its size as the port goes").dependOn(&probe.step);
 
-    const names = b.addInstallArtifact(module(b, target, "codegen-zig-names", "src/root.zig", &exports, false, false), .{});
+    const names = b.addInstallArtifact(module(b, target, "codegen-names", "src/root.zig", &exports, false, false), .{});
     b.step("names", "Build the compiler with the name section").dependOn(&names.step);
 
     const test_step = b.step("test", "Run the inline tests natively, as each build allocates");

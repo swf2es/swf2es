@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import { KeyChains, type KeyLog } from "@swf2es/codegen";
 import { containerEngine, libraries, runOracle } from "../../oracle/oracle.ts";
 import { classes, GETTER, METHOD, mn, OVERRIDE, SLOT } from "../unit/codegen/link-cases.ts";
-import { loadTesting } from "../unit/codegen/testing-module.ts";
+import { loadTesting, TESTED } from "../unit/codegen/testing-module.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
@@ -162,14 +162,13 @@ const random = generator(seed);
 const below = (n: number) => Math.floor(random() * n);
 const pick = <T>(list: T[]) => list[below(list.length)];
 
-const build = process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test";
 // The subject is now and then rebuilt in a new instance, which takes its place (moved).
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
-let current: any = await loadTesting(build);
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+// biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
+let current: any = await loadTesting(TESTED);
+// biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
 const subject: any = new Proxy({}, { get: (_, name) => current[name] });
-const reference = await loadTesting(build);
-const elsewhere = await loadTesting(build);
+const reference = await loadTesting(TESTED);
+const elsewhere = await loadTesting(TESTED);
 for (const t of [subject, reference, elsewhere]) {
   t.domainReset(50);
   for (const r of roots) {
@@ -193,7 +192,7 @@ const counts = { compiles: 0, drops: 0, evictions: 0, revivals: 0, rebuilds: 0, 
 const decoder = new TextDecoder();
 
 /** What KeyChains asks of an instance; without `inherit`, each domain's chain starts from nothing. */
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+// biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
 function keyLog(t: any, inherit = true): KeyLog {
   return {
     header: (index) => decoder.decode(t.domainKeyHeaderBytes(index)),
@@ -209,7 +208,7 @@ const elsewhereChains = new KeyChains(keyLog(elsewhere));
 let alike = 0;
 
 /** Ask both the same; they must answer alike. */
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+// biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
 function both<T>(ask: (t: any) => T): T {
   const answer = ask(subject);
   if (answer !== ask(reference)) {
@@ -265,7 +264,7 @@ function keys(step: number, i: number): void {
   }
 
   // Alike where the reference's context is the third instance's, the ABCs' indices aside.
-  // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+  // biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
   const placed = (t: any, c: KeyChains, j: number, after: number) => {
     const context: string = t.domainContext(j, after);
     const key = c.context(j, after);
@@ -377,7 +376,7 @@ function begun<T>(start: () => T): T {
  * does: 1 if done, -1 if it failed.
  */
 async function moved(): Promise<number> {
-  const next = await loadTesting(build);
+  const next = await loadTesting(TESTED);
   const out = (address: number) =>
     new Uint8Array(current.memory.buffer, address, current.outputLength()).slice();
   next.domainPartBudget(budget());
@@ -566,13 +565,6 @@ for (; step < steps && failures.length === 0; step++) {
 
       counts.findings++;
     }
-  }
-
-  // Let the subject's garbage go now and then, as a host does between calls.
-  if (step % 16 === 0) {
-    subject.__collect();
-    reference.__collect();
-    elsewhere.__collect();
   }
 }
 

@@ -1,5 +1,4 @@
-// Structured method bodies for the verifier, from the review of stage 4's
-// differential fuzz: five bodies an ABC of statements that branch, switch,
+// Structured method bodies for the verifier, seeds of abc.ts: five bodies an ABC of statements that branch, switch,
 // throw and catch, call, construct, get and set properties, push and pop
 // scopes and create functions and classes, with handlers over random
 // ranges and a few raw mutations, linked after the builtins.

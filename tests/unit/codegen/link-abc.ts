@@ -7,8 +7,8 @@
 // whose strings, namespaces and members each outgrow an id table's first
 // 64 slots in the one call that links it; and the user one creating its
 // class, for the verifier.
-import { abc, tables, u30 } from "../unit/codegen/abc-builder.ts";
-import { classes, GETTER, METHOD, mn, OVERRIDE, SETTER, SLOT } from "../unit/codegen/link-cases.ts";
+import { abc, tables, u30 } from "./abc-builder.ts";
+import { classes, GETTER, METHOD, mn, OVERRIDE, SETTER, SLOT } from "./link-cases.ts";
 
 const INTERFACE = 0x04;
 const CONST = 6;

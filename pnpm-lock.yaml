@@ -4,11 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  assemblyscript@0.28.20:
-    hash: 54e8b4bbf0c3f4ecd4b62bd8dfddf3c6a6b12fdb46086cf12893ec357b326e0f
-    path: patches/assemblyscript@0.28.20.patch
-
 importers:
 
   .:
@@ -95,10 +90,6 @@ importers:
       '@swf2es/format':
         specifier: workspace:*
         version: link:../format
-    devDependencies:
-      assemblyscript:
-        specifier: ^0.28.20
-        version: 0.28.20(patch_hash=54e8b4bbf0c3f4ecd4b62bd8dfddf3c6a6b12fdb46086cf12893ec357b326e0f)
 
   packages/context3d: {}
 
@@ -207,11 +198,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/codegen
 
-  tests/libraries: {}
-
-  tests/packages: {}
-
-  tests/parity:
+  tests/golden:
     dependencies:
       '@swf2es/codegen':
         specifier: workspace:*
@@ -219,6 +206,10 @@ importers:
       '@swf2es/player':
         specifier: workspace:*
         version: link:../../packages/player
+
+  tests/libraries: {}
+
+  tests/packages: {}
 
   tests/player:
     dependencies:
@@ -1211,11 +1202,6 @@ packages:
     resolution: {integrity: sha512-COROpnaoap1E2F000S62r6A60uHZnmlvomhfyT2DlTcrY1OrBKn2UhH7qn5wTC9zMvD0AY7csdPSNwKP+7WiQw==}
     engines: {node: '>= 0.4'}
 
-  assemblyscript@0.28.20:
-    resolution: {integrity: sha512-5PM7GZpvcLypHcLmi30aP8mqm5HjU+LL3BdV1xDyA3USGtL2w+iMiUnhtH+vW8+2kOuHlAyPu7M+QgyEw5he1g==}
-    engines: {node: '>=20', npm: '>=10'}
-    hasBin: true
-
   astro-expressive-code@0.44.3:
     resolution: {integrity: sha512-LUpQmmvzr90JXP5QIAopgdjlOKLuT3x0wlPAUpc4OZtPtFS8sbflPcGPpL/lG3pQuUCQV2CXUFgYNBYNu9tphA==}
     peerDependencies:
@@ -1243,10 +1229,6 @@ packages:
 
   bcp-47@2.1.2:
     resolution: {integrity: sha512-wsv86UuNFuPnVieKLyECTT+CP1WSAHeoIg5P3xu2kA9Z+7fVPoKt7dxzSeEhtJel0AI+NW3fIW3KtTKQKUCngg==}
-
-  binaryen@131.0.0-nightly.20260721:
-    resolution: {integrity: sha512-AAQIkhfbYXh4FBObwBrlO+5L+6Rp6OOMOjh6AdT0M+GLNLyrwKWgtW+EzmizNgx9CWDfTJPfDtKoZi62QESbtg==}
-    hasBin: true
 
   boolbase@1.0.0:
     resolution: {integrity: sha512-JZOSA7Mo9sNGB8+UjSgzdLtokWAky1zbztM3WRLCbZ70/3cTANmQmOdR7y2g+J0e2WXywy1yS468tY+IruqEww==}
@@ -1622,9 +1604,6 @@ packages:
   lightningcss@1.33.0:
     resolution: {integrity: sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA==}
     engines: {node: '>= 12.0.0'}
-
-  long@5.3.2:
-    resolution: {integrity: sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA==}
 
   longest-streak@3.1.0:
     resolution: {integrity: sha512-9Ri+o0JYgehTaVBBDoMqIl8GXtbWg711O3srftcHhZ0dqnETqLaoIK0x17fUw9rFSlK/0NlsKe0Ahhyl5pXE2g==}
@@ -2961,11 +2940,6 @@ snapshots:
 
   aria-query@5.3.2: {}
 
-  assemblyscript@0.28.20(patch_hash=54e8b4bbf0c3f4ecd4b62bd8dfddf3c6a6b12fdb46086cf12893ec357b326e0f):
-    dependencies:
-      binaryen: 131.0.0-nightly.20260721
-      long: 5.3.2
-
   astro-expressive-code@0.44.3(astro@7.4.7(@types/node@24.19.0)(yaml@2.9.1)):
     dependencies:
       astro: 7.4.7(@types/node@24.19.0)(yaml@2.9.1)
@@ -3072,8 +3046,6 @@ snapshots:
       is-alphabetical: 2.0.1
       is-alphanumerical: 2.0.1
       is-decimal: 2.0.1
-
-  binaryen@131.0.0-nightly.20260721: {}
 
   boolbase@1.0.0: {}
 
@@ -3439,8 +3411,6 @@ snapshots:
       lightningcss-linux-x64-musl: 1.33.0
       lightningcss-win32-arm64-msvc: 1.33.0
       lightningcss-win32-x64-msvc: 1.33.0
-
-  long@5.3.2: {}
 
   longest-streak@3.1.0: {}
 

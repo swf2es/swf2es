@@ -1,23 +1,15 @@
 /**
  * Compiles ABC and AVM1 bytecode to ES modules.
  *
- * The compiler itself is AssemblyScript (assembly/), built to codegen.wasm,
- * or, while it is ported (docs/zig-codegen.md), Zig (zig/), built to
- * codegen-zig.wasm, which zig.ts gives the same exports as asc's glue.
- * This wrapper instantiates either and gives its exports their types. The same wasm runs as the browser JIT
+ * The compiler itself is Zig (zig/), built to codegen.wasm, whose exports
+ * zig.ts binds. This wrapper instantiates it and gives its exports their
+ * types. The same wasm runs as the browser JIT
  * (a module per ABC as its SWF loads) and as the ahead-of-time compiler,
  * so both produce identical output. See docs/architecture/overview.md.
  */
 import { AIR_API_VERSION, API_VERSION, checkApiVersion, isAirApiVersion } from "@swf2es/format";
-import { instantiate } from "./codegen.js";
 import { KeyChains, type KeyContext } from "./keys.js";
-import {
-  CodegenOutOfMemory,
-  CodegenPanic,
-  instantiate as instantiateZig,
-  type RecoveryExports,
-  recoveryInstance,
-} from "./zig.js";
+import { CodegenOutOfMemory, CodegenPanic, instantiate, recoveryInstance } from "./zig.js";
 
 export { KeyChains, type KeyContext, type KeyLog } from "./keys.js";
 export { hex, sha256Here } from "./sha256.js";
@@ -375,18 +367,10 @@ export interface Codegen {
 /**
  * Instantiate the compiler from a compiled codegen.wasm module. Loading the
  * bytes is left to the caller (fetch in browsers, fs in node), which keeps
- * this package free of I/O. The file ships as `@swf2es/codegen/codegen.wasm`,
- * and the compiler in Zig, while it is ported, as
- * `@swf2es/codegen/codegen-zig.wasm`, told apart by what it exports.
+ * this package free of I/O. The file ships as `@swf2es/codegen/codegen.wasm`.
  */
 export async function createCodegen(module: WebAssembly.Module): Promise<Codegen> {
-  const exported = WebAssembly.Module.exports(module).map((e) => e.name);
-  // Zig's compiler stages a call's arrays at its `input`, where asc's glue
-  // lowers them itself. One whose port has not reached an export throws
-  // when it is called.
-  const zig = exported.includes("input");
-  const make: typeof instantiate = zig ? instantiateZig : instantiate;
-  let wasm = await make(module, { env: {} });
+  let wasm = await instantiate(module);
   const version = wasm.compilerVersion();
   if (version !== COMPILER_VERSION) {
     throw new Error(
@@ -394,32 +378,6 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     );
   }
 
-  // Of the same version, but built before its modules were handed out in
-  // place: its *Bytes exports return copies, which this wrapper cannot read.
-  // Asked of the module, as the bindings define every export they know of.
-  if (!zig && !exported.includes("outputLength")) {
-    throw new Error(
-      "codegen.wasm has no outputLength export, which the wrapper expects: it is older than the wrapper",
-    );
-  }
-
-  // Or before it wrote a module a part at a time, or rebuilt its domain a
-  // part at a time and in another instance.
-  for (const name of ["domainModuleMoreBytes", "domainRebuildStep", "domainSaveBytes"]) {
-    if (!zig && !exported.includes(name)) {
-      throw new Error(
-        `codegen.wasm has no ${name} export, which the wrapper expects: it is older than the wrapper`,
-      );
-    }
-  }
-
-  // codegen.wasm uses AssemblyScript's minimal runtime, which collects
-  // garbage only when asked. Nothing runs in wasm between calls, so that is
-  // when: every COLLECT_EVERY calls, and after a call that grew memory.
-  // Memory never shrinks, so collecting only on growth would let each
-  // cycle's garbage grow it a little further.
-  let size = wasm.memory.buffer.byteLength;
-  let calls = 0;
   // Whether the domain has an ABC to compile: asking before is a mistake worth a message, not a trap.
   let added = 0;
   const last = (what: string) => {
@@ -442,7 +400,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     // compile took megabytes of codegen's memory a few thousand loads on.
     const at = indexOf(index);
     const own = at < 0 ? added - 1 : at;
-    const linked = collected(wasm.domainLinked(at));
+    const linked = wasm.domainLinked(at);
     const named = [hashes[own] ?? ""];
     for (const i of linked ? linked.split(",") : []) {
       named.push(hashes[Number(i)] ?? "");
@@ -451,17 +409,16 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     // Its bytes decoded here: lifted as a string, a module of megabytes took
     // longer than compiling it. The emitter writes only ASCII, which decodes
     // alike either way, and to a string the engine keeps a byte a character.
-    // A large ABC's module comes a part at a time, each part's garbage
-    // collected before the next is written (see domainModuleBytes).
+    // A large ABC's module comes a part at a time, each part's arena given
+    // back as the next is written (see domainModuleBytes).
     const parts = [
       handed(wasm.domainModuleBytes(named.join("\n"), at, keep, true), wasm.outputLength()),
     ];
     while (!wasm.domainModuleDone()) {
-      wasm.__collect();
       parts.push(handed(wasm.domainModuleMoreBytes(), wasm.outputLength()));
     }
 
-    const module = collected(parts.length === 1 ? parts[0] : parts.join(""), parts.length > 1);
+    const module = parts.length === 1 ? parts[0] : parts.join("");
     if (module === "") {
       throw new Error(`ABC ${index}: its application domain was dropped`);
     }
@@ -469,7 +426,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     return module;
   };
   const compiled = (hashes: string[], index: number, keep: boolean) =>
-    zig ? recordChanges(() => moduleOf(hashes, index, keep)) : moduleOf(hashes, index, keep);
+    recordChanges(() => moduleOf(hashes, index, keep));
   const ranges = (actions: ActionBlocks) =>
     [
       Int32Array.from(actions.blocks, (b) => b.offset),
@@ -529,11 +486,11 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   const actionsModule = (bytes: Uint8Array, actions: ActionBlocks, keep: boolean) => {
     const [offsets, lengths] = ranges(actions);
     const address = wasm.actionsModuleBytes(bytes, offsets, lengths, actions.version, keep);
-    return collected(handed(address, wasm.outputLength()));
+    return handed(address, wasm.outputLength());
   };
   // UTF-8 a call handed out in codegen's memory, not copied (see handOut in
-  // assembly/output.ts), decoded before anything else calls in: the next
-  // call may grow memory or move them, and a collection may free them.
+  // zig/src/root.zig), decoded before anything else calls in: the next
+  // call may grow memory, and gives the last one's arena back.
   const handed = (address: number, length: number) =>
     length === 0 ? "" : utf8.decode(new Uint8Array(wasm.memory.buffer, address, length));
   const stamps = WebAssembly.Module.customSections(module, "swf2es.build");
@@ -576,9 +533,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     return { state, abcs };
   };
   const loadCheckpoint = (into: typeof wasm, saved: Checkpoint, recovery: boolean) => {
-    const loaded = recovery
-      ? (into as RecoveryExports).loadCheckpointState(saved.state)
-      : into.domainLoad(saved.state);
+    const loaded = recovery ? into.loadCheckpointState(saved.state) : into.domainLoad(saved.state);
     if (!loaded) {
       return false;
     }
@@ -590,33 +545,26 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     return into.domainLoadRebuild();
   };
   // The rebuild domainCompact, domainRevive or domainLoadRebuild started in
-  // `into`, a part a call, each part's garbage collected before the next
-  // (see domainRebuildStep), and the old tables once it is done, before the
-  // next call's allocations would grow memory past them: whether it was done.
+  // `into`, a part a call, each part's arena given back as the next starts
+  // (see domainRebuildStep): whether it was done.
   const finishRebuild = (into: typeof wasm) => {
     let step = into.domainRebuildStep();
     while (step === 0) {
-      into.__collect();
       step = into.domainRebuildStep();
     }
 
-    into.__collect();
-    if (into === wasm) {
-      size = into.memory.buffer.byteLength;
-      calls = 0;
-    }
     return step > 0;
   };
   const rebuild = (into = wasm, saved: Checkpoint | null = null, optional = false) => {
     let done: boolean;
     try {
-      if (zig && !saved) {
+      if (!saved) {
         saved = saveCheckpoint();
       }
       done = finishRebuild(into);
     } catch (error) {
-      if (zig && !(error instanceof CodegenPanic)) {
-        (into as RecoveryExports).abandonRebuild();
+      if (!(error instanceof CodegenPanic)) {
+        into.abandonRebuild();
         if (optional && error instanceof CodegenOutOfMemory) {
           return false;
         }
@@ -649,7 +597,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   const prepare = () => {
     if (spare === null && !making) {
       making = true;
-      make(module, { env: {} }).then(
+      instantiate(module).then(
         (made) => {
           spare = made;
           making = false;
@@ -661,37 +609,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     }
   };
   // The domain rebuilt in `into`, a new instance, from what this one saves
-  // of it and its live ABCs' bytes, read where they are: whether it was. The
-  // ABCs' copies in it are its garbage once parsed, collected every few
-  // megabytes.
+  // of it and its live ABCs' bytes, read where they are: whether it was.
   const rebuiltIn = (into: typeof wasm) => {
-    if (zig) {
-      const saved = saveCheckpoint();
-      return loadCheckpoint(into, saved, false) && rebuild(into, saved);
-    }
-
-    const saved = wasm.domainSaveBytes();
-    if (!into.domainLoad(new Uint8Array(wasm.memory.buffer, saved, wasm.outputLength()))) {
-      return false;
-    }
-
-    into.__collect();
-    let copied = 0;
-    for (let i = 0; i < added; i++) {
-      const at = wasm.domainSavedAbcBytes(i);
-      const length = wasm.outputLength();
-      if (at !== 0 && into.domainLoadAbc(i, new Uint8Array(wasm.memory.buffer, at, length)) !== 0) {
-        return false;
-      }
-
-      copied += length;
-      if (copied >= COPIED_BETWEEN_COLLECTIONS) {
-        into.__collect();
-        copied = 0;
-      }
-    }
-
-    return into.domainLoadRebuild() && rebuild(into);
+    const saved = saveCheckpoint();
+    return loadCheckpoint(into, saved, false) && rebuild(into, saved);
   };
   // The domain rebuilt in the spare instance, which then takes this one's
   // place, whose memory goes with it: whether it was. One that failed, or
@@ -713,19 +634,15 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
     if (!done) {
       failedMoves++;
-      size = wasm.memory.buffer.byteLength;
       return false;
     }
 
     // The held SWFs' copies were the old instance's (see hold).
     holds.length = 0;
     wasm = into;
-    size = wasm.memory.buffer.byteLength;
-    calls = 0;
     return true;
   };
-  // Zig's compiler panics, where AssemblyScript's would trap, and its
-  // instance is dead (CodegenPanic). Recovery reads nothing of it: the calls
+  // When the compiler panics, its instance is dead (CodegenPanic). Recovery reads nothing of it: the calls
   // that changed the domain are journaled here, in order, and replayed into
   // a fresh instance, which is the same domain by determinism and takes
   // the dead one's place; the call that panicked is left out. If the replay
@@ -759,10 +676,6 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   const abcDomains: number[] = [];
   let replayable = true;
   const journaled = (entry: Entry, owner = 0) => {
-    if (!zig) {
-      return;
-    }
-
     const id = owner | 0;
     if (id !== 0) {
       const domain = journalDomains.get(id);
@@ -779,7 +692,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   };
   // The target is absolute so dropping a child preserves work its compiles did on its ancestors.
   const journalLog = (mark: number) => {
-    const at = (wasm as RecoveryExports).journalBytes(mark);
+    const at = wasm.journalBytes(mark);
     if (at === 0) {
       return false;
     }
@@ -925,7 +838,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           const w = entry.words;
           for (let i = 0; i < w.length; i += 4) {
             if (
-              !(into as RecoveryExports).replayEntry(w[i], w[i + 1], w[i + 2], w[i + 3]) &&
+              !into.replayEntry(w[i], w[i + 1], w[i + 2], w[i + 3]) &&
               into.domainState(abcDomains[w[i + 1]] ?? -1) === 0
             ) {
               throw new Error(`a compile's log did not replay for ABC ${w[i + 1]}`);
@@ -935,8 +848,6 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           break;
         }
       }
-
-      into.__collect();
     }
   };
   const recover = (): boolean => {
@@ -961,27 +872,14 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     holds.length = 0;
     chains.clear();
     wasm = into;
-    size = wasm.memory.buffer.byteLength;
-    calls = 0;
     return true;
   };
-  const collected = <T>(result: T, reclaim = false): T => {
-    const grown = wasm.memory.buffer.byteLength;
-    if (reclaim || grown > size || ++calls >= COLLECT_EVERY) {
-      wasm.__collect();
-      size = grown;
-      calls = 0;
-    }
-
-    return result;
-  };
-
   // Whether the domain was lost to a panic recovery could not undo (see fresh).
   let lost = false;
   const api: Codegen = {
     identity,
     abcVersion(abc) {
-      const packed = collected(wasm.abcVersion(abc));
+      const packed = wasm.abcVersion(abc);
       return packed < 0 ? null : { major: packed >>> 16, minor: packed & 0xffff };
     },
     get epoch() {
@@ -989,7 +887,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     },
     reset(version = API_VERSION) {
       checkApiVersion(version);
-      collected(wasm.domainReset(version));
+      wasm.domainReset(version);
       added = 0;
       epoch++;
       revisionEpoch++;
@@ -1006,13 +904,13 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       return apiVersion;
     },
     add(abc, builtin = false, appDomain = 0) {
-      const bytes = zig ? new Uint8Array(abc) : abc;
-      const error = collected(wasm.domainAdd(bytes, builtin, appDomain));
+      const bytes = new Uint8Array(abc);
+      const error = wasm.domainAdd(bytes, builtin, appDomain);
       if (error < 0) {
         throw new Error(`application domain ${appDomain}: never made, or dropped`);
       }
 
-      if (zig && (error === 0 || (wasm as RecoveryExports).lastAddLinked())) {
+      if (error === 0 || wasm.lastAddLinked()) {
         if (error === 0) {
           abcDomains.push(appDomain);
         }
@@ -1035,40 +933,38 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       return error;
     },
     childDomain(parent) {
-      const domain = collected(wasm.domainChild(parent));
+      const domain = wasm.domainChild(parent);
       if (domain < 0) {
         throw new Error(`application domain ${parent}: never made, or dropped`);
       }
 
-      if (zig) {
-        const owner = journalDomains.get(parent | 0);
-        const child = { id: domain, parent: owner };
-        if (owner) {
-          owner.children ??= new Set();
-          owner.children.add(child);
-        }
-
-        journalDomains.set(domain, child);
-        journaled({ kind: "child", parent });
+      const owner = journalDomains.get(parent | 0);
+      const child = { id: domain, parent: owner };
+      if (owner) {
+        owner.children ??= new Set();
+        owner.children.add(child);
       }
+
+      journalDomains.set(domain, child);
+      journaled({ kind: "child", parent });
+
       return domain;
     },
     dropDomain(appDomain, of = epoch) {
       if (of === epoch) {
-        collected(wasm.domainDrop(appDomain));
+        wasm.domainDrop(appDomain);
         journaled({ kind: "drop", appDomain });
-        if (zig) {
-          forgetDropped(appDomain);
-        }
+        forgetDropped(appDomain);
+
         chains.forget((d) => wasm.domainState(d) === 2);
       }
     },
     evictDomain(appDomain) {
-      collected(wasm.domainEvict(appDomain));
+      wasm.domainEvict(appDomain);
       journaled({ kind: "evict", appDomain });
     },
     usage() {
-      const [live, dead, memory] = collected(wasm.domainUsage()).split(" ").map(Number);
+      const [live, dead, memory] = wasm.domainUsage().split(" ").map(Number);
       return { live, dead, memory, failedMoves };
     },
     memoryBytes() {
@@ -1078,57 +974,49 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       // Done in the spare instance, once there is one and that would take
       // less memory, or in place would not fit; else in place, where the
       // new tables are made while the old are live, only where they fit
-      // and, beside a spare made or being made, a move would not do better:
-      // what earlier calls left is collected first, and the old tables once
-      // it is done, before the next call's allocations would grow memory
-      // past them.
-      if (spare === null && !making && collected(wasm.domainWantsCompact(WANT_Spare))) {
+      // and, beside a spare made or being made, a move would not do better.
+      if (spare === null && !making && wasm.domainWantsCompact(WANT_Spare)) {
         prepare();
       }
 
-      if (spare !== null && collected(wasm.domainWantsCompact(WANT_Move))) {
-        wasm.__collect();
+      if (spare !== null && wasm.domainWantsCompact(WANT_Move)) {
         if (moved()) {
           return true;
         }
       }
 
       const beside = spare !== null || making;
-      if (!collected(wasm.domainWantsCompact(beside ? WANT_InPlaceBesideSpare : WANT_InPlace))) {
+      if (!wasm.domainWantsCompact(beside ? WANT_InPlaceBesideSpare : WANT_InPlace)) {
         return false;
       }
 
-      wasm.__collect();
-      calls = 0;
       return wasm.domainCompact(true) && rebuild(wasm, null, true);
     },
     isLive(appDomain) {
-      return collected(wasm.domainState(appDomain)) === 0;
+      return wasm.domainState(appDomain) === 0;
     },
     reviveDomain(appDomain, abcs) {
       // Its ABCs' bytes are copied into the compiler only if a rebuild let go of them.
-      let revived = collected(wasm.domainRevive(appDomain, true));
+      let revived = wasm.domainRevive(appDomain, true);
       if (revived < 0) {
         for (const [index, bytes] of abcs) {
-          const owned = zig ? new Uint8Array(bytes) : bytes;
-          const error = collected(wasm.domainRestore(index, owned));
+          const owned = new Uint8Array(bytes);
+          const error = wasm.domainRestore(index, owned);
           if (error !== 0) {
             throw new Error(`ABC ${index}: not of an evicted domain, or rejected (${error})`);
           }
-          if (zig) {
-            // One restore an ABC: a revival retried gives its bytes again.
-            const known = restores.get(index);
-            if (known) {
-              journal.delete(known);
-            }
-
-            const entry: Entry = { kind: "restore", index, bytes: owned };
-            restores.set(index, entry);
-            journaled(entry, abcDomains[index]);
+          // One restore an ABC: a revival retried gives its bytes again.
+          const known = restores.get(index);
+          if (known) {
+            journal.delete(known);
           }
+
+          const entry: Entry = { kind: "restore", index, bytes: owned };
+          restores.set(index, entry);
+          journaled(entry, abcDomains[index]);
         }
 
-        revived = collected(wasm.domainRevive(appDomain, true));
+        revived = wasm.domainRevive(appDomain, true);
       }
 
       // Revived by a rebuild in place, mid-load: a compaction moves it later.
@@ -1144,11 +1032,11 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       }
     },
     found({ domain, nsKind, uri, name, abc, asType }) {
-      collected(wasm.domainFound(domain, nsKind, uri, name, abc, asType));
+      wasm.domainFound(domain, nsKind, uri, name, abc, asType);
       // A finding of an ABC outside the finder's chain, which the player
       // never reports, is not journaled: its replay can part from the
-      // compile (the compiler takes it unchecked, as AssemblyScript's does).
-      if (zig && inChain(abcDomains[abc] ?? -1, domain)) {
+      // compile (the compiler takes it unchecked).
+      if (inChain(abcDomains[abc] ?? -1, domain)) {
         journaled(
           { kind: "found", definition: { domain, nsKind, uri, name, abc, asType } },
           domain,
@@ -1157,11 +1045,11 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     },
     compile(hashes = [], index = -1) {
       last("compile");
-      // Each part a call of its own, collected after it: the module's garbage
-      // is gone before its entries are written.
+      // Each part a call of its own, whose arena the next gives back: the
+      // module's garbage is gone before its entries are written.
       const module = compiled(hashes, index, true);
-      const sourceMap = collected(wasm.domainSourceMap());
-      const entries = parseEntries(collected(wasm.domainModuleEntries()));
+      const sourceMap = wasm.domainSourceMap();
+      const entries = parseEntries(wasm.domainModuleEntries());
       return { module, sourceMap, entries };
     },
     compileModule(hashes = [], index = -1) {
@@ -1174,7 +1062,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         return null;
       }
 
-      const text = collected(wasm.domainContext(indexOf(index), after, upTo));
+      const text = wasm.domainContext(indexOf(index), after, upTo);
       if (text === "") {
         return null;
       }
@@ -1193,7 +1081,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         return null;
       }
 
-      return collected(chains.context(indexOf(index), after));
+      return chains.context(indexOf(index), after);
     },
     revision() {
       return `${revisionEpoch} ${wasm.domainRevision()}`;
@@ -1202,19 +1090,19 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       last("compileModuleLogged");
       const mark = wasm.domainLogMark();
       const module = compiled(hashes, index, false);
-      const log = collected(wasm.domainLogSince(mark, indexOf(index)));
+      const log = wasm.domainLogSince(mark, indexOf(index));
       return { module, log: log === "!" ? null : log };
     },
     replay(log, index = -1) {
       last("replay");
-      const replay = () => collected(wasm.domainReplay(log, indexOf(index)));
-      return zig ? recordChanges(replay) : replay();
+      const replay = () => wasm.domainReplay(log, indexOf(index));
+      return recordChanges(replay);
     },
     compileActions(bytes, actions) {
       const module = actionsModule(bytes, actions, true);
-      const entries = parseEntries(collected(wasm.actionsModuleEntries()));
+      const entries = parseEntries(wasm.actionsModuleEntries());
       const units = new Map<string, ModuleUnit>();
-      for (const item of collected(wasm.actionsModuleUnits()).split("\u0002")) {
+      for (const item of wasm.actionsModuleUnits().split("\u0002")) {
         const [key, numbers, limits, code] = item.split("\u0001");
         if (code !== undefined) {
           const [at, end, bound, five] = numbers.split(",").map(Number);
@@ -1241,14 +1129,14 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       const address = wasm.actionsHeldEmitEachBytes(handle, actions.version, indices.join(","));
       const text = handed(address, wasm.outputLength());
       // A block's analysis can go before the next block runs.
-      return parseEntries(collected(text, true));
+      return parseEntries(text);
     },
     compileActionUnit(bytes, actions, { at, end, bound, five }) {
       const handle = hold(bytes, actions);
       const address = wasm.actionsHeldUnitBytes(handle, actions.version, at, end, bound, five);
       const code = handed(address, wasm.outputLength());
       const [high, reach] = wasm.actionsUnitLimits();
-      return collected({ code, high, reach });
+      return { code, high, reach };
     },
     releaseActions(bytes) {
       const known = holding.get(bytes);
@@ -1259,27 +1147,20 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       }
     },
     heldActions() {
-      return { held: collected(wasm.actionsHeldCount()), copies };
+      return { held: wasm.actionsHeldCount(), copies };
     },
   };
-  if (!zig) {
-    return api;
-  }
-
-  // Each method recovers from a panic of Zig's compiler (see recover): an
+  // Each method recovers from a panic of the compiler (see recover): an
   // ABC whose load panicked is rejected as a corrupt one is, and any other
   // call that panicked throws a plain Error, the compiler going on. Where
   // recovery cannot be, the domain is lost, but not the compiler: it goes
-  // on in a fresh instance, as AssemblyScript's stays callable after a
-  // trap, for a reset and what needs no domain (AVM1), and the domain's
-  // calls throw until the next reset.
+  // on in a fresh instance, for a reset and what needs no domain (AVM1),
+  // and the domain's calls throw until the next reset.
   const fresh = () => {
     wasm = spare ?? recoveryInstance(module);
     spare = null;
     holds.length = 0;
     chains.clear();
-    size = wasm.memory.buffer.byteLength;
-    calls = 0;
   };
   const descriptors = Object.getOwnPropertyDescriptors(api);
   for (const [name, descriptor] of Object.entries(descriptors)) {
@@ -1369,14 +1250,11 @@ function parseEntries(text: string): Map<number, string> {
   return entries;
 }
 
-const COLLECT_EVERY = 64;
-/** What domainWantsCompact is asked (see wantsRebuild in assembly/avm2/link/lifetime.ts). */
+/** What domainWantsCompact is asked (see wantsRebuild in zig/src/avm2/link/lifetime.zig). */
 const WANT_InPlace = 0;
 const WANT_InPlaceBesideSpare = 1;
 const WANT_Move = 2;
 const WANT_Spare = 3;
-/** How many bytes of ABCs a rebuild in the spare instance copies in between its collections. */
-const COPIED_BETWEEN_COLLECTIONS = 4 << 20;
 /** How many SWFs whose blocks or units are compiled codegen holds a copy of at most. */
 const HELD_SWFS = 4;
 

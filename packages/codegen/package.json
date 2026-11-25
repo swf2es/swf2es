@@ -1,7 +1,7 @@
 {
   "name": "@swf2es/codegen",
   "version": "0.1.35",
-  "description": "ABC and AVM1 bytecode to ES module compiler (AssemblyScript → wasm); identical output in JIT and AOT modes",
+  "description": "ABC and AVM1 bytecode to ES module compiler (Zig → wasm); identical output in JIT and AOT modes",
   "keywords": [
     "swf",
     "flash",
@@ -26,8 +26,7 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./codegen.wasm": "./dist/codegen.wasm",
-    "./codegen-zig.wasm": "./dist/codegen-zig.wasm"
+    "./codegen.wasm": "./dist/codegen.wasm"
   },
   "files": [
     "dist",
@@ -38,13 +37,8 @@
   "dependencies": {
     "@swf2es/format": "workspace:*"
   },
-  "devDependencies": {
-    "assemblyscript": "^0.28.20"
-  },
   "scripts": {
-    "build:wasm": "asc --config asconfig.json --target release && asc --config asconfig.testing.json --target release && node stamp.ts dist/codegen.wasm dist-test/codegen-as.wasm && node zig/build.ts",
-    "build:wasm:debug": "asc --config asconfig.json --target debug && asc --config asconfig.testing.json --target debug && node stamp.ts dist/codegen.wasm dist-test/codegen-as.wasm && node zig/build.ts",
-    "build:zig": "node zig/build.ts --update",
-    "build:wasm:checked": "asc --config asconfig.testing.json --target checked"
+    "build:wasm": "node zig/build.ts",
+    "build:zig": "node zig/build.ts --update"
   }
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { abc } from "./abc-builder.ts";
-import { type Build, loadTesting } from "./testing-module.ts";
+import { type Build, loadTesting, TESTED } from "./testing-module.ts";
 
 const POWERS10 = [1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000];
 
@@ -15,7 +15,7 @@ const PRINTED: [number, string][] = [
   [2396245078700000000, "2396245078700000500.0"],
 ];
 
-/** Where POWERS10 of AssemblyScript's number formatting is in `memory`, in words. */
+/** Where POWERS10 of the number formatting (zig/src/dtoa.zig) is in `memory`, in words. */
 function powers10(memory: WebAssembly.Memory): number {
   const words = new Uint32Array(memory.buffer);
   const found: number[] = [];
@@ -52,8 +52,8 @@ async function printed(build: Build): Promise<string[]> {
   return before;
 }
 
-test("doubles print without reading past AssemblyScript's table of powers of ten", async () => {
-  const text = await printed(process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test");
+test("doubles print without reading past the table of powers of ten", async () => {
+  const text = await printed(TESTED);
   assert.deepEqual(
     text,
     PRINTED.map(([, s]) => s),

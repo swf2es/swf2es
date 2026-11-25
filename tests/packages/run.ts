@@ -41,11 +41,7 @@ const project = join(work, "project");
 after(() => rmSync(work, { recursive: true, force: true }));
 
 /** What importing them in node cannot show: a binary, and a module that refuses outside a worker. */
-const NOT_IMPORTED = new Set([
-  "@swf2es/codegen/codegen.wasm",
-  "@swf2es/codegen/codegen-zig.wasm",
-  "@swf2es/player-hosts/node-worker",
-]);
+const NOT_IMPORTED = new Set(["@swf2es/codegen/codegen.wasm", "@swf2es/player-hosts/node-worker"]);
 
 interface Packed {
   /** Its folder under packages/. */

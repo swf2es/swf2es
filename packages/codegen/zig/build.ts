@@ -1,5 +1,5 @@
 // Builds the compiler in Zig (build.zig, docs/zig-codegen.md) with the
-// pinned Zig (tools/zig.ts): dist/codegen-zig.wasm, stamped with its
+// pinned Zig (tools/zig.ts): dist/codegen.wasm, stamped with its
 // identity as codegen.wasm is (stamp.ts), and the test builds in
 // dist-test/. The modules are not checked in. digests.json is: the digest
 // of their inputs, and of each module built from them, which the pinned
@@ -38,11 +38,11 @@ const digestsFile = join(here, "digests.json");
 
 /** Each module build.zig installs, and where in the package it goes. */
 const MODULES: Record<string, string> = {
-  "codegen-zig": "dist/codegen-zig.wasm",
-  "testing-zig": "dist-test/testing-zig.wasm",
-  "testing-zig-poison": "dist-test/testing-zig-poison.wasm",
+  codegen: "dist/codegen.wasm",
+  testing: "dist-test/testing.wasm",
+  "testing-poison": "dist-test/testing-poison.wasm",
 };
-const STAMPED = new Set(["codegen-zig"]);
+const STAMPED = new Set(["codegen"]);
 
 interface Digests {
   zig: string;

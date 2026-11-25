@@ -1,15 +1,15 @@
-// Malformed saved domains given to Zig's domainLoad (from the review of
-// stage 6), the ABCs and a rebuild after: a bad save fails the move
+// Malformed saved domains given to the compiler's domainLoad, the ABCs and
+// a rebuild after: a bad save fails the move
 // cleanly, refused or a rebuild that fails, and never panics.
 //
 //   node tests/fuzz/saved.ts [cases, 2000] [seed, 1]
 import { fileURLToPath } from "node:url";
 
 const TREE = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
-const { bindTesting, zigTestingModule } = await import(`${TREE}/tests/unit/codegen/zig-testing.ts`);
-const { linkAbcs } = await import(`${TREE}/tests/parity/link-abc.ts`);
+const { bindTesting, testingModule } = await import(`${TREE}/tests/unit/codegen/testing-module.ts`);
+const { linkAbcs } = await import(`${TREE}/tests/unit/codegen/link-abc.ts`);
 const { script } = await import(`${TREE}/tests/unit/codegen/ir-cases.ts`);
-const module = await zigTestingModule(false);
+const module = await testingModule("testing");
 const cases = Number(process.argv[2] ?? 2000);
 
 let seed = Number(process.argv[3] ?? 1);

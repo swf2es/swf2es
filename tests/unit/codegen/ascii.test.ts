@@ -1,5 +1,5 @@
 // Every module codegen writes is ASCII: a character past ASCII, in a string
-// constant, a name or a path, is a \u escape (assembly/output.ts), so that
+// constant, a name or a path, is a \u escape (zig/src/output.zig), so that
 // the engine keeps a module's source a byte a character. One character past
 // U+00FF anywhere in a module made V8 keep all of it two bytes a character.
 import assert from "node:assert/strict";

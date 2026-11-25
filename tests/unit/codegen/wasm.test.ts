@@ -21,29 +21,14 @@ test("codegen.wasm imports nothing but abort", () => {
   );
 });
 
-// Read named references so changing the shipping binary cannot compare a compiler with itself.
-const binary = (name: string) =>
-  readFile(new URL(`../../../packages/codegen/${name}`, import.meta.url));
-const zigModule = await WebAssembly.compile(await binary("dist/codegen-zig.wasm"));
-const asModule = await WebAssembly.compile(await binary("dist-test/codegen-as.wasm"));
-
-test("codegen-zig.wasm, the compiler in Zig, imports nothing but abort too", () => {
-  assert.deepEqual(
-    WebAssembly.Module.imports(zigModule).map((i) => `${i.module}.${i.name}`),
-    ["env.abort"],
-  );
-});
-
-test("createCodegen tells the compilers apart, whose identities differ so caches never mix", async () => {
-  const as = await createCodegen(asModule);
-  const zig = await createCodegen(zigModule);
-  assert.match(zig.identity ?? "", /^[0-9a-f]{64}$/);
-  assert.notEqual(zig.identity, as.identity);
-  assert.deepEqual(zig.abcVersion(Uint8Array.of(16, 0, 46, 0)), { major: 46, minor: 16 });
-  zig.reset();
-  assert.equal(zig.add(new Uint8Array(0)), 1107);
+test("createCodegen reads the build's identity, which caches key its modules by", async () => {
+  const codegen = await createCodegen(module);
+  assert.match(codegen.identity ?? "", /^[0-9a-f]{64}$/);
+  assert.deepEqual(codegen.abcVersion(Uint8Array.of(16, 0, 46, 0)), { major: 46, minor: 16 });
+  codegen.reset();
+  assert.equal(codegen.add(new Uint8Array(0)), 1107);
   // The wrapper counts the reset; the domain has no ABC, log entry or rebuild.
-  assert.equal(zig.revision(), "1 0 0 0");
+  assert.equal(codegen.revision(), "1 0 0 0");
 });
 
 test("wrapper and wasm agree on the compiler version", async () => {
@@ -366,12 +351,11 @@ test("a module's source map and entries are written when asked for, from it alon
 test("a module written a part at a time is the module written whole", { skip }, async () => {
   const builtin = new Uint8Array(await readFile(new URL("builtin.abc", generated)));
   const utf8 = new TextDecoder();
-  // Its parts, each next one asked for until it is done, garbage collected
-  // at every cut as the wrapper collects it.
+  // Its parts, each next one asked for until it is done, each call giving
+  // the last one's arena back.
   const parts = (hashes: string, index: number, keep: boolean) => {
     const got = [utf8.decode(testing.domainModuleBytes(hashes, index, keep, false))];
     while (!testing.domainModuleDone()) {
-      testing.__collect();
       got.push(utf8.decode(testing.domainModuleMoreBytes()));
     }
 

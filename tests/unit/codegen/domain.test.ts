@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
-import { COMPILER } from "../../compiler.ts";
 import { abc, tables, u30 } from "./abc-builder.ts";
 import {
   classes,
@@ -571,13 +570,12 @@ test("the first builtin ABC supplies the builtin types", {
   }
 });
 
-test("collecting garbage between calls keeps the domain and frees what was dropped", {
+test("each call giving the last one's memory back keeps the domain and frees what was dropped", {
   skip: !existsSync(generated) && "oracle/avmplus missing",
 }, () => {
   const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
   testing.domainReset(SWF_31);
   testing.domainAdd(builtin, true);
-  testing.__collect();
   assert.notEqual(find("", "Object"), "none");
   assert.match(testing.domainVerifyAll() as string, /^verified 630 of 630 bodies$/);
 
@@ -586,7 +584,6 @@ test("collecting garbage between calls keeps the domain and frees what was dropp
     testing.domainReset(SWF_31);
     testing.domainAdd(builtin, true);
     testing.domainVerifyAll();
-    testing.__collect();
   }
 
   const size = testing.memory.buffer.byteLength;
@@ -594,7 +591,6 @@ test("collecting garbage between calls keeps the domain and frees what was dropp
     testing.domainReset(SWF_31);
     testing.domainAdd(builtin, true);
     testing.domainVerifyAll();
-    testing.__collect();
   }
 
   assert.equal(testing.memory.buffer.byteLength, size);
@@ -626,8 +622,7 @@ test("dropping other domains changes no module, and memory stops growing", {
       ],
       true,
     );
-  const zig = COMPILER === "zig";
-  const loads = zig ? 2000 : 1000;
+  const loads = 2000;
   const run = () => {
     testing.domainReset(SWF_31);
     testing.domainAdd(builtin, true);
@@ -636,7 +631,6 @@ test("dropping other domains changes no module, and memory stops growing", {
     const module = testing.domainModule("b\nx", 1) as string;
 
     let compacted = 0;
-    let warmSize = 0;
     let atThousand = 0;
     for (let n = 1; n <= loads; n++) {
       const other = testing.domainChild(0) as number;
@@ -645,10 +639,6 @@ test("dropping other domains changes no module, and memory stops growing", {
       testing.domainDrop(other);
       if (testing.domainCompact()) {
         compacted++;
-        testing.__collect();
-      }
-      if (n === 250) {
-        warmSize = testing.memory.buffer.byteLength;
       }
 
       if (n === 1000) {
@@ -656,27 +646,22 @@ test("dropping other domains changes no module, and memory stops growing", {
       }
     }
 
-    if (zig) {
-      // Zig's memory grows by whole pages as domain and ABC indices are
-      // given out, about 220 bytes a load as measured: bounded per load.
-      assert.ok(compacted > 0);
-      const perLoad = (testing.memory.buffer.byteLength - atThousand) / (loads - 1000);
-      assert.ok(perLoad <= 512, `${perLoad} bytes a load from load 1,000 on`);
-    } else {
-      assert.equal(testing.memory.buffer.byteLength, warmSize);
-    }
+    // Memory grows by whole pages as domain and ABC indices are given out,
+    // about 220 bytes a load as measured: bounded per load.
+    assert.ok(compacted > 0);
+    const perLoad = (testing.memory.buffer.byteLength - atThousand) / (loads - 1000);
+    assert.ok(perLoad <= 512, `${perLoad} bytes a load from load 1,000 on`);
     assert.equal(testing.domainModule("b\nx", 1), module);
     return module;
   };
 
+  // Memory grows by pages as more domain and ABC indices are given out:
+  // equal sessions are compared.
   const module = run();
-  if (zig) {
-    // Zig grows by pages as it assigns more domain and ABC indices. Compare equal sessions.
-    assert.equal(run(), module);
-    const size = testing.memory.buffer.byteLength;
-    assert.equal(run(), module);
-    assert.equal(testing.memory.buffer.byteLength, size);
-  }
+  assert.equal(run(), module);
+  const size = testing.memory.buffer.byteLength;
+  assert.equal(run(), module);
+  assert.equal(testing.memory.buffer.byteLength, size);
 
   // As compiled in a domain that never had the others.
   testing.domainReset(SWF_31);
@@ -689,8 +674,8 @@ test("a compaction in place, a part at a time, never grows memory", {
   skip: !existsSync(generated) && "oracle/avmplus missing",
 }, () => {
   // With no spare instance to move to: the new tables made beside the old
-  // and the dead ones only where the three fit, each part's garbage
-  // collected before the next, as the wrapper does.
+  // and the dead ones only where the three fit, each part's arena given
+  // back as the next starts.
   const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
   testing.domainReset(SWF_31);
   testing.domainAdd(builtin, true);
@@ -700,17 +685,14 @@ test("a compaction in place, a part at a time, never grows memory", {
     assert.notEqual(testing.domainModule("", -1, false), "");
   }
 
-  if (COMPILER === "zig") {
-    // Release a previous workload to leave contiguous free runs beside the live ABCs.
-    const previous = testing.domainChild(main) as number;
-    for (let n = 0; n < 60; n++) {
-      assert.equal(testing.domainAdd(builtin, true, previous), 0);
-    }
-
-    testing.domainDrop(previous);
-    assert.ok(testing.domainRebuild());
-    testing.__collect();
+  // Release a previous workload to leave contiguous free runs beside the live ABCs.
+  const previous = testing.domainChild(main) as number;
+  for (let n = 0; n < 60; n++) {
+    assert.equal(testing.domainAdd(builtin, true, previous), 0);
   }
+
+  testing.domainDrop(previous);
+  assert.ok(testing.domainRebuild());
 
   let compactions = 0;
   for (let n = 0; n < 150; n++) {
@@ -718,21 +700,18 @@ test("a compaction in place, a part at a time, never grows memory", {
     assert.equal(testing.domainAdd(builtin, true, child), 0);
     assert.notEqual(testing.domainModule("", -1, false), "");
     testing.domainDrop(child);
-    testing.__collect();
     const before = testing.memory.buffer.byteLength;
     if (testing.domainCompact(true)) {
-      if (COMPILER === "zig" && compactions === 0) {
+      if (compactions === 0) {
         // A repeated request can replace the pending rebuild or leave it in progress.
         testing.domainCompact(true);
       }
 
       let step = testing.domainRebuildStep();
       while (step === 0) {
-        testing.__collect();
         step = testing.domainRebuildStep();
       }
 
-      testing.__collect();
       assert.equal(step, 1);
       assert.equal(testing.memory.buffer.byteLength, before, `load ${n}`);
       compactions++;

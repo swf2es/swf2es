@@ -1,36 +1,135 @@
 /**
- * The compiler in Zig (packages/codegen/zig, docs/zig-codegen.md) behind
- * the same object asc's glue gives for codegen.wasm, export for export, so
- * that createCodegen runs over either.
+ * The compiler (packages/codegen/zig, docs/zig-codegen.md), its exports
+ * bound as functions that take and give JavaScript values.
  *
- * Zig's module takes bytes, not managed objects: every call starts with
- * the module's `input`, which gives room for its arrays and strings, staged
- * there and each passed as its address and length; what a call hands
- * out is an address, `outputLength` bytes, valid until the next call
- * starts. A call that ran out of memory hands out nothing and says so in
- * `codegenError`, and is thrown here, as asc's trap would be. A panic, a
- * failed safety check of the ReleaseSafe build, is the module's one import,
- * env.abort, and any other trap are thrown as a CodegenPanic, after which
- * the instance is dead and every call throws one, for the wrapper to start
- * another.
- *
- * An export the module does not have yet, as the port goes on stage by
- * stage, throws when called.
+ * Its module takes bytes, not managed objects: every call starts with the
+ * module's `input`, which gives room for its arrays and strings, staged
+ * there and each passed as its address and length; what a call hands out
+ * is an address, `outputLength` bytes, valid until the next call starts. A
+ * call that ran out of memory hands out nothing and says so in
+ * `codegenError`, and is thrown here as a CodegenOutOfMemory. A panic, a
+ * failed safety check of the ReleaseSafe build, is the module's one
+ * import, env.abort, and it and any other trap are thrown as a
+ * CodegenPanic, after which the instance is dead and every call throws
+ * one, for the wrapper to start another.
  */
-import type { instantiate as instantiateAs } from "./codegen.js";
 
-/** codegen.wasm's exports as asc's glue gives them. */
-export type CodegenExports = Awaited<ReturnType<typeof instantiateAs>>;
-
-/** What asc's runtime exports beside the compiler's, which Zig's module has no use for. */
-type Runtime = "memory" | "__new" | "__pin" | "__unpin" | "__collect" | "__rtti_base";
+/** codegen.wasm's exports, bound. */
+export interface CodegenExports {
+  readonly memory: WebAssembly.Memory;
+  compilerVersion(): string;
+  abcVersion(abc: Uint8Array): number;
+  actionsEmitEach(
+    swf: Uint8Array,
+    offsets: Int32Array,
+    lengths: Int32Array,
+    version: number,
+    blocks: string,
+    reuse: boolean,
+  ): string;
+  actionsEmitEachBytes(
+    swf: Uint8Array,
+    offsets: Int32Array,
+    lengths: Int32Array,
+    version: number,
+    blocks: string,
+    reuse: boolean,
+  ): number;
+  actionsHeldCount(): number;
+  actionsHeldEmitEachBytes(handle: number, version: number, blocks: string): number;
+  actionsHeldUnitBytes(
+    handle: number,
+    version: number,
+    at: number,
+    end: number,
+    bound: number,
+    five: boolean,
+  ): number;
+  actionsHold(handle: number, swf: Uint8Array, offsets: Int32Array, lengths: Int32Array): void;
+  actionsModuleBytes(
+    swf: Uint8Array,
+    offsets: Int32Array,
+    lengths: Int32Array,
+    version: number,
+    keep?: boolean,
+  ): number;
+  actionsModuleEntries(): string;
+  actionsModuleUnits(): string;
+  actionsRelease(handle: number): void;
+  actionsUnitBytes(
+    swf: Uint8Array,
+    offsets: Int32Array,
+    lengths: Int32Array,
+    version: number,
+    at: number,
+    end: number,
+    bound: number,
+    five: boolean,
+  ): number;
+  actionsUnitLimits(): Float64Array;
+  domainAdd(bytes: Uint8Array, builtin: boolean, appDomain?: number): number;
+  domainChild(parent: number): number;
+  domainCompact(stepped?: boolean): boolean;
+  domainContext(index?: number, after?: number, upTo?: number): string;
+  domainDrop(appDomain: number): void;
+  domainEvict(appDomain: number): void;
+  domainFound(
+    appDomain: number,
+    nsKind: number,
+    uri: string,
+    name: string,
+    abc: number,
+    asType: boolean,
+  ): void;
+  domainKeyFork(appDomain: number): number;
+  domainKeyHeaderBytes(index?: number): number;
+  domainKeyLogBytes(
+    appDomain: number,
+    after: number,
+    from: number,
+    to: number,
+    block: number,
+    filled: number,
+  ): number;
+  domainLinked(index?: number): string;
+  domainLoad(words: Uint8Array): boolean;
+  domainLoadAbc(index: number, bytes: Uint8Array): number;
+  domainLoadRebuild(): boolean;
+  domainLogMark(): number;
+  domainLogSince(mark: number, index?: number): string;
+  domainModule(hashes?: string, index?: number, keep?: boolean, linkedOnly?: boolean): string;
+  domainModuleBytes(hashes?: string, index?: number, keep?: boolean, linkedOnly?: boolean): number;
+  domainModuleDone(): boolean;
+  domainModuleEntries(): string;
+  domainModuleMoreBytes(): number;
+  domainParent(appDomain: number): number;
+  domainRebuildStep(): number;
+  domainReplay(log: string, index?: number): boolean;
+  domainReset(apiVersion: number): void;
+  domainRestore(index: number, bytes: Uint8Array): number;
+  domainRevision(): string;
+  domainRevive(appDomain: number, stepped?: boolean): number;
+  domainSaveBytes(): number;
+  domainSavedAbcBytes(index: number): number;
+  domainSourceMap(): string;
+  domainState(appDomain: number): number;
+  domainUsage(): string;
+  domainWantsCompact(want?: number): boolean;
+  outputLength(): number;
+  // The recovery journal's (see createCodegen's recover).
+  lastAddLinked(): boolean;
+  journalBytes(mark: number): number;
+  replayEntry(kind: number, index: number, a: number, b: number): boolean;
+  abandonRebuild(): void;
+  loadCheckpointState(words: Uint8Array): boolean;
+}
 
 /**
- * An export's parameters, as asc's glue takes them, and its result.
+ * An export's parameters, as its bound function takes them, and its result.
  * Parameters are space-separated: `u8s` a Uint8Array, `i32s` an
  * Int32Array, `str` a string, each staged; `i32` and `bool` passed as they
- * are; `=value` a default, as the AssemblyScript function declares it.
- * Results: `str` UTF-8 handed out, decoded as AssemblyScript decodes it;
+ * are; `=value` a default where the argument is left out.
+ * Results: `str` UTF-8 handed out, decoded leniently (fromUtf8);
  * `address` an address handed out, as the *Bytes exports return it;
  * `f64x2` two doubles at an address; `f64s` doubles handed out, as many as
  * `outputLength` bytes hold.
@@ -40,71 +139,59 @@ export type Signature = readonly [
   "void" | "i32" | "bool" | "str" | "address" | "f64x2" | "f64s",
 ];
 
-/** Every export of codegen.wasm's, by its AssemblyScript signature. */
-export const SIGNATURES: { readonly [name in Exclude<keyof CodegenExports, Runtime>]: Signature } =
-  {
-    compilerVersion: ["", "str"],
-    abcVersion: ["u8s", "i32"],
-    actionsEmitEach: ["u8s i32s i32s i32 str bool", "str"],
-    actionsEmitEachBytes: ["u8s i32s i32s i32 str bool", "address"],
-    actionsHeldCount: ["", "i32"],
-    actionsHeldEmitEachBytes: ["i32 i32 str", "address"],
-    actionsHeldUnitBytes: ["i32 i32 i32 i32 i32 bool", "address"],
-    actionsHold: ["i32 u8s i32s i32s", "void"],
-    actionsModuleBytes: ["u8s i32s i32s i32 bool=false", "address"],
-    actionsModuleEntries: ["", "str"],
-    actionsModuleUnits: ["", "str"],
-    actionsRelease: ["i32", "void"],
-    actionsUnitBytes: ["u8s i32s i32s i32 i32 i32 i32 bool", "address"],
-    actionsUnitLimits: ["", "f64x2"],
-    domainAdd: ["u8s bool i32=0", "i32"],
-    domainChild: ["i32", "i32"],
-    domainCompact: ["bool=false", "bool"],
-    domainContext: ["i32=-1 i32=0 i32=-1", "str"],
-    domainDrop: ["i32", "void"],
-    domainEvict: ["i32", "void"],
-    domainFound: ["i32 i32 str str i32 bool", "void"],
-    domainKeyFork: ["i32", "i32"],
-    domainKeyHeaderBytes: ["i32=-1", "address"],
-    domainKeyLogBytes: ["i32 i32 i32 i32 i32 i32", "address"],
-    domainLinked: ["i32=-1", "str"],
-    domainLoad: ["u8s", "bool"],
-    domainLoadAbc: ["i32 u8s", "i32"],
-    domainLoadRebuild: ["", "bool"],
-    domainLogMark: ["", "i32"],
-    domainLogSince: ["i32 i32=-1", "str"],
-    domainModule: ["str= i32=-1 bool=true bool=false", "str"],
-    domainModuleBytes: ["str= i32=-1 bool=true bool=false", "address"],
-    domainModuleDone: ["", "bool"],
-    domainModuleEntries: ["", "str"],
-    domainModuleMoreBytes: ["", "address"],
-    domainParent: ["i32", "i32"],
-    domainRebuildStep: ["", "i32"],
-    domainReplay: ["str i32=-1", "bool"],
-    domainReset: ["i32", "void"],
-    domainRestore: ["i32 u8s", "i32"],
-    domainRevision: ["", "str"],
-    domainRevive: ["i32 bool=false", "i32"],
-    domainSaveBytes: ["", "address"],
-    domainSavedAbcBytes: ["i32", "address"],
-    domainSourceMap: ["", "str"],
-    domainState: ["i32", "i32"],
-    domainUsage: ["", "str"],
-    domainWantsCompact: ["i32=0", "bool"],
-    outputLength: ["", "i32"],
-  };
-
-/** Additional exports for the host's recovery journal. */
-export interface RecoveryExports extends CodegenExports {
-  lastAddLinked(): boolean;
-  journalBytes(mark: number): number;
-  replayEntry(kind: number, index: number, a: number, b: number): boolean;
-  abandonRebuild(): void;
-  loadCheckpointState(words: Uint8Array): boolean;
-}
-
-const ZIG_SIGNATURES: Record<string, Signature> = {
-  ...SIGNATURES,
+/** Every export of codegen.wasm's, by its signature. */
+export const SIGNATURES: {
+  readonly [name in Exclude<keyof CodegenExports, "memory">]: Signature;
+} = {
+  compilerVersion: ["", "str"],
+  abcVersion: ["u8s", "i32"],
+  actionsEmitEach: ["u8s i32s i32s i32 str bool", "str"],
+  actionsEmitEachBytes: ["u8s i32s i32s i32 str bool", "address"],
+  actionsHeldCount: ["", "i32"],
+  actionsHeldEmitEachBytes: ["i32 i32 str", "address"],
+  actionsHeldUnitBytes: ["i32 i32 i32 i32 i32 bool", "address"],
+  actionsHold: ["i32 u8s i32s i32s", "void"],
+  actionsModuleBytes: ["u8s i32s i32s i32 bool=false", "address"],
+  actionsModuleEntries: ["", "str"],
+  actionsModuleUnits: ["", "str"],
+  actionsRelease: ["i32", "void"],
+  actionsUnitBytes: ["u8s i32s i32s i32 i32 i32 i32 bool", "address"],
+  actionsUnitLimits: ["", "f64x2"],
+  domainAdd: ["u8s bool i32=0", "i32"],
+  domainChild: ["i32", "i32"],
+  domainCompact: ["bool=false", "bool"],
+  domainContext: ["i32=-1 i32=0 i32=-1", "str"],
+  domainDrop: ["i32", "void"],
+  domainEvict: ["i32", "void"],
+  domainFound: ["i32 i32 str str i32 bool", "void"],
+  domainKeyFork: ["i32", "i32"],
+  domainKeyHeaderBytes: ["i32=-1", "address"],
+  domainKeyLogBytes: ["i32 i32 i32 i32 i32 i32", "address"],
+  domainLinked: ["i32=-1", "str"],
+  domainLoad: ["u8s", "bool"],
+  domainLoadAbc: ["i32 u8s", "i32"],
+  domainLoadRebuild: ["", "bool"],
+  domainLogMark: ["", "i32"],
+  domainLogSince: ["i32 i32=-1", "str"],
+  domainModule: ["str= i32=-1 bool=true bool=false", "str"],
+  domainModuleBytes: ["str= i32=-1 bool=true bool=false", "address"],
+  domainModuleDone: ["", "bool"],
+  domainModuleEntries: ["", "str"],
+  domainModuleMoreBytes: ["", "address"],
+  domainParent: ["i32", "i32"],
+  domainRebuildStep: ["", "i32"],
+  domainReplay: ["str i32=-1", "bool"],
+  domainReset: ["i32", "void"],
+  domainRestore: ["i32 u8s", "i32"],
+  domainRevision: ["", "str"],
+  domainRevive: ["i32 bool=false", "i32"],
+  domainSaveBytes: ["", "address"],
+  domainSavedAbcBytes: ["i32", "address"],
+  domainSourceMap: ["", "str"],
+  domainState: ["i32", "i32"],
+  domainUsage: ["", "str"],
+  domainWantsCompact: ["i32=0", "bool"],
+  outputLength: ["", "i32"],
   lastAddLinked: ["", "bool"],
   journalBytes: ["i32", "address"],
   replayEntry: ["i32 i32 i32 i32", "bool"],
@@ -115,7 +202,7 @@ const ZIG_SIGNATURES: Record<string, Signature> = {
 /** An allocation refused by the compiler leaves it usable. */
 export class CodegenOutOfMemory extends Error {}
 
-/** A panic in the Zig module: a safety check failed, and the instance is dead. */
+/** A panic in the module: a safety check failed, and the instance is dead. */
 export class CodegenPanic extends Error {
   override name = "CodegenPanic";
 }
@@ -161,7 +248,7 @@ const align8 = (n: number) => (n + 7) & ~7;
 
 /**
  * The exports that read what the last call left rather than start one, as
- * asc's do: the call's output stays readable after them (a unit's limits,
+ * the call's output stays readable after them (a unit's limits,
  * read after its code, the held SWFs counted or one let go).
  */
 const READS_LAST_CALL = new Set([
@@ -175,10 +262,10 @@ const READS_LAST_CALL = new Set([
 ]);
 
 /**
- * The exports of a Zig build of the compiler, instantiated from `module`,
- * as asc's glue would give them: `signatures` names them, and the test
- * build's add theirs, with those of theirs that read what the last call
- * left rather than start a call (`readsLastCall`).
+ * The exports of a build of the compiler, instantiated from `module`,
+ * bound: `signatures` names them, and the test builds add theirs, with
+ * those of theirs that read what the last call left rather than start a
+ * call (`readsLastCall`).
  */
 export async function bind<T>(
   module: WebAssembly.Module,
@@ -191,10 +278,12 @@ export async function bind<T>(
 }
 
 /** A panic with no compaction spare ready can instantiate the already compiled module synchronously. */
-export function recoveryInstance(module: WebAssembly.Module): CodegenExports {
+export function recoveryInstance(
+  module: WebAssembly.Module,
+): CodegenExports & { panicked(): string | null } {
   const state = panicState();
   const instance = new WebAssembly.Instance(module, state.imports);
-  return bindInstance<RecoveryExports>(instance, state, ZIG_SIGNATURES, []);
+  return bindInstance<CodegenExports>(instance, state, SIGNATURES, []);
 }
 
 function panicState() {
@@ -207,7 +296,7 @@ function panicState() {
           state.panic = state.raw
             ? fromUtf8(new Uint8Array(state.raw.memory.buffer, message >>> 0, length))
             : "panic";
-          throw new CodegenPanic(`codegen-zig.wasm: ${state.panic}`);
+          throw new CodegenPanic(`codegen.wasm: ${state.panic}`);
         },
       },
     },
@@ -226,7 +315,7 @@ function bindInstance<T>(
   const alive = () => {
     if (state.panic !== null) {
       throw new CodegenPanic(
-        `codegen-zig.wasm panicked earlier (${state.panic}): make another instance`,
+        `codegen.wasm panicked earlier (${state.panic}): make another instance`,
       );
     }
   };
@@ -242,7 +331,7 @@ function bindInstance<T>(
     } catch (error) {
       if (!(error instanceof CodegenPanic)) {
         state.panic = `trap: ${error instanceof Error ? error.message : String(error)}`;
-        throw new CodegenPanic(`codegen-zig.wasm: ${state.panic}`);
+        throw new CodegenPanic(`codegen.wasm: ${state.panic}`);
       }
 
       throw error;
@@ -253,17 +342,13 @@ function bindInstance<T>(
     get memory() {
       return exports.memory;
     },
-    // Each call's arena is given back as the next starts: nothing to collect.
-    __collect() {},
     panicked: () => state.panic,
   };
   for (const [name, [spec, result]] of Object.entries(signatures)) {
     const call = exports[name] as ((...args: number[]) => number) | undefined;
     if (typeof call !== "function") {
       bound[name] = () => {
-        throw new Error(
-          `codegen-zig.wasm has no ${name} yet: the Zig compiler is not ported so far`,
-        );
+        throw new Error(`this build of codegen.wasm has no ${name}`);
       };
       continue;
     }
@@ -273,7 +358,7 @@ function bindInstance<T>(
     const starts = !READS_LAST_CALL.has(name) && !readsLastCall.includes(name);
     bound[name] = (...args: unknown[]) => {
       alive();
-      // A default where the argument is left out, as asc's glue passes arguments.length.
+      // A default where the argument is left out.
       const values = params.map((p, i) => (i < args.length ? args[i] : p.fallback));
       const parts = values.map((value, i) => {
         const kind = params[i].kind;
@@ -301,11 +386,11 @@ function bindInstance<T>(
 
       const flat: number[] = [];
       // Only the module's own code is guarded: running out of memory is a
-      // plain Error, which leaves the instance as usable as asc's left it.
+      // plain Error, which leaves the instance usable.
       if (starts) {
         const base = guarded(() => exports.input(size)) >>> 0;
         if (base === 0) {
-          throw new CodegenOutOfMemory(`codegen-zig.wasm: ${name} ran out of memory`);
+          throw new CodegenOutOfMemory(`codegen.wasm: ${name} ran out of memory`);
         }
 
         // Read after input, which may have grown memory.
@@ -331,7 +416,7 @@ function bindInstance<T>(
       // (a RangeError) marks the instance dead as a trap in it does.
       const outOfMemory = starts && guarded(() => exports.codegenError()) !== 0;
       if (outOfMemory) {
-        throw new CodegenOutOfMemory(`codegen-zig.wasm: ${name} ran out of memory`);
+        throw new CodegenOutOfMemory(`codegen.wasm: ${name} ran out of memory`);
       }
 
       return guarded(() => {
@@ -362,21 +447,16 @@ function bindInstance<T>(
   return bound as T & { panicked(): string | null };
 }
 
-/**
- * Zig's compiler as asc's glue gives codegen.wasm, for createCodegen: the
- * same signature as the glue's instantiate, whose imports it has no use for.
- */
+/** The compiler's exports, bound, from its compiled module, for createCodegen. */
 export async function instantiate(
   module: WebAssembly.Module,
-  _imports: object = {},
 ): Promise<CodegenExports & { panicked(): string | null }> {
-  return bind<RecoveryExports>(module, ZIG_SIGNATURES);
+  return bind<CodegenExports>(module, SIGNATURES);
 }
 
 /**
- * A string as AssemblyScript's String.UTF8.encode writes it, as the
- * compiler took a string in: WTF-8, a lone surrogate as three bytes, where
- * TextEncoder writes U+FFFD.
+ * A string as the compiler takes it in: WTF-8, a lone surrogate as three
+ * bytes, where TextEncoder writes U+FFFD.
  */
 export function toUtf8(text: string): Uint8Array {
   const out = new Uint8Array(text.length * 3);
@@ -416,11 +496,11 @@ export function toUtf8(text: string): Uint8Array {
 }
 
 /**
- * Bytes as AssemblyScript's String.UTF8.decodeUnsafe reads them, as the
- * compiler made a string of an ABC's bytes: valid UTF-8 as TextDecoder
- * reads it, and anything else as AssemblyScript does, which checks nothing,
- * keeps what an invalid sequence's bits say and drops a sequence cut short
- * at the end, where TextDecoder writes U+FFFD.
+ * Bytes as the compiler makes a string of an ABC's bytes: valid UTF-8 as
+ * TextDecoder reads it, and anything else as the compiler reads it
+ * (zig/src/output.zig), checking nothing, keeping what an invalid
+ * sequence's bits say and dropping a sequence cut short at the end, where
+ * TextDecoder writes U+FFFD.
  */
 export function fromUtf8(bytes: Uint8Array): string {
   try {

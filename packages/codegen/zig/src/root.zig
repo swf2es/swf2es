@@ -90,7 +90,7 @@ pub export fn abcVersion(abc: [*]const u8, length: u32) i32 {
 
     const minor: u32 = std.mem.readInt(u16, abc[0..2], .little);
     const major: u32 = std.mem.readInt(u16, abc[2..4], .little);
-    // Wrapped, as AssemblyScript's i32 shift does: a major of 0x8000 or more is negative.
+    // Wrapped, as an i32 shift does: a major of 0x8000 or more is negative.
     return @bitCast((major << 16) | minor);
 }
 

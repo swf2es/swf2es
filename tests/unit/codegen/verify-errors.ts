@@ -4,7 +4,7 @@
 // rollback tests need to fail allocations in: a function created in two
 // scope chains, contested and settled, a handler with a catch scope, and a
 // switch of many cases.
-import { abc, tables, u30 } from "../unit/codegen/abc-builder.ts";
+import { abc, tables, u30 } from "./abc-builder.ts";
 
 export function verifyErrorAbcs(): [string, Uint8Array][] {
   const pool = {

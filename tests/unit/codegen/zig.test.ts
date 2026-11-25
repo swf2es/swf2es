@@ -1,28 +1,32 @@
-// The compiler in Zig behind asc's glue's exports (packages/codegen/src/zig.ts,
-// docs/zig-codegen.md): what it stages and lifts as AssemblyScript did, and
-// what a call that runs out of memory or panics does.
+// The compiler's byte ABI as packages/codegen/src/zig.ts binds it
+// (docs/zig-codegen.md, "Interface"): how strings go in and come out, what
+// a call that runs out of memory or panics does, and how createCodegen
+// recovers from a panic.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { instantiate as instantiateAs } from "../../../packages/codegen/dist/codegen.js";
 import { createCodegen } from "../../../packages/codegen/dist/index.js";
-import { CodegenPanic, fromUtf8, instantiate, toUtf8 } from "../../../packages/codegen/dist/zig.js";
+import {
+  CodegenPanic,
+  fromUtf8,
+  instantiate,
+  SIGNATURES,
+  toUtf8,
+} from "../../../packages/codegen/dist/zig.js";
 import { builtinLibrary } from "../../../packages/player/dist/playerglobal/libraries.js";
-import { linkAbcs } from "../../parity/link-abc.ts";
-import { richAbc } from "../../parity/rich-abc.ts";
-import { verifyErrorAbcs } from "../../parity/verify-errors.ts";
 import { script } from "./ir-cases.ts";
-import { bindTesting, zigTestingModule } from "./zig-testing.ts";
+import { linkAbcs } from "./link-abc.ts";
+import { richAbc } from "./rich-abc.ts";
+import { bindTesting, testingModule } from "./testing-module.ts";
+import { verifyErrorAbcs } from "./verify-errors.ts";
 
-// Read the two named binaries even when the shipping filename is temporarily the Zig build.
 const compile = async (name: string) =>
   WebAssembly.compile(
     await readFile(new URL(`../../../packages/codegen/${name}`, import.meta.url)),
   );
-const zig = await instantiate(await compile("dist/codegen-zig.wasm"));
-const as = await instantiateAs(await compile("dist-test/codegen-as.wasm"), { env: {} });
+const release = await instantiate(await compile("dist/codegen.wasm"));
 
-test("strings go in as AssemblyScript's String.UTF8.encode wrote them: WTF-8", () => {
+test("strings go in as WTF-8", () => {
   assert.deepEqual([...toUtf8("aé€")], [0x61, 0xc3, 0xa9, 0xe2, 0x82, 0xac]);
   assert.deepEqual([...toUtf8("\u{1f600}")], [0xf0, 0x9f, 0x98, 0x80]);
   // Lone surrogates, which TextEncoder writes as U+FFFD.
@@ -31,10 +35,10 @@ test("strings go in as AssemblyScript's String.UTF8.encode wrote them: WTF-8", (
   assert.deepEqual([...toUtf8("\ud800")], [0xed, 0xa0, 0x80]);
 });
 
-test("strings come out as AssemblyScript's String.UTF8.decodeUnsafe read them", () => {
+test("strings come out as the compiler reads bytes, checking nothing", () => {
   const read = (bytes: number[]) => fromUtf8(Uint8Array.from(bytes));
   assert.equal(read([0x61, 0xc3, 0xa9]), "aé");
-  // A byte order mark is kept, as AssemblyScript keeps it.
+  // A byte order mark is kept.
   assert.equal(read([0xef, 0xbb, 0xbf, 0x61]), "﻿a");
   // WTF-8's lone surrogate, as toUtf8 writes it.
   assert.equal(read([0xed, 0xa0, 0x80]), "\ud800");
@@ -49,31 +53,26 @@ test("strings come out as AssemblyScript's String.UTF8.decodeUnsafe read them", 
   assert.equal(read([0xf7, 0xbf, 0xbf, 0xbf]), "\udfbf\udfff");
 });
 
-test("the compilers agree on what Zig's has ported", () => {
-  assert.equal(zig.compilerVersion(), as.compilerVersion());
-  for (const bytes of [
-    [],
-    [16, 0, 46],
-    [16, 0, 46, 0],
-    [16, 0, 46, 0, 9],
-    [0xff, 0xff, 0xff, 0xff],
-  ]) {
-    assert.equal(zig.abcVersion(Uint8Array.from(bytes)), as.abcVersion(Uint8Array.from(bytes)));
+test("codegen.wasm exports what the wrapper binds, and abcVersion reads both versions", async () => {
+  const exported = WebAssembly.Module.exports(await compile("dist/codegen.wasm")).map(
+    (e) => e.name,
+  );
+  const bound = ["memory", "input", "codegenError", ...Object.keys(SIGNATURES)];
+  assert.deepEqual([...new Set(exported)].sort(), [...new Set(bound)].sort());
+  assert.equal(release.compilerVersion(), "0.0.0");
+  for (const [bytes, version] of [
+    [[], -1],
+    [[16, 0, 46], -1],
+    [[16, 0, 46, 0], (46 << 16) | 16],
+    [[16, 0, 46, 0, 9], (46 << 16) | 16],
+    [[0xff, 0xff, 0xff, 0xff], -1],
+  ] as const) {
+    assert.equal(release.abcVersion(Uint8Array.from(bytes)), version, `${bytes}`);
   }
 });
 
-test("Zig's compiler has every export of AssemblyScript's but its runtime's", async () => {
-  const exports = async (file: string) =>
-    WebAssembly.Module.exports(await compile(file)).map((e) => e.name);
-  const zigs = new Set(await exports("dist/codegen-zig.wasm"));
-  const missing = (await exports("dist-test/codegen-as.wasm")).filter(
-    (name) => !name.startsWith("__") && !zigs.has(name),
-  );
-  assert.deepEqual(missing, []);
-});
-
 test("a call that runs out of memory hands out nothing and says so, and does not trap", async () => {
-  const { exports } = await WebAssembly.instantiate(await compile("dist/codegen-zig.wasm"), {
+  const { exports } = await WebAssembly.instantiate(await compile("dist/codegen.wasm"), {
     env: { abort: () => assert.fail("abort") },
   });
   const raw = exports as { input(size: number): number; codegenError(): number };
@@ -84,7 +83,7 @@ test("a call that runs out of memory hands out nothing and says so, and does not
 });
 
 test("running out of memory through the wrapper is a plain Error, and the instance lives on", async () => {
-  const testing = await bindTesting(await zigTestingModule(false));
+  const testing = await bindTesting(await testingModule("testing"));
   assert.throws(
     () => testing.abcVersion(new Uint8Array(0xfff0_0000)),
     (e) => !(e instanceof CodegenPanic) && /ran out of memory/.test((e as Error).message),
@@ -94,7 +93,7 @@ test("running out of memory through the wrapper is a plain Error, and the instan
 });
 
 test("a panic is thrown as a CodegenPanic, and the instance is dead after it", async () => {
-  const testing = await bindTesting(await zigTestingModule(false));
+  const testing = await bindTesting(await testingModule("testing"));
   assert.equal(testing.panicked(), null);
   assert.throws(
     () => testing.testingPanic(),
@@ -105,7 +104,7 @@ test("a panic is thrown as a CodegenPanic, and the instance is dead after it", a
 });
 
 test("any other trap, as a stack overflow, kills the instance as a panic does", async () => {
-  const testing = await bindTesting(await zigTestingModule(false));
+  const testing = await bindTesting(await testingModule("testing"));
   // How deep the stack has reached since it was painted, for the fuzzers to size it by.
   testing.stackPaint();
   assert.ok(testing.stackDeepest() > 0 && testing.stackDeepest() < 4096);
@@ -115,14 +114,14 @@ test("any other trap, as a stack overflow, kills the instance as a panic does", 
 });
 
 test("a view of the module's own memory goes in whole, though input gives that memory back", async () => {
-  const testing = await bindTesting(await zigTestingModule(false));
+  const testing = await bindTesting(await testingModule("testing"));
   const view = new Uint8Array(testing.memory.buffer, 64, 4);
   view.set([16, 0, 46, 0]);
   assert.equal(testing.abcVersion(view), (46 << 16) | 16);
 });
 
-test("arrays and strings must be given, as asc's glue requires; a default only where left out", () => {
-  assert.throws(() => zig.abcVersion(undefined as unknown as Uint8Array), TypeError);
+test("arrays and strings must be given; a default only where left out", () => {
+  assert.throws(() => release.abcVersion(undefined as unknown as Uint8Array), TypeError);
 });
 
 /** Byte array `name` of a Zig source of the test build's. */
@@ -140,7 +139,7 @@ async function zigBytes(file: string, name: string): Promise<number[]> {
     .map(Number);
 }
 
-test("the Zig tests' ABCs are the ones tests/parity builds", async () => {
+test("the Zig tests' ABCs are the ones the node tests build", async () => {
   assert.deepEqual(await zigBytes("abc.zig", "rich_abc"), [...richAbc(true)]);
   const { builtin, user, failing, wide, created } = linkAbcs();
   assert.deepEqual(await zigBytes("domain.zig", "link_builtin"), [...builtin]);
@@ -151,12 +150,12 @@ test("the Zig tests' ABCs are the ones tests/parity builds", async () => {
   assert.deepEqual(await zigBytes("domain.zig", "link_contested"), [...verifyErrorAbcs()[2][1]]);
 });
 
-test("a load that panics Zig's compiler is rejected, and the domain goes on in a new instance", async () => {
+test("a load that panics the compiler is rejected, and the domain goes on in a new instance", async () => {
   // The test build panics on these two ABCs (root.zig's domainAdd): a
   // safety check, and the stack overflowing.
   const panic = new TextEncoder().encode("\0panic");
   const overflow = new TextEncoder().encode("\0overflow");
-  const codegen = await createCodegen(await zigTestingModule(false));
+  const codegen = await createCodegen(await testingModule("testing"));
   codegen.reset();
   const main = codegen.childDomain(0);
   assert.equal(codegen.add(script([0x24, 7, 0x24, 5, 0xa0, 0x48]), false, main), 0);
@@ -176,7 +175,7 @@ test("a load that panics Zig's compiler is rejected, and the domain goes on in a
 });
 
 test("a panic recovery cannot undo loses the domain, not the compiler: reset and AVM1 go on", async () => {
-  const codegen = await createCodegen(await zigTestingModule(false));
+  const codegen = await createCodegen(await testingModule("testing"));
   codegen.reset();
   assert.equal(codegen.add(script([0x24, 7, 0x48])), 0);
   // The instance a recovery would replay into cannot be made, once: the
@@ -208,7 +207,7 @@ test("a panic recovery cannot undo loses the domain, not the compiler: reset and
 });
 
 test("recovery keeps ancestor resolutions after the compiling child is dropped", async () => {
-  const compiler = await createCodegen(await zigTestingModule(false));
+  const compiler = await createCodegen(await testingModule("testing"));
   const { builtin, user } = linkAbcs();
   compiler.reset();
   assert.equal(compiler.add(builtin, true), 0);
@@ -223,7 +222,7 @@ test("recovery keeps ancestor resolutions after the compiling child is dropped",
 });
 
 test("recovery invalidates a cache read even when the native log returns to its previous length", async () => {
-  const compiler = await createCodegen(await zigTestingModule(false));
+  const compiler = await createCodegen(await testingModule("testing"));
   compiler.reset();
   assert.equal(compiler.add(builtinLibrary, true), 0);
   const main = compiler.childDomain(0);
@@ -245,7 +244,7 @@ test("recovery invalidates a cache read even when the native log returns to its 
 });
 
 test("a rejected compile request leaves the current domain recoverable", async () => {
-  const compiler = await createCodegen(await zigTestingModule(false));
+  const compiler = await createCodegen(await testingModule("testing"));
   compiler.reset();
   assert.equal(compiler.add(script([0x24, 7, 0x48])), 0);
   const key = compiler.keyContext(0);
@@ -255,7 +254,7 @@ test("a rejected compile request leaves the current domain recoverable", async (
 });
 
 test("an interrupted verifier cannot replay as a completed verification", async (t) => {
-  const module = await zigTestingModule(false);
+  const module = await testingModule("testing");
   t.mock.method(WebAssembly, "instantiate", async (module: WebAssembly.Module, imports: object) => {
     const instance = new WebAssembly.Instance(module, imports);
     const raw = instance.exports as {
@@ -293,7 +292,7 @@ test("an interrupted verifier cannot replay as a completed verification", async 
 });
 
 test("recovery reads a finding's inherited fields once and preserves the finding", async () => {
-  const compiler = await createCodegen(await zigTestingModule(false));
+  const compiler = await createCodegen(await testingModule("testing"));
   compiler.reset();
   assert.equal(compiler.add(linkAbcs().builtin, true), 0);
   let reads = 0;
@@ -317,7 +316,7 @@ test("recovery reads a finding's inherited fields once and preserves the finding
 });
 
 test("recovery omits parse rejections and repeats link rejections", async (t) => {
-  const compiler = await createCodegen(await zigTestingModule(false));
+  const compiler = await createCodegen(await testingModule("testing"));
   const abc = linkAbcs();
   compiler.reset();
   assert.equal(compiler.add(abc.builtin, true), 0);
@@ -344,7 +343,7 @@ test("recovery omits parse rejections and repeats link rejections", async (t) =>
 
 test("dropping sibling domains does not query domains from earlier drops", async (t) => {
   let stateReads = 0;
-  const module = await zigTestingModule(false);
+  const module = await testingModule("testing");
   t.mock.method(WebAssembly, "instantiate", async (module: WebAssembly.Module, imports: object) => {
     const instance = new WebAssembly.Instance(module, imports);
     const raw = instance.exports;
@@ -372,7 +371,7 @@ test("dropping sibling domains does not query domains from earlier drops", async
 });
 
 test("a missing journal entry cannot silently roll back the compiler after a later panic", async (t) => {
-  const module = await zigTestingModule(false);
+  const module = await testingModule("testing");
   let failJournal = true;
   t.mock.method(WebAssembly, "instantiate", async (module: WebAssembly.Module, imports: object) => {
     const instance = new WebAssembly.Instance(module, imports);
@@ -407,7 +406,7 @@ test("a missing journal entry cannot silently roll back the compiler after a lat
 });
 
 test("recovery owns the accepted bytes and never consumes an unused revival iterable", async () => {
-  const compiler = await createCodegen(await zigTestingModule(false));
+  const compiler = await createCodegen(await testingModule("testing"));
   compiler.reset();
   const child = compiler.childDomain(0);
   const bytes = script([0x24, 7, 0x48]);
@@ -425,7 +424,7 @@ test("recovery owns the accepted bytes and never consumes an unused revival iter
 });
 
 test("recovery after compaction keeps the generation and restores an evicted child's ABCs", async () => {
-  const compiler = await createCodegen(await zigTestingModule(false));
+  const compiler = await createCodegen(await testingModule("testing"));
   const builtin = builtinLibrary;
   compiler.reset();
   assert.equal(compiler.add(builtin, true), 0);

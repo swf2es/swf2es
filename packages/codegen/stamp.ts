@@ -4,7 +4,7 @@
 // compiler built from other sources never reuses another's output, which
 // COMPILER_VERSION, moved by hand, would not ensure.
 //
-//   node stamp.ts dist/codegen.wasm [dist-test/codegen-as.wasm]
+//   node stamp.ts dist/codegen.wasm [more copies...]
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 

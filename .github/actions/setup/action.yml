@@ -4,9 +4,6 @@ inputs:
   oracle:
     description: Pull the oracle's image.
     default: "false"
-  checked:
-    description: Also build the codegen whose every array access is bounds-checked.
-    default: "false"
   store:
     description: >-
       The name this job keeps the oracle's store (oracle/store.ts) under, so parallel jobs
@@ -32,9 +29,6 @@ runs:
         restore-keys: zig-${{ runner.os }}-${{ runner.arch }}-
     - shell: bash
       run: pnpm build
-    - if: inputs.checked == 'true'
-      shell: bash
-      run: pnpm --filter @swf2es/codegen build:wasm:checked
     - if: inputs.oracle == 'true'
       shell: bash
       run: pnpm oracle:pull

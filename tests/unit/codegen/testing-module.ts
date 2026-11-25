@@ -26,71 +26,67 @@ const HANDED_OUT = new Set([
   "actionsUnitBytes",
 ]);
 
+/**
+ * `build` compiled. SWF2ES_CODEGEN=<dir> gives another copy of the test
+ * build in its place, to compare two (tests/programs/ab.ts).
+ */
+export async function testingModule(build: Build): Promise<WebAssembly.Module> {
+  const other = build === "testing" ? process.env.SWF2ES_CODEGEN : undefined;
+  const dir = other
+    ? pathToFileURL(`${other.replace(/\/$/, "")}/`)
+    : new URL("../../../packages/codegen/dist-test/", import.meta.url);
+  return WebAssembly.compile(await readFile(new URL(`${build}.wasm`, dir)));
+}
+
+/** An instance of a test build, with a memory of its own, its exports as they come. */
+// biome-ignore lint/suspicious/noExplicitAny: the tests' exports are many, and typed by their signatures alone
+export async function bindTesting(module: WebAssembly.Module): Promise<any> {
+  // biome-ignore lint/suspicious/noExplicitAny: as above
+  const bound: any = await bind(module, { ...SIGNATURES, ...TESTING_SIGNATURES }, [
+    "memoryChunksUsed",
+    "memoryReached",
+    "memoryTopRuns",
+    "stackDeepest",
+  ]);
+  // The ABC reader's kinds, by which readAll is told what to read.
+  for (const [i, name] of ["U8", "U16", "S24", "U30", "U32", "S32", "D64", "UTF8"].entries()) {
+    bound[name] = { value: i };
+  }
+
+  return bound;
+}
+
 /** A new instance of `build`, with a memory of its own. */
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+// biome-ignore lint/suspicious/noExplicitAny: as bindTesting
 export async function loadTesting(build: Build): Promise<any> {
   return (await testingInstances(build))();
 }
 
-/** New instances of `build`, each with a memory of its own, its module compiled once. */
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+/**
+ * New instances of `build`, each with a memory of its own, its module
+ * compiled once, and what an export hands out copied, before the next call
+ * gives its memory back.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: as bindTesting
 export async function testingInstances(build: Build): Promise<() => Promise<any>> {
-  // SWF2ES_COMPILER=zig loads the compiler in Zig's test build (docs/zig-codegen.md),
-  // and in place of the checked build the one that fills freed memory with 0xAA.
-  if (COMPILER === "zig") {
-    const module = await zigTestingModule(build === "dist-test-checked");
-    return () => instance(bindTesting, module);
-  }
-
-  // SWF2ES_CODEGEN=<dir> loads another copy of the release build, to compare two (tests/programs/ab.ts).
-  const other = build === "dist-test" ? process.env.SWF2ES_CODEGEN : undefined;
-  const dir = other
-    ? pathToFileURL(`${other.replace(/\/$/, "")}/`)
-    : new URL(`../../../packages/codegen/${build}/`, import.meta.url);
-  const { instantiate } = await import(new URL("testing.js", dir).href);
-  const module = await WebAssembly.compile(await readFile(new URL("testing.wasm", dir)));
-  return () => instance(instantiate, module);
-}
-
-async function instance(
-  instantiate: (module: WebAssembly.Module, imports: object) => Promise<unknown>,
-  module: WebAssembly.Module,
-  // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
-): Promise<any> {
-  // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
-  const exports: any = await instantiate(module, { env: {} });
-  let size = exports.memory.buffer.byteLength;
-  let calls = 0;
-  return new Proxy(exports, {
-    get(target, name) {
-      const value = target[name];
-      if (typeof value !== "function" || String(name).startsWith("__")) {
-        return value;
-      }
-
-      return (...args: unknown[]) => {
-        let result = value.apply(target, args);
-        // Copied out before a collection may free them, or another call move
-        // them; an older build (SWF2ES_CODEGEN) gave a copy already.
-        if (HANDED_OUT.has(String(name)) && typeof result === "number") {
-          result = new Uint8Array(target.memory.buffer, result, target.outputLength()).slice();
+  const module = await testingModule(build);
+  return async () => {
+    const exports = await bindTesting(module);
+    return new Proxy(exports, {
+      get(target, name) {
+        const value = target[name];
+        if (typeof value !== "function" || !HANDED_OUT.has(String(name))) {
+          return value;
         }
 
-        const grown = target.memory.buffer.byteLength;
-        if (grown > size || ++calls >= COLLECT_EVERY) {
-          target.__collect();
-          size = grown;
-          calls = 0;
-        }
-
-        return result;
-      };
-    },
-  });
+        return (...args: unknown[]) => {
+          const address = value.apply(target, args);
+          return new Uint8Array(target.memory.buffer, address, target.outputLength()).slice();
+        };
+      },
+    });
+  };
 }
 
-// SWF2ES_CHECKED selects the checked build.
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
-export const testing: any = await loadTesting(
-  process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test",
-);
+// biome-ignore lint/suspicious/noExplicitAny: as bindTesting
+export const testing: any = await loadTesting(TESTED);

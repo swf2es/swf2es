@@ -1,8 +1,7 @@
-// Differential fuzz of createCodegen's recovery from a panic of Zig's
-// compiler (from the review of stage 6): A, Zig's test build, with panics
-// and stack overflows injected by its marked ABCs; B, the same calls with
-// none; C, with WITH_AS=1, AssemblyScript's compiler. Every answer of A's
-// is B's, a panicking load rejected as 1107, and the domain alike after.
+// Differential fuzz of createCodegen's recovery from a panic of the
+// compiler: A, the test build, with panics and stack overflows injected by
+// its marked ABCs; B, the same calls with none. Every answer of A's is
+// B's, a panicking load rejected as 1107, and the domain alike after.
 //
 //   node tests/fuzz/recovery.ts [seeds, 20] [first seed, 1] [steps, 300]
 //   (COMPACT=1 compacts too; PANIC_RATE, VERBOSE=1, STOP=1, DUMP=dir)
@@ -17,21 +16,17 @@ const { classes, mn, METHOD, GETTER, SLOT, OVERRIDE } = await import(
   `${TREE}/tests/unit/codegen/link-cases.ts`
 );
 const { script } = await import(`${TREE}/tests/unit/codegen/ir-cases.ts`);
-const { linkAbcs } = await import(`${TREE}/tests/parity/link-abc.ts`);
+const { linkAbcs } = await import(`${TREE}/tests/unit/codegen/link-abc.ts`);
 
 const seeds = Number(process.argv[2] ?? 20);
 const first = Number(process.argv[3] ?? 1);
 const steps = Number(process.argv[4] ?? 300);
 const COMPACT = process.env.COMPACT === "1";
-const WITH_AS = process.env.WITH_AS === "1";
 const PANIC_RATE = Number(process.env.PANIC_RATE ?? 0.06);
 const VERBOSE = process.env.VERBOSE === "1";
 
-const zigModule = await WebAssembly.compile(
-  readFileSync(`${TREE}/packages/codegen/dist-test/testing-zig.wasm`),
-);
-const asModule = await WebAssembly.compile(
-  readFileSync(`${TREE}/packages/codegen/dist-test/codegen-as.wasm`),
+const module = await WebAssembly.compile(
+  readFileSync(`${TREE}/packages/codegen/dist-test/testing.wasm`),
 );
 const builtin = new Uint8Array(readFileSync(`${TREE}/oracle/avmplus/generated/builtin.abc`));
 const PANIC = new TextEncoder().encode("\0panic");
@@ -107,10 +102,9 @@ const outcome = <T>(call: () => T): { value?: T; error?: string } => {
 async function run(seed: number): Promise<{ panics: number; compactions: number; ops: number }> {
   const r = rng(seed);
   const pick = <T>(list: T[]) => list[Math.floor(r() * list.length)];
-  const a: Codegen = await createCodegen(zigModule);
-  const b: Codegen = await createCodegen(zigModule);
-  const c: Codegen | null = WITH_AS ? await createCodegen(asModule) : null;
-  const all = c ? [a, b, c] : [a, b];
+  const a: Codegen = await createCodegen(module);
+  const b: Codegen = await createCodegen(module);
+  const all = [a, b];
   const trace: string[] = [];
   const ops: unknown[] = [];
   const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
@@ -125,20 +119,18 @@ async function run(seed: number): Promise<{ panics: number; compactions: number;
     const results = all.map((g) => outcome(() => call(g)));
     say(`${what} -> ${JSON.stringify(results[1])?.slice(0, 120)}`);
     if (compare) {
-      for (let k = 0; k < results.length; k++) {
-        try {
-          assert.deepEqual(results[k], results[1]);
-        } catch (error) {
-          if (process.env.DUMP) {
-            fs.writeFileSync(
-              `${process.env.DUMP}/ops-${seed}.json`,
-              JSON.stringify({ ops, n: abcs.length }),
-            );
-          }
-          throw new Error(
-            `seed ${seed}: ${what}: ${k === 0 ? "recovered" : "AssemblyScript"} differs\n${(error as Error).message.slice(0, 3000)}`,
+      try {
+        assert.deepEqual(results[0], results[1]);
+      } catch (error) {
+        if (process.env.DUMP) {
+          fs.writeFileSync(
+            `${process.env.DUMP}/ops-${seed}.json`,
+            JSON.stringify({ ops, n: abcs.length }),
           );
         }
+        throw new Error(
+          `seed ${seed}: ${what}: recovered differs\n${(error as Error).message.slice(0, 3000)}`,
+        );
       }
     }
 

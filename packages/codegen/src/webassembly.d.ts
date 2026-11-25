@@ -1,6 +1,6 @@
 // The ES2022 lib has no WebAssembly types, this package deliberately loads
 // neither DOM nor node types, and @types/node does not declare them either.
-// These are the parts the wrapper, the asc bindings and the tests use;
+// These are the parts the wrapper and the tests use;
 // consumers get the real ones from their own environment.
 declare namespace WebAssembly {
   // biome-ignore lint/suspicious/noEmptyInterface: an opaque handle, like the real Module type

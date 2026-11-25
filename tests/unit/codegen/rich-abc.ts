@@ -3,9 +3,9 @@
 // multinames of every kind TypeNames included, methods with optional
 // values and parameter names, metadata, a class with a protected
 // namespace, interfaces and traits of every kind, a script, and bodies
-// with exceptions and activation traits. The parity harness sweeps it
-// byte by byte; the reviewer of stage 2 built it.
-import { abc, tables, u30 } from "../unit/codegen/abc-builder.ts";
+// with exceptions and activation traits: a seed of tests/fuzz/abc.ts, and
+// what zig.test.ts checks the Zig tests' copy against.
+import { abc, tables, u30 } from "./abc-builder.ts";
 
 export function richAbc(floats: boolean): Uint8Array {
   const pool = {

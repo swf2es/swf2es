@@ -35,7 +35,6 @@ import { fileURLToPath } from "node:url";
 import { containerEngine, runOracle } from "../../oracle/oracle.ts";
 // The built package, as the player loads it: node runs its .js, not its sources.
 import { createCodegen } from "../../packages/codegen/dist/index.js";
-import { CODEGEN_WASM } from "../compiler.ts";
 import { type Build, loadTesting } from "../unit/codegen/testing-module.ts";
 import { avm1Determinism } from "./determinism-avm1.ts";
 
@@ -128,7 +127,7 @@ function rejected(error: number, abc: Uint8Array, builtin: boolean): string {
  * Each module of a chain and its source map, as `testing` compiles them;
  * each module's methods' entries into `entries`, if given.
  */
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+// biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
 function compile(testing: any, abc: Uint8Array, entries?: Map<number, string>[]): string[] {
   const results: string[] = [];
   const hashes: string[] = [];
@@ -155,14 +154,13 @@ const utf8 = new TextDecoder();
  * and cut at every body (domainPartBudget), not kept and kept: what the
  * host is handed part by part, the first's text in place of the last.
  */
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+// biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
 function compileInParts(testing: any, abc: Uint8Array): string[] {
   const parts = (hashes: string, keep: boolean) => {
     const got = [utf8.decode(testing.domainModuleBytes(hashes, -1, keep, false))];
     while (!testing.domainModuleDone()) {
-      // Collected at every cut, as the wrapper collects: what a part keeps
-      // for the next must be reachable from the module being written.
-      testing.__collect();
+      // Each call gives the last one's arena back: what a part keeps for
+      // the next must be outside it.
       got.push(utf8.decode(testing.domainModuleMoreBytes()));
     }
 
@@ -241,7 +239,7 @@ async function checkAt(): Promise<void> {
   referenceEntries.clear();
   for (const chain of chains) {
     const entries: Map<number, string>[] = [];
-    reference.set(chain.name, compile(await loadTesting("dist-test"), chain.abc, entries));
+    reference.set(chain.name, compile(await loadTesting("testing"), chain.abc, entries));
     referenceEntries.set(chain.name, entries);
     if (reference.get(chain.name)?.at(-1)?.startsWith("rejected")) {
       rejections++;
@@ -258,11 +256,11 @@ async function checkAt(): Promise<void> {
     }
   }
 
-  await oneInstance("after the chains before it", "dist-test", chains, 1);
-  await oneInstance("in reverse, twice in a row", "dist-test", [...chains].reverse(), 2);
-  await oneInstance("in the checked build", "dist-test-checked", chains, 1);
+  await oneInstance("after the chains before it", "testing", chains, 1);
+  await oneInstance("in reverse, twice in a row", "testing", [...chains].reverse(), 2);
+  await oneInstance("in the poison build", "testing-poison", chains, 1);
   {
-    const testing = await loadTesting("dist-test");
+    const testing = await loadTesting("testing");
     for (const chain of chains) {
       const got = compileInParts(testing, chain.abc);
       compare("a part at a time", chain.name, got, reference.get(chain.name) ?? []);
@@ -272,7 +270,7 @@ async function checkAt(): Promise<void> {
   // The release build has the same source for this behind its own entry; the
   // package's API must give the same bytes.
   {
-    const wasm = new URL(`../../packages/codegen/dist/${CODEGEN_WASM}`, import.meta.url);
+    const wasm = new URL("../../packages/codegen/dist/codegen.wasm", import.meta.url);
     const codegen = await createCodegen(await WebAssembly.compile(readFileSync(wasm)));
     for (const chain of chains) {
       const results: string[] = [];
@@ -299,7 +297,7 @@ async function checkAt(): Promise<void> {
   // reverse order, one emitter for all. The
   // builtins are the same in every chain, so checked in the first.
   {
-    const testing = await loadTesting("dist-test");
+    const testing = await loadTesting("testing");
     for (const [c, chain] of chains.entries()) {
       const abcs = [...builtins, chain.abc];
       const want = referenceEntries.get(chain.name) ?? [];

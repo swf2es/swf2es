@@ -21,7 +21,6 @@ import { createCodegen } from "../../packages/codegen/dist/index.js";
 import { isAs3, readActions, readSwf } from "../../packages/format/dist/index.js";
 import { Avm1Assembler, constant, register, Simple } from "../avm1-assembler.ts";
 import { backwardActions, unitActions } from "../avm1-backward.ts";
-import { CODEGEN_WASM } from "../compiler.ts";
 import { testingInstances } from "../unit/codegen/testing-module.ts";
 
 export interface Avm1Swf {
@@ -246,10 +245,10 @@ const utf8 = new TextDecoder();
 
 /**
  * The AVM1 SWFs there are: the tests' blocks as SWFs of three versions,
- * code before a block, and the corpus's, where it was fetched. The parity
- * harness compiles them too (tests/parity).
+ * code before a block, and, where `corpus`, the corpus's, where it was
+ * fetched. tests/golden digests them without the corpus.
  */
-export function avm1Swfs(): Avm1Swf[] {
+export function avm1Swfs(corpus = true): Avm1Swf[] {
   const tests = testBlocks();
   return [
     assembled("the tests' blocks, SWF 4", 4, tests),
@@ -271,7 +270,7 @@ export function avm1Swfs(): Avm1Swf[] {
         lengths: Int32Array.of(offset, bytes.length - offset),
       })),
     ),
-    ...corpusSwfs(),
+    ...(corpus ? corpusSwfs() : []),
   ];
 }
 
@@ -301,11 +300,11 @@ export async function avm1Determinism(): Promise<{
     console.log(`  got:  ${(a[line] ?? "(end)").slice(0, 160)}`);
     console.log(`  want: ${(b[line] ?? "(end)").slice(0, 160)}`);
   };
-  // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+  // biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
   const module = (testing: any, swf: Avm1Swf, keep = false) =>
     utf8.decode(testing.actionsModuleBytes(swf.bytes, swf.offsets, swf.lengths, swf.version, keep));
 
-  const fresh = await testingInstances("dist-test");
+  const fresh = await testingInstances("testing");
   const reference = new Map<Avm1Swf, string>();
   const entries = new Map<Avm1Swf, Map<number, string>>();
   const units = new Map<Avm1Swf, Map<string, { numbers: number[]; unit: string }>>();
@@ -328,9 +327,9 @@ export async function avm1Determinism(): Promise<{
     fresh,
     [...swfs].reverse().flatMap((s) => [s, s]),
   );
-  await oneInstance("in the checked build", await testingInstances("dist-test-checked"), swfs);
+  await oneInstance("in the poison build", await testingInstances("testing-poison"), swfs);
 
-  const wasm = new URL(`../../packages/codegen/dist/${CODEGEN_WASM}`, import.meta.url);
+  const wasm = new URL("../../packages/codegen/dist/codegen.wasm", import.meta.url);
   const codegen = await createCodegen(await WebAssembly.compile(readFileSync(wasm)));
   for (const swf of swfs) {
     const blocks = [...swf.offsets].map((offset, k) => ({ offset, length: swf.lengths[k] }));
