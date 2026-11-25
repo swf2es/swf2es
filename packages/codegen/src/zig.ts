@@ -327,30 +327,35 @@ function bindInstance<T>(
       }
 
       const value = guarded(() => call(...flat));
-      if (starts && exports.codegenError() !== 0) {
+      // What it handed out read inside guarded too: a view past memory's end
+      // (a RangeError) marks the instance dead as a trap in it does.
+      const outOfMemory = starts && guarded(() => exports.codegenError()) !== 0;
+      if (outOfMemory) {
         throw new CodegenOutOfMemory(`codegen-zig.wasm: ${name} ran out of memory`);
       }
 
-      switch (result) {
-        case "void":
-          return undefined;
-        case "bool":
-          return value !== 0;
-        case "str":
-          return handed(value);
-        case "address":
-          return value >>> 0;
-        case "f64x2":
-          return new Float64Array(exports.memory.buffer, value >>> 0, 2).slice();
-        case "f64s":
-          return new Float64Array(
-            exports.memory.buffer,
-            value >>> 0,
-            exports.outputLength() / 8,
-          ).slice();
-        default:
-          return value;
-      }
+      return guarded(() => {
+        switch (result) {
+          case "void":
+            return undefined;
+          case "bool":
+            return value !== 0;
+          case "str":
+            return handed(value);
+          case "address":
+            return value >>> 0;
+          case "f64x2":
+            return new Float64Array(exports.memory.buffer, value >>> 0, 2).slice();
+          case "f64s":
+            return new Float64Array(
+              exports.memory.buffer,
+              value >>> 0,
+              exports.outputLength() / 8,
+            ).slice();
+          default:
+            return value;
+        }
+      });
     };
   }
 

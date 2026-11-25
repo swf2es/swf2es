@@ -487,7 +487,15 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     const at = holds.indexOf(handle);
     if (at >= 0) {
       holds.splice(at, 1);
-      wasm.actionsRelease(handle);
+      // Also called from the finalization registry, which must not throw:
+      // a dead instance's holds went with it.
+      try {
+        wasm.actionsRelease(handle);
+      } catch (error) {
+        if (!(error instanceof CodegenPanic)) {
+          throw error;
+        }
+      }
     }
   };
   const collectedSwfs = new FinalizationRegistry<number>(release);
@@ -620,6 +628,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     if (done && saved) {
       checkpoint = saved;
       journal.clear();
+      restores.clear();
       for (const domain of journalDomains.values()) {
         domain.entries = undefined;
       }
@@ -736,7 +745,8 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     | { kind: "drop" | "evict" | "revive"; appDomain: number }
     | { kind: "restore"; index: number; bytes: Uint8Array }
     | { kind: "found"; definition: FoundDefinition }
-    | { kind: "log"; index: number; operation: number; a: number; b: number };
+    /** A compile's log entries of ABCs of one domain, four words each: kind, ABC, a, b. */
+    | { kind: "log"; words: Uint32Array };
   interface JournalDomain {
     id: number;
     parent?: JournalDomain;
@@ -745,6 +755,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   }
   const journalDomains = new Map<number, JournalDomain>();
   const journal = new Set<Entry>();
+  const restores = new Map<number, Entry>();
   const abcDomains: number[] = [];
   let replayable = true;
   const journaled = (entry: Entry, owner = 0) => {
@@ -776,19 +787,18 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     if (!count) {
       return true;
     }
-    const words = new Uint32Array(wasm.memory.buffer, at, count);
-    for (let i = 0; i < count; i += 4) {
-      journaled(
-        {
-          kind: "log",
-          operation: words[i],
-          index: words[i + 1],
-          a: words[i + 2],
-          b: words[i + 3],
-        },
-        abcDomains[words[i + 1]],
-      );
+    // Packed, a run of entries of one domain's ABCs to a journal entry, so
+    // that a long session's logs take their words and little more.
+    const words = new Uint32Array(wasm.memory.buffer, at, count).slice();
+    let start = 0;
+    for (let i = 4; i <= count; i += 4) {
+      const owner = abcDomains[words[start + 1]];
+      if (i === count || abcDomains[words[i + 1]] !== owner) {
+        journaled({ kind: "log", words: words.subarray(start, i) }, owner);
+        start = i;
+      }
     }
+
     return true;
   };
   function recordChanges<T>(call: () => T): T {
@@ -814,11 +824,32 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       throw error;
     }
 
-    // A missing suffix makes recovery unsafe until the next successful checkpoint.
-    replayable = false;
-    replayable = journalLog(mark);
+    // A missing suffix makes recovery unsafe until the next successful
+    // checkpoint. A panic reading it leaves the journal as it was before the
+    // compile, which recovery then gives back, the compile's changes with
+    // the dead instance: only another failure suspends recovery.
+    try {
+      replayable = journalLog(mark);
+    } catch (error) {
+      if (!(error instanceof CodegenPanic)) {
+        replayable = false;
+      }
+
+      throw error;
+    }
+
     return result;
   }
+  // Whether application domain `d` is `own` or one of its ancestors.
+  const inChain = (d: number, own: number) => {
+    for (let at = journalDomains.get(own | 0); at; at = at.parent) {
+      if (at.id === d) {
+        return true;
+      }
+    }
+
+    return d === 0 && own >= 0;
+  };
   const forgetDropped = (appDomain: number) => {
     const root = journalDomains.get(appDomain | 0);
     if (!root) {
@@ -887,14 +918,22 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           into.domainFound(d.domain, d.nsKind, d.uri, d.name, d.abc, d.asType);
           break;
         }
-        case "log":
-          if (
-            !(into as RecoveryExports).replayEntry(entry.operation, entry.index, entry.a, entry.b)
-          ) {
-            throw new Error(`a compile's log did not replay for ABC ${entry.index}`);
+        case "log": {
+          // Refused where its ABC's domain is not live (evicted since):
+          // nothing compiles against it until a revival, which a rebuild
+          // relinks from what it found. Any other refusal is a divergence.
+          const w = entry.words;
+          for (let i = 0; i < w.length; i += 4) {
+            if (
+              !(into as RecoveryExports).replayEntry(w[i], w[i + 1], w[i + 2], w[i + 3]) &&
+              into.domainState(abcDomains[w[i + 1]] ?? -1) === 0
+            ) {
+              throw new Error(`a compile's log did not replay for ABC ${w[i + 1]}`);
+            }
           }
 
           break;
+        }
       }
 
       into.__collect();
@@ -937,6 +976,8 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     return result;
   };
 
+  // Whether the domain was lost to a panic recovery could not undo (see fresh).
+  let lost = false;
   const api: Codegen = {
     identity,
     abcVersion(abc) {
@@ -956,6 +997,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       chains.clear();
       apiVersion = version;
       journal.clear();
+      restores.clear();
       abcDomains.length = 0;
       replayable = true;
       checkpoint = null;
@@ -1074,7 +1116,15 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
             throw new Error(`ABC ${index}: not of an evicted domain, or rejected (${error})`);
           }
           if (zig) {
-            journaled({ kind: "restore", index, bytes: owned }, abcDomains[index]);
+            // One restore an ABC: a revival retried gives its bytes again.
+            const known = restores.get(index);
+            if (known) {
+              journal.delete(known);
+            }
+
+            const entry: Entry = { kind: "restore", index, bytes: owned };
+            restores.set(index, entry);
+            journaled(entry, abcDomains[index]);
           }
         }
 
@@ -1095,7 +1145,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     },
     found({ domain, nsKind, uri, name, abc, asType }) {
       collected(wasm.domainFound(domain, nsKind, uri, name, abc, asType));
-      if (zig) {
+      // A finding of an ABC outside the finder's chain, which the player
+      // never reports, is not journaled: its replay can part from the
+      // compile (the compiler takes it unchecked, as AssemblyScript's does).
+      if (zig && inChain(abcDomains[abc] ?? -1, domain)) {
         journaled(
           { kind: "found", definition: { domain, nsKind, uri, name, abc, asType } },
           domain,
@@ -1116,7 +1169,8 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       return compiled(hashes, index, false);
     },
     context(index = -1, after = 0, upTo = -1) {
-      if (added === 0) {
+      // A domain lost to a panic has no context until the next reset.
+      if (added === 0 || lost) {
         return null;
       }
 
@@ -1214,7 +1268,19 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
   // Each method recovers from a panic of Zig's compiler (see recover): an
   // ABC whose load panicked is rejected as a corrupt one is, and any other
-  // call that panicked throws a plain Error, the compiler going on.
+  // call that panicked throws a plain Error, the compiler going on. Where
+  // recovery cannot be, the domain is lost, but not the compiler: it goes
+  // on in a fresh instance, as AssemblyScript's stays callable after a
+  // trap, for a reset and what needs no domain (AVM1), and the domain's
+  // calls throw until the next reset.
+  const fresh = () => {
+    wasm = spare ?? recoveryInstance(module);
+    spare = null;
+    holds.length = 0;
+    chains.clear();
+    size = wasm.memory.buffer.byteLength;
+    calls = 0;
+  };
   const descriptors = Object.getOwnPropertyDescriptors(api);
   for (const [name, descriptor] of Object.entries(descriptors)) {
     const method = descriptor.value;
@@ -1222,12 +1288,39 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       continue;
     }
 
+    const domainless = DOMAINLESS.has(name);
     descriptor.value = (...args: unknown[]) => {
+      // An instance left dead outside a call of this wrapper (a finalizer's
+      // release) is recovered from first, or given way to.
+      if ((wasm as { panicked?: () => string | null }).panicked?.() != null && !recover()) {
+        fresh();
+        lost = true;
+      }
+
+      if (lost && !domainless) {
+        throw new Error(
+          `${name}: the compiler's domain was lost to a panic it could not recover from; reset it`,
+        );
+      }
+
       try {
-        return method.apply(api, args);
+        const result = method.apply(api, args);
+        if (name === "reset") {
+          lost = false;
+        }
+
+        return result;
       } catch (error) {
-        if (!(error instanceof CodegenPanic) || !recover()) {
+        if (!(error instanceof CodegenPanic)) {
           throw error;
+        }
+
+        if (!recover()) {
+          fresh();
+          lost = name !== "reset";
+          throw new Error(
+            `${name}: ${error.message}; the compiler went on in a new instance, its domain lost`,
+          );
         }
 
         if (name === "add") {
@@ -1241,6 +1334,21 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
   return Object.defineProperties({}, descriptors) as Codegen;
 }
+
+/** What a lost domain does not stop (see lost): a reset, AVM1, and what reads no domain. */
+const DOMAINLESS = new Set([
+  "reset",
+  "abcVersion",
+  "compileActions",
+  "compileActionsModule",
+  "compileActionBlocks",
+  "compileActionUnit",
+  "releaseActions",
+  "heldActions",
+  "memoryBytes",
+  "usage",
+  "context",
+]);
 
 /** An ABC with nothing in it, which a dropped domain's ABCs give way to in the journal of calls. */
 const EMPTY_ABC = Uint8Array.of(16, 0, 46, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);

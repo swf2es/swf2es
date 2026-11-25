@@ -175,6 +175,38 @@ test("a load that panics Zig's compiler is rejected, and the domain goes on in a
   assert.equal(codegen.compileModule(["a", "b"], 1).length > 0, true);
 });
 
+test("a panic recovery cannot undo loses the domain, not the compiler: reset and AVM1 go on", async () => {
+  const codegen = await createCodegen(await zigTestingModule(false));
+  codegen.reset();
+  assert.equal(codegen.add(script([0x24, 7, 0x48])), 0);
+  // The instance a recovery would replay into cannot be made, once: the
+  // domain is lost, and a fresh instance takes the dead one's place.
+  const Instance = WebAssembly.Instance;
+  let refusals = 1;
+  WebAssembly.Instance = new Proxy(Instance, {
+    construct(target, args) {
+      if (refusals-- > 0) {
+        throw new Error("refused for the test");
+      }
+
+      return Reflect.construct(target, args);
+    },
+  });
+  try {
+    assert.throws(() => codegen.add(new TextEncoder().encode("\0panic")), /its domain lost/);
+  } finally {
+    WebAssembly.Instance = Instance;
+  }
+
+  assert.throws(() => codegen.compileModule([], 0), /reset it/);
+  assert.equal(codegen.context(0), null);
+  assert.deepEqual(codegen.abcVersion(Uint8Array.of(16, 0, 46, 0)), { major: 46, minor: 16 });
+  assert.equal(codegen.heldActions().held, 0);
+  codegen.reset();
+  assert.equal(codegen.add(script([0x24, 9, 0x48])), 0);
+  assert.ok(codegen.compileModule([], 0).length > 0);
+});
+
 test("recovery keeps ancestor resolutions after the compiling child is dropped", async () => {
   const compiler = await createCodegen(await zigTestingModule(false));
   const { builtin, user } = linkAbcs();
