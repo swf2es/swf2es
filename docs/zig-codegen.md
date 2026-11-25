@@ -308,13 +308,21 @@ what is live, and to decide on deleting them from measurements.
 | Memory against live weight | 1.7× to 4× (`rebuiltSize`, the policy) | 1.3× to 2× of a smaller live | live + one call + slack |
 | 300 real loads | 250 MB, 9 rebuilds, about 31 s | 120 to 180 MB, as many rebuilds, shorter | 40 to 100 MB, no rebuilds |
 | 100 dropped domains, then compact | 64 → 12 MB | about the same | never reaches 64 |
-| Libraries alone | 8 MB | 4 to 6 MB | the same |
+| Libraries alone | 8 MB | 4 to 6 MB; measured 11.6 MiB (below) | the same |
 
 The M2 line assumes live weight of 60 to 150 MB by today's estimate
 (250 MB over the 1.7× to 4× the policy keeps) and half to two thirds of
 it in Zig's layout. `tests/bench/codegen-session.ts` (#1185) prints
 memory, live and dead weight and rebuilds, and measures each step; the
 first M1 measurement replaces this table.
+
+*Measured in M1 (stage 6):* the libraries alone reach 11.6 MiB of wasm
+memory in Zig, against AssemblyScript's 8.0, not 4 to 6: builtin and
+playerglobal added take 4.0 in both, and compiling playerglobal's module
+takes Zig's call arena and module text to 11.6 where AssemblyScript's
+collector stays within its 8.0. After 30 loads of builtin into children
+that are dropped and compacted, Zig is at 8.8 MiB and AssemblyScript at
+16.0. 300 real loads: see stage 6 below.
 
 ## 3. Interface
 
@@ -1010,7 +1018,15 @@ Stage 6 (the exports and lifetimes), as built:
   Each recovery invalidates outstanding cache reads with a new revision token.
   If a compile stops with a partial verifier log, further calls can still use
   the instance. A later panic can recover once a rebuild checkpoints it or a
-  reset starts a fresh domain.
+  reset starts a fresh domain. A panic recovery cannot undo loses the
+  domain, not the compiler: a fresh instance takes the dead one's place,
+  a reset and what reads no domain (AVM1, `abcVersion`) go on, and the
+  domain's calls throw until the next reset, where AssemblyScript's stays
+  callable after a trap. A finding of an ABC outside the finder's chain,
+  which the player never reports, is not journaled, as its replay can
+  part from the compile (the compiler takes it unchecked, as
+  AssemblyScript's does); a compile's log entry against an ABC whose
+  domain has since been evicted is skipped on replay.
 - *Writes outside put.* A stepped verifier truncates its log entry in a
   later call than the one that added it, and a push in the same call may
   write over that row: a rollback writes it back (`Domain.truncated`).
@@ -1021,9 +1037,13 @@ Stage 6 (the exports and lifetimes), as built:
   Other workloads shared the machine, so the timing comparison is
   inconclusive. At 25-load intervals Zig's recovery payload peaked at
   2.4 MiB outside Wasm, counting owned ABC bytes, serialized checkpoint
-  state and four 32-bit words per recorded compile entry. JavaScript object
-  overhead and memory shared in time by the old and spare instances are
-  separate.
+  state and four 32-bit words per recorded compile entry. Those words
+  are packed, a run of one domain's ABCs to a typed array, so that a
+  log entry takes its 16 bytes and about 9 more of JavaScript heap (the
+  libraries' 8,023 entries: 0.07 MiB of heap), where the review measured
+  94 bytes an entry with an object each. A restore is kept once an ABC
+  however often a revival is retried. Memory shared in time by the old
+  and spare instances is separate.
 
 **Release mode, decided.** The user's decision after stage 5: the
 release ships in ReleaseSafe. About 180 KB gzipped is fine, so section
