@@ -111,7 +111,7 @@ desktop app, sockets and files.
 packages/
   native/        WebAssembly: fills, lines and bitmap kernels (Zig), zlib and LZMA, MP3
   format/        SWF container and tag parsers
-  codegen/       bytecode → ES modules, in AssemblyScript (codegen.wasm), for JIT and AOT
+  codegen/       bytecode → ES modules, in Zig (codegen.wasm), for JIT and AOT
   runtime/       the AS3 and AVM1 language runtimes
   render/        the renderer: scene list, planner and WebGL 2 backend
   player/        display list, timeline, playerglobal, and the view that drives render/

@@ -129,7 +129,9 @@ must match it line for line, as the conformance cases must match
 avmshell's.
 
 CI (`.github/workflows/ci.yml`) runs `pnpm check`, the typecheck and the
-native binaries' rebuild in a job of its own, and `pnpm test` and `pnpm
+native binaries' rebuild in a job of its own, the compiler's (its Zig
+modules built again and held to their digests, and the generated code held
+to `tests/golden/digests.json`) in another, and `pnpm test` and `pnpm
 test:checked` split into parts side by side: the player's cases in
 thirds (`run.ts --shard i/n`), its other checks, the compiler's packages
 with `pnpm determinism` and the Tamarin subset after them, and the pages
@@ -201,11 +203,13 @@ and checks that the compiler does not trap, that a module it accepts
 imports as an ES module, and that each of its methods compiled alone is its
 entry in the module. A seeded generator makes a run repeat; a failing case
 is written to `tests/fuzz/out/failures/`. `pnpm test` runs a short round,
-`pnpm test:checked` the same in the build that checks every array access,
-which catches a read past a table's end the release build lets through.
+on the test build, whose every access is checked as the release build's
+is, and `pnpm test:checked` the same on the build that fills freed and
+rolled-back memory with 0xAA, which catches output that reads memory it
+no longer owns.
 
 `tests/fuzz/avm1.ts` does the same for AVM1's decoder and flow
-(`codegen/assembly/avm1/`): action blocks generated from the actions'
+(`codegen/zig/src/avm1/`): action blocks generated from the actions'
 grammar, nested bodies and branches among them, and shapes at the edges
 (bodies that jump back before their own start, long `WaitForFrame` chains,
 deep nesting, blocks that read the same bytes from many offsets), mutated

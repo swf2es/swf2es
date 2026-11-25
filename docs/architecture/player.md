@@ -492,7 +492,7 @@ line `\tat Name()` for each compiled method on that stack, named as Flash
 names it ("Test/get x", "Test$cinit", "global$init",
 "Function/<anonymous>"). Codegen spells that name into each function's
 identifier, "$_" and the name with `$` escapes
-(`assembly/avm2/emit/stack-names.ts`), and the runtime reads it back
+(`zig/src/avm2/emit/stack-names.zig`), and the runtime reads it back
 (`stackNames` in `errors.ts`), so release builds run and emit nothing more
 for it. A module minified after it was compiled ahead of time loses those
 names, and its stack traces with them. Flash also lists its native

@@ -1,6 +1,10 @@
 # The compiler in Zig
 
-Status: under way, on stacked pull requests from stage 0 (`zig/stage-0`,
+Status: ported. Stage 7 (`zig/stage-7`) swapped the compilers and deleted
+the AssemblyScript one, with no release that kept both; the tag
+`zig-last-parity` is the last commit that has both, where the whole parity
+harness ran, and comments that name `assembly/...` mean its files there.
+The port was done on stacked pull requests from stage 0 (`zig/stage-0`,
 on `dev` at 52aac10d, the merge of #1185). The plan was read against
 `dev` at fcecef29 and #1185; the earlier spikes are on local branches,
 `experiment/zig-abc` and `experiment/zig-avm1`. Where this says
@@ -433,7 +437,8 @@ go on at once in separate worktrees, and parity is then reached in
 order.
 
 **Can the two coexist? Yes, and they should, as two whole compilers.**
-Recommended:
+Recommended (and done, until stage 7 removed the switch with the
+AssemblyScript compiler):
 
 - Two wasm files in `@swf2es/codegen`'s `dist/`: `codegen.wasm`
   (AssemblyScript, the default) and `codegen-zig.wasm`, with the test
@@ -511,10 +516,13 @@ Zig wasm again with fresh caches and fails on a difference from
 `digests.json`, and runs the harness on the stages the Zig one has. The existing jobs stay on
 AssemblyScript. Before the swap: the whole of `pnpm test`, `pnpm
 corpus` and `pnpm tamarin:swf2es` once with `SWF2ES_COMPILER=zig`, in CI.
-After the swap: the jobs run on Zig, and the parity job runs with the
-roles reversed for one release, then goes with `assembly/`. From then
-on output is held by determinism, conformance, Tamarin and the corpus,
-as now. An open question below asks whether to also keep digests.
+After the swap, done in stage 7 with no release between: the jobs run on
+Zig, and the parity job went with `assembly/`. From then on output is held
+by determinism, conformance, Tamarin and the corpus, as before, and by
+golden digests (`tests/golden/`, question 8 below): what the compiler makes
+of the libraries, the unit tests' ABCs, the conformance cases and AVM1
+blocks, generated from the binary the last parity run held to
+AssemblyScript's, and moved only by a change that means to move them.
 
 ## 6. AssemblyScript behaviour to copy
 
@@ -644,7 +652,7 @@ proof, not this list.
 
 ## 7. Build, toolchain and size
 
-**Today.** `pnpm build` runs asc (`assemblyscript` 0.28, a
+**Before the port.** `pnpm build` ran asc (`assemblyscript` 0.28, a
 devDependency) on `asconfig.json`: `dist/codegen.wasm` at `-O3`,
 unchecked, 259 KB with #1185 (94 KB gzipped), then `stamp.ts`, then the
 test build `dist-test/testing.wasm` (271 KB). `pnpm test:checked` builds
@@ -657,10 +665,11 @@ more:
 - The pinned Zig 0.17.0 through `tools/zig.ts` (`findZig`,
   `ZIG_VERSION`), never upgraded.
 - `packages/codegen/zig/build.ts`, on `tools/zig.ts`'s `runZig` and
-  `inputDigest`: `pnpm build` runs it after asc. It builds
-  `dist/codegen-zig.wasm`, stamped by `stamp.ts` as `codegen.wasm` is,
-  and the test builds `dist-test/testing-zig.wasm` and
-  `testing-zig-poison.wasm`. Nothing is checked in but
+  `inputDigest`: `pnpm build` runs it. It builds `dist/codegen.wasm`
+  (during the port `codegen-zig.wasm`, beside asc's), stamped by
+  `stamp.ts`, and the test builds `dist-test/testing.wasm` and
+  `testing-poison.wasm` (during the port `testing-zig.wasm` and
+  `testing-zig-poison.wasm`). Nothing is checked in but
   `packages/codegen/zig/digests.json`: the digest of the inputs (the Zig
   sources, `build.zig`, `build.ts`, `stamp.ts`, `ZIG_VERSION`) and each
   module's SHA-256. A build whose inputs are the digested ones and
@@ -676,7 +685,7 @@ more:
   releases). CI caches it and Zig's caches. Only Linux builds are
   checked against the digests, here and in CI; another host's differing
   module shows as `pnpm build`'s warning.
-- CI's `zig` job runs `build.ts --verify`: the inline tests, a build with
+- CI's `codegen` job (`zig` during the port) runs `build.ts --verify`: the inline tests, a build with
   fresh caches, and a failure where the inputs or a module are not
   `digests.json`'s. The builds are deterministic: the same digests from
   fresh and kept caches, here and in CI.
@@ -685,15 +694,16 @@ more:
   float-to-int, sign extension and mutable globals, single-threaded and
   stripped, plus a build with names for reading a trap's stack.
 - `tools/notices.ts` gains Zig's standard library (MIT) for what is
-  compiled in, and loses AssemblyScript's notice after the deletion.
-  `dtoa.zig` is translated from AssemblyScript's standard library
-  (Apache-2.0) and says so.
+  compiled in. AssemblyScript's notice stays after the deletion, reworded:
+  `dtoa.zig` and `parse.zig` are translated from AssemblyScript's standard
+  library (Apache-2.0), say so, and are compiled into `codegen.wasm`.
 
 **Release mode: ReleaseSafe**, as agreed. A wrong index in the compiler
 would otherwise become wrong JavaScript run with the page's privileges.
-It also ends the separate checked build: `pnpm test:checked`,
-`dist-test-checked` and `SWF2ES_CHECKED` go, since the shipped build is
-the checked one.
+It also ends the separate checked build, `dist-test-checked`, since the
+shipped build is the checked one. `pnpm test:checked` and `SWF2ES_CHECKED`
+stay, for the player's own checks (its shortcuts and the renderer's spans
+against full walks), and run the compiler's tests on the 0xAA build.
 
 A panic is `env.abort`, with its message, and a trap. `src/zig.ts`
 throws it as a `CodegenPanic` and marks the instance dead: every later
@@ -1162,27 +1172,28 @@ in both; each stage's pull request is rebased on `dev` as `dev` moves,
 and the parity job runs on the stack's top. Nothing reaches `dev` until
 the stack is complete and merged.
 
-**Swap.** One commit: `SWF2ES_COMPILER` defaults to `zig`,
-`dist/codegen.wasm` is the Zig build, and the AssemblyScript one is
-kept as `codegen-as.wasm` for the parity job and for `SWF2ES_COMPILER=as`.
-Caches refill by themselves, since the identity changed.
-
-**Rollback.** Before the deletion, set the default back: one line, and
-caches refill again. The modules are the same bytes either way, so
-nothing a page has compiled or cached is wrong under the other
-compiler. After the deletion, rollback is a revert of the deletion
-commit, which is why it waits a release.
-
-**Deleted after one release on Zig:** `packages/codegen/assembly/`,
-`asconfig.json`, `asconfig.base.json`, `asconfig.testing.json`, the
-`assemblyscript` devDependency, the asc scripts in `package.json`, the
+**Swap, as done.** The user decided against a release that kept both
+compilers. Stage 7 swapped and deleted at once: `dist/codegen.wasm` is the
+Zig build (the same bytes as `codegen-zig.wasm` at `zig-last-parity`), and
+gone are `packages/codegen/assembly/`, `asconfig.json`,
+`asconfig.base.json`, `asconfig.testing.json`, the `assemblyscript`
+devDependency and its patch, the asc scripts in `package.json`, the
 generated glue and `tsconfig.json`'s `rootDirs` for it, `__collect` and
-`COLLECT_EVERY` in `src/index.ts` and `testing-module.ts`,
-`test:checked` and the checked build, the parity job and `tests/parity/`,
-the `assembly` entries in `knip.json` and `biome.json`, AssemblyScript's
-notice, and the AssemblyScript section of AGENTS.md, replaced by Zig's
-rules. Then, with M2: the rebuild, the weights and the compaction
-policy, and `compactSoon` in the player.
+`COLLECT_EVERY` in `src/index.ts` and `testing-module.ts`, the checked
+build, the switch (`SWF2ES_COMPILER`, `tests/compiler.ts`), the parity job
+and `tests/parity/` (its hand-built ABCs moved to `tests/unit/codegen/`,
+its structured bodies to `tests/fuzz/`), the `assembly` entries in
+`knip.json` and `biome.json`, and the AssemblyScript section of AGENTS.md,
+replaced by Zig's rules. AssemblyScript's notice stays, for the code
+ported from its standard library (section 7). Caches refill by
+themselves, as a build's identity names its bytes. Then, with M2: the
+rebuild, the weights and the compaction policy, and `compactSoon` in the
+player.
+
+**Rollback** is a revert of the stack's merge into `dev`: it brings the
+AssemblyScript compiler, the switch and the parity job back as they were
+at the merge. The modules are the same bytes either way, so nothing a
+page has compiled or cached is wrong under the other compiler.
 
 ## 10. Risks and open questions
 
