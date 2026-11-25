@@ -8,8 +8,9 @@
 // save is lost, and both start again.
 //
 //   node tests/fuzz/recovery.ts [seeds, 20] [first seed, 1] [steps, 300]
-//   (COMPACT=1 compacts too, both at the same steps, TRANSIENT=1 with
-//   domains made, filled and let go of; PANIC_RATE, VERBOSE=1, STOP=1, DUMP=dir)
+//   (COMPACT=1 compacts too, both at the same steps, in spare instances,
+//   INPLACE=1 in place half the time, TRANSIENT=1 with domains made,
+//   filled and let go of; PANIC_RATE, VERBOSE=1, STOP=1, DUMP=dir)
 import assert from "node:assert/strict";
 import * as dumpFs from "node:fs";
 import { readFileSync } from "node:fs";
@@ -41,11 +42,13 @@ const builtin = new Uint8Array(readFileSync(`${TREE}/oracle/avmplus/generated/bu
 
 // Every instance's exports, the ones a recovery makes too, with panics
 // injected where `inject` names an export, once; and under COMPACT a
-// rebuild wanted only where `compacting` says, and only in a spare
-// instance, so that A and B, whose memory differs after A's recoveries,
-// rebuild at the same steps: one in place must fit in memory already taken.
+// rebuild wanted only where `compacting` says: in a spare instance, or
+// with INPLACE in place too. A and B, whose memory differs after A's
+// recoveries, must rebuild at the same steps, and one in place must fit
+// in memory already taken: where only one did, the other then moves.
+const INPLACE = process.env.INPLACE === "1";
 let inject: string | null = null;
-let compacting = false;
+let compacting: "no" | "move" | "in place" = "no";
 let refusals = 0;
 const wrapped = (instance: WebAssembly.Instance) => {
   const raw = instance.exports as Record<string, (...args: number[]) => number>;
@@ -62,9 +65,11 @@ const wrapped = (instance: WebAssembly.Instance) => {
   }
 
   if (COMPACT) {
-    // WANT_Spare always, WANT_Move when compacting, never in place.
+    // WANT_Spare always; WANT_Move or WANT_InPlace and WANT_InPlaceBesideSpare as compacting says.
     exports.domainWantsCompact = (want: number) =>
-      want === 3 || (want === 2 && compacting) ? 1 : 0;
+      want === 3 || (want === 2 && compacting === "move") || (want < 2 && compacting === "in place")
+        ? 1
+        : 0;
   }
 
   return { exports } as unknown as WebAssembly.Instance;
@@ -192,6 +197,11 @@ async function run(seed: number): Promise<Counts> {
     const fs = dumpFs;
     const results = all.map((g) => outcome(() => call(g)));
     say(`${what} -> ${JSON.stringify(results[1])?.slice(0, 120)}`);
+    // B has no panic injected, so none to recover from.
+    assert.ok(
+      results[1].error !== "panic" && results[1].error !== "lost",
+      `seed ${seed}: ${what}: B reports ${results[1].error}`,
+    );
     if (compare) {
       for (let k = 0; k < results.length; k++) {
         try {
@@ -496,10 +506,19 @@ async function run(seed: number): Promise<Counts> {
       }
 
       await new Promise((resolve) => setTimeout(resolve, 5));
-      compacting = true;
+      compacting = INPLACE && r() < 0.5 ? "in place" : "move";
+      const how = compacting;
       const done = all.map((g) => outcome(() => g.compact()));
-      compacting = false;
-      say(`compact -> ${JSON.stringify(done)}`);
+      if (compacting === "in place" && done[0].value !== done[1].value) {
+        // Only one fitted in place: the other rebuilds in its spare.
+        const behind = done[0].value ? 1 : 0;
+        compacting = "move";
+        done[behind] = outcome(() => all[behind].compact());
+        say(`compact in place by one, moved by the other -> ${JSON.stringify(done)}`);
+      }
+
+      compacting = "no";
+      say(`compact ${how} -> ${JSON.stringify(done)}`);
       assert.deepEqual(done[0], done[1], `seed ${seed}: compact at step ${step}`);
       if (done[0].value) {
         counts.compactions++;
