@@ -725,13 +725,19 @@ export function loadDomain(words: Uint8Array): Loaded | null {
 function consistent(dom: Domain): bool {
   const domains = <u32>dom.domainParent.length;
   const abcs = <u32>dom.abcs.length;
-  if (domains === 0) {
+  // The root is never evicted nor dropped: what walks up evicted parents stops at it.
+  if (domains === 0 || dom.domainState[0] !== DOMAIN_Live) {
     return false;
   }
 
   for (let d: u32 = 0; d < domains; d++) {
     const parent = dom.domainParent[d];
     if ((d === 0 ? parent !== -1 : parent < 0 || <u32>parent >= d) || dom.domainState[d] > 2) {
+      return false;
+    }
+
+    // Each domain a level below its parent, as domainChild makes it.
+    if (dom.domainDepth[d] !== (d === 0 ? 0 : dom.domainDepth[parent] + 1)) {
       return false;
     }
   }

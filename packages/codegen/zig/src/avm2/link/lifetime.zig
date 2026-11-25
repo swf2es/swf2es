@@ -768,7 +768,8 @@ fn livesGiven(loaded: *const Loaded) bool {
 fn consistent(dom: *const Domain) bool {
     const domains = dom.domainParent.len;
     const abcs = dom.abcs.len;
-    if (domains == 0) {
+    // The root is never evicted nor dropped: what walks up evicted parents stops at it.
+    if (domains == 0 or dom.domainState.get(0) != DOMAIN_Live) {
         return false;
     }
 
@@ -777,6 +778,12 @@ fn consistent(dom: *const Domain) bool {
         const parent = dom.domainParent.get(d);
         const bad = if (d == 0) parent != -1 else parent < 0 or @as(u32, @intCast(parent)) >= d;
         if (bad or dom.domainState.get(d) > 2) {
+            return false;
+        }
+
+        // Each domain a level below its parent, as domainChild makes it.
+        const depth: u64 = if (d == 0) 0 else @as(u64, dom.domainDepth.get(@intCast(parent))) + 1;
+        if (dom.domainDepth.get(d) != depth) {
             return false;
         }
     }
