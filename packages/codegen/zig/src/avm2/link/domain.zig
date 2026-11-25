@@ -1208,7 +1208,8 @@ pub const Domain = struct {
             }
 
             const i: u32 = @intCast(id);
-            if (self.bindingNs.get(i) == ns and self.bindingName.get(i) == name and self.bindingVersion.get(i) <= version) {
+            // The slot's hash first: most slots a probe passes hold another key.
+            if (b.hashAt(slot) == hash and self.bindingNs.get(i) == ns and self.bindingName.get(i) == name and self.bindingVersion.get(i) <= version) {
                 return id;
             }
 
@@ -1316,13 +1317,20 @@ pub const Domain = struct {
         }
 
         const b = &self.bindings;
-        var slot = b.start(hashPair(ns, name));
+        const hash = hashPair(ns, name);
+        var slot = b.start(hash);
         var best: i32 = -1;
         var bestDepth: u32 = 0;
         while (true) {
             const id = b.at(slot);
             if (id < 0) {
                 return best;
+            }
+
+            // The slot's hash first: most slots a probe passes hold another key.
+            if (b.hashAt(slot) != hash) {
+                slot = b.next(slot);
+                continue;
             }
 
             const i: u32 = @intCast(id);
@@ -1349,13 +1357,19 @@ pub const Domain = struct {
         }
 
         const t = &self.types;
-        var slot = t.start(hashPair(ns, name));
+        const hash = hashPair(ns, name);
+        var slot = t.start(hash);
         var best: i32 = -1;
         var bestDepth: u32 = 0;
         while (true) {
             const id = t.at(slot);
             if (id < 0) {
                 return best;
+            }
+
+            if (t.hashAt(slot) != hash) {
+                slot = t.next(slot);
+                continue;
             }
 
             const i: u32 = @intCast(id);
