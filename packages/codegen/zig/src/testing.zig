@@ -171,6 +171,20 @@ export fn domainTraitsCount() i32 {
     };
 }
 
+export fn benchParse(bytes: [*]const u8, len: u32, rounds: i32) i32 {
+    return abc.benchParse(root.gpa(), bytes[0..len], rounds) catch |err| {
+        _ = root.fail(err);
+        return 0;
+    };
+}
+
+export fn benchDecode(bytes: [*]const u8, len: u32, rounds: i32) i32 {
+    return abc.benchDecode(root.gpa(), bytes[0..len], rounds) catch |err| {
+        _ = root.fail(err);
+        return 0;
+    };
+}
+
 export fn codeDump(bytes: [*]const u8, len: u32, is_builtin: bool) usize {
     return root.handOut(abc.codeDump(root.gpa(), bytes[0..len], is_builtin) catch |err| return root.failWriting(err));
 }

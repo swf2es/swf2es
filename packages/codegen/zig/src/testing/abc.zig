@@ -366,6 +366,44 @@ pub fn codeDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const 
     return out.written();
 }
 
+/// Parse `bytes` `rounds` times, for tests/bench/bench.ts: the methods an
+/// ABC has. Each round's tables are given back before the next.
+pub fn benchParse(gpa: Allocator, bytes: []const u8, rounds: i32) Allocator.Error!i32 {
+    const data = try padded(gpa, bytes);
+    var methods: i32 = 0;
+    for (0..@intCast(@max(rounds, 0))) |_| {
+        const saved = memory.call.mark();
+        defer memory.call.restore(saved);
+        const abc = try readAbc(gpa, gpa, data, @intCast(bytes.len), false);
+        methods +%= @intCast(abc.methodCount());
+    }
+
+    return methods;
+}
+
+/// Parse `bytes` once, then decode every body `rounds` times, for
+/// tests/bench/bench.ts: the instructions a round decodes.
+pub fn benchDecode(gpa: Allocator, bytes: []const u8, rounds: i32) Allocator.Error!i32 {
+    const data = try padded(gpa, bytes);
+    const abc = try readAbc(gpa, gpa, data, @intCast(bytes.len), false);
+    if (abc.@"error" != 0) {
+        return 0;
+    }
+
+    var decoder: BodyDecoder = try .init(gpa, abc, data, null, 0);
+    var instructions: i32 = 0;
+    for (0..@intCast(@max(rounds, 0))) |_| {
+        instructions = 0;
+        // The decoder keeps its scratch from one body to the next.
+        for (0..abc.bodyCount()) |b| {
+            const code = try decoder.decode(@intCast(b), null);
+            instructions +%= @intCast(code.count);
+        }
+    }
+
+    return instructions;
+}
+
 pub fn opcodeTable(gpa: Allocator) Error![]const u8 {
     var out: Output = try .init(gpa);
     const w = out.writer();

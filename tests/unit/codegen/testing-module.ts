@@ -1,18 +1,58 @@
-// Loads the test build of codegen (packages/codegen/assembly/testing.ts).
-//
-// Its runtime collects garbage only when asked, between calls: every
-// COLLECT_EVERY calls, and after a call that grew memory. Memory never
-// shrinks, so collecting only on growth would let each cycle's garbage grow
-// it a little further.
+// Loads the compiler's test builds (packages/codegen/zig/src/testing.zig):
+// the compiler's exports and the tests' own, bound as
+// packages/codegen/src/zig.ts binds the compiler's.
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { COMPILER } from "../../compiler.ts";
-import { bindTesting, zigTestingModule } from "./zig-testing.ts";
+import { bind, SIGNATURES, type Signature } from "../../../packages/codegen/dist/zig.js";
 
-/** The release build, or the one that checks every array access (pnpm test:checked). */
-export type Build = "dist-test" | "dist-test-checked";
+/**
+ * The test build, or the one that fills every freed run and rolled-back
+ * allocation with 0xAA, which must give the same output.
+ */
+export type Build = "testing" | "testing-poison";
 
-const COLLECT_EVERY = 64;
+/** The build the tests run on: the 0xAA build under SWF2ES_CHECKED (pnpm test:checked). */
+export const TESTED: Build = process.env.SWF2ES_CHECKED ? "testing-poison" : "testing";
+
+const TESTING_SIGNATURES: Record<string, Signature> = {
+  memoryChunksUsed: ["", "i32"],
+  // Read as unsigned, as an address is: memory past 2 GiB.
+  memoryReached: ["", "address"],
+  memoryTopRuns: ["", "i32"],
+  memoryReserve: ["i32", "void"],
+  testingPanic: ["", "void"],
+  testingOverflow: ["i32", "i32"],
+  stackPaint: ["", "void"],
+  stackDeepest: ["", "i32"],
+  avm1Opcodes: ["", "str"],
+  avm1Dump: ["u8s", "str"],
+  avm1Check: ["u8s", "str"],
+  avm1Action: ["u8s i32", "str"],
+  readAll: ["u8s u8s", "f64s"],
+  poolDump: ["u8s", "str"],
+  abcDump: ["u8s bool=false", "str"],
+  opcodeTable: ["", "str"],
+  domainFind: ["i32 str str i32 i32=0", "str"],
+  domainSummary: ["", "str"],
+  domainTraits: ["i32", "str"],
+  domainResolve: ["i32", "i32"],
+  domainBuiltins: ["", "str"],
+  domainSlotTypes: ["i32 i32", "str"],
+  domainTraitsCount: ["", "i32"],
+  unspecifiedReads: ["", "i32"],
+  benchParse: ["u8s i32", "i32"],
+  benchDecode: ["u8s i32", "i32"],
+  codeDump: ["u8s bool=false", "str"],
+  domainVerifyAll: ["", "str"],
+  domainIr: ["i32", "str"],
+  domainCheckIr: ["", "str"],
+  domainIrAll: ["", "str"],
+  domainEmit: ["i32", "str"],
+  domainEmitEach: ["str bool i32=-1", "str"],
+  domainEmitEachBytes: ["str bool i32=-1", "address"],
+  domainPartBudget: ["i32", "void"],
+  domainRebuild: ["bool=false", "bool"],
+};
 
 /** The exports that hand UTF-8 out where it is in memory, by address, outputLength bytes of it. */
 const HANDED_OUT = new Set([

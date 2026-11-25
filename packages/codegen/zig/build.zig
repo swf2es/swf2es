@@ -91,6 +91,8 @@ const testing_exports = exports ++ [_][]const u8{
     "domainSlotTypes",
     "domainTraitsCount",
     "unspecifiedReads",
+    "benchParse",
+    "benchDecode",
     "codeDump",
     "domainVerifyAll",
     "domainIr",
