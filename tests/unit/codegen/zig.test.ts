@@ -211,8 +211,10 @@ test("a panic recovery cannot undo loses the domain, not the compiler: reset and
 
   assert.throws(() => codegen.compileModule([], 0), /reset it/);
   assert.equal(codegen.context(0), null);
-  // The player drops a domain from a finalizer, where a throw goes nowhere.
+  // The player drops a domain from a finalizer, and compacts from a timer,
+  // where a throw goes nowhere.
   codegen.dropDomain(child);
+  assert.equal(codegen.compact(), false);
   assert.deepEqual(codegen.abcVersion(Uint8Array.of(16, 0, 46, 0)), { major: 46, minor: 16 });
   assert.equal(codegen.heldActions().held, 0);
   const actions = new Avm1Assembler().push("hello").trace().stop().bytes();
@@ -264,6 +266,37 @@ test("a reset that panics past recovery leaves the domain lost until the next re
   codegen.reset();
   assert.equal(codegen.add(script([0x24, 9, 0x48])), 0);
   assert.ok(codegen.compileModule([], 0).length > 0);
+});
+
+test("an address handed out past memory's end is read as a panic, and recovered from", async (t) => {
+  const module = await zigTestingModule(false);
+  let bogus = false;
+  t.mock.method(WebAssembly, "instantiate", async (module: WebAssembly.Module, imports: object) => {
+    const instance = new WebAssembly.Instance(module, imports);
+    const raw = instance.exports as { domainModuleBytes(...args: number[]): number };
+    return {
+      exports: {
+        ...instance.exports,
+        domainModuleBytes(...args: number[]) {
+          const address = raw.domainModuleBytes(...args);
+          if (bogus) {
+            bogus = false;
+            return 0xfffffff0;
+          }
+
+          return address;
+        },
+      },
+    };
+  });
+
+  const codegen = await createCodegen(module);
+  codegen.reset();
+  assert.equal(codegen.add(script([0x24, 7, 0x48])), 0);
+  const want = codegen.compileModule([], 0);
+  bogus = true;
+  assert.throws(() => codegen.compileModule([], 0), /went on in a new instance/);
+  assert.equal(codegen.compileModule([], 0), want);
 });
 
 test("recovery keeps ancestor resolutions after the compiling child is dropped", async () => {

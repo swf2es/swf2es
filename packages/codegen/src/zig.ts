@@ -256,6 +256,10 @@ function bindInstance<T>(
     // Each call's arena is given back as the next starts: nothing to collect.
     __collect() {},
     panicked: () => state.panic,
+    // What a call handed out, at an address it returned, read inside the
+    // guard: a view past memory's end marks the instance dead as a trap does.
+    view: (address: number, length: number) =>
+      guarded(() => new Uint8Array(exports.memory.buffer, address >>> 0, length)),
   };
   for (const [name, [spec, result]] of Object.entries(signatures)) {
     const call = exports[name] as ((...args: number[]) => number) | undefined;
