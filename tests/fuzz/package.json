@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node abc.ts && node domains.ts && node recovery.ts 6 1 200 && node saved.ts && node avm1.ts && node compress.ts && node atf.ts && node pbj.ts && node tessellate.ts"
+    "test": "node abc.ts && node domains.ts && node recovery.ts 6 1 200 && COMPACT=1 TRANSIENT=1 node recovery.ts 3 1 300 && node saved.ts && node avm1.ts && node compress.ts && node atf.ts && node pbj.ts && node tessellate.ts"
   },
   "dependencies": {
     "@swf2es/codegen": "workspace:*"

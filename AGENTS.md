@@ -77,6 +77,11 @@ node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]   # native fills match ind
                               # coverage under both winding rules, including crossing contours
 node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revivals and rebuilds of
                               # application domains change no module against a reference
+node tests/fuzz/recovery.ts [seeds, 20] [first seed, 1] [steps, 300]   # panics injected into
+                              # the compiler: createCodegen recovers to the domain an instance without
+                              # them has, or loses it by design (COMPACT=1 TRANSIENT=1: with rebuilds)
+node tests/fuzz/saved.ts [cases, 2000] [seed, 1]   # malformed saved domains: refused, or rebuilt
+                              # and then used, never a panic
 node tests/player/spans-fuzz.ts [seeds, 60] [first seed, 1] [frames, 40]   # random changes to a
                               # tree of containers and shapes in Chrome: the renderer's spans,
                               # checked on odd seeds, draw each frame as a view that takes none
