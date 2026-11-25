@@ -637,6 +637,7 @@ test("dropping other domains changes no module, and memory stops growing", {
 
     let compacted = 0;
     let warmSize = 0;
+    let atThousand = 0;
     for (let n = 1; n <= loads; n++) {
       const other = testing.domainChild(0) as number;
       assert.equal(testing.domainAdd(layered(n), false, other), 0);
@@ -649,10 +650,18 @@ test("dropping other domains changes no module, and memory stops growing", {
       if (n === 250) {
         warmSize = testing.memory.buffer.byteLength;
       }
+
+      if (n === 1000) {
+        atThousand = testing.memory.buffer.byteLength;
+      }
     }
 
     if (zig) {
+      // Zig's memory grows by whole pages as domain and ABC indices are
+      // given out, about 220 bytes a load as measured: bounded per load.
       assert.ok(compacted > 0);
+      const perLoad = (testing.memory.buffer.byteLength - atThousand) / (loads - 1000);
+      assert.ok(perLoad <= 512, `${perLoad} bytes a load from load 1,000 on`);
     } else {
       assert.equal(testing.memory.buffer.byteLength, warmSize);
     }
