@@ -514,12 +514,31 @@ fn replay(dom: *Domain, from: *const Domain, e: u32) Allocator.Error!bool {
         return true;
     }
 
+    // A loaded domain's numbers are a save's, which may be malformed: each
+    // checked against its ABC, as domainReplay checks a host's, so that a
+    // bad save fails the rebuild rather than reading past a table.
+    const a = from.logA.get(e);
+    const b = from.logB.get(e);
+    const info = dom.abcs.get(abc);
+    if (info == &no_abc) {
+        return false;
+    }
+
     if (kind == domain_.LOG_Resolve) {
-        const t = traitsOf(dom, abc, from.logA.get(e), from.logB.get(e));
+        if (a < traits_.TRAITS_Instance or a > traits_.TRAITS_Activation) {
+            return false;
+        }
+
+        const owners: u32 = switch (a) {
+            traits_.TRAITS_Script => info.scriptCount(),
+            traits_.TRAITS_Activation => @intCast(dom.bodyTraits.get(abc).len),
+            else => info.classCount(),
+        };
+        const t = if (b < owners) traitsOf(dom, abc, a, b) else -1;
         return t >= 0 and try dom.traits.resolve(dom, @intCast(t)) == 0;
     }
 
-    return kind == domain_.LOG_Sign and try dom.traits.sign(dom, dom.methodStart.get(abc) + from.logB.get(e)) == 0;
+    return kind == domain_.LOG_Sign and b < info.methodCount() and try dom.traits.sign(dom, dom.methodStart.get(abc) + b) == 0;
 }
 
 /// Keep entry `e` of `from`'s log, not done, for when its domain is revived.
@@ -765,9 +784,10 @@ fn consistent(dom: *const Domain) bool {
     for (0..dom.logKind.len) |e_| {
         const e: u32 = @intCast(e_);
         const kind = dom.logKind.get(e);
+        // An entry's ABC was added before it, as a rebuild attaches it first.
         if (dom.logAt.get(e) < at or
             dom.logAt.get(e) > abcs or
-            dom.logAbc.get(e) >= abcs or
+            dom.logAbc.get(e) >= dom.logAt.get(e) or
             kind > domain_.LOG_Verify or
             (kind == domain_.LOG_Found and dom.logA.get(e) >= dom.foundDomain.len))
         {

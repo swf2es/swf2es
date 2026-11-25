@@ -195,9 +195,9 @@ pub fn domainRestore(index: i32, bytes: []const u8) Allocator.Error!i32 {
 }
 
 /// Make evicted application domain `appDomain` live again, with its evicted
-/// ancestors: 0, or -1, leaving them evicted, if they cannot be. A revival
-/// that needs a rebuild (1, or 2 `stepped`) waits for stage 6's: until
-/// then no rebuild ever is, so none needs one.
+/// ancestors, by a rebuild if one has been since any was evicted: 0, 1
+/// after a rebuild, 2 for one started `stepped` (domainRebuildStep), or
+/// -1, leaving them evicted, if they cannot be.
 pub fn domainRevive(appDomain: i32, stepped: bool) Allocator.Error!i32 {
     abandon();
     const dom = try domain();
