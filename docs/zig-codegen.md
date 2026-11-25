@@ -1045,6 +1045,25 @@ Stage 6 (the exports and lifetimes), as built:
   however often a revival is retried. Memory shared in time by the old
   and spare instances is separate.
 
+*Compaction pauses, measured* (after the review asked whether Zig's
+rebuild, which parses the live ABCs again, stalls longer). A rebuild is
+95% verification in Zig as in AssemblyScript (94%); re-parsing and
+re-linking are under 4%. The verifier's domain lookups compared each
+probed slot's rows before its stored hash, and the rows are read through
+`Rows`' shelves: 40% of a rebuild. Comparing the hash first (as
+`TraitsTable.own` did) took one rebuild of a long session's domain from
+950 to 1,090 ms to 525 to 614 ms, against AssemblyScript's 612. On real
+content, 300 loads of 109 SWFs with child domains evicted and dropped,
+two interleaved runs each: Zig 9 compactions, median 4.10 s, max 4.48 s,
+33.9 s in all; AssemblyScript 8, median 4.38 s, max 4.74 s, 31.3 s. Each
+of Zig's comparable rebuilds took 0.91 to 0.95 of AssemblyScript's; the
+ninth is its own memory-based decision. Memory: 123 MB against 308.
+`codegen-session.ts`, 300 loads: 5 rebuilds (4 moves) against 6 (3),
+5.5 s each, peak instance 15.2 MiB against 29.8. The review's synthetic
+case (200 loads of three builtin copies, compacting each load): 3.9 s,
+1.13 s of it in compact(), against 4.0 s and 1.03 s. M2 removes the
+rebuild.
+
 **Release mode, decided.** The user's decision after stage 5: the
 release ships in ReleaseSafe. About 180 KB gzipped is fine, so section
 7's bound of twice AssemblyScript's size and its 1.15 bound on compile
