@@ -72,12 +72,17 @@ pub const Output = struct {
         w.end += n;
     }
 
+    /// Through the writer's own writeByte, which is shared: written into the
+    /// buffer at each call site instead, grown first, the emitters' code
+    /// came to twice the size (measured at stage 5).
     pub fn byte(self: *Output, b: u8) Allocator.Error!void {
         self.allocating.writer.writeByte(b) catch return error.OutOfMemory;
     }
 
-    /// Text of the emitter's own, all ASCII.
-    /// Share the append across emitters to keep their generated Wasm small.
+    /// Text of the emitter's own, all ASCII. `s` must not point into this
+    /// Output: a grow that reallocates the buffer would leave it dangling.
+    /// Not inlined, so that the emitters share one append and their Wasm
+    /// stays small.
     pub noinline fn text(self: *Output, s: []const u8) Allocator.Error!void {
         const w = &self.allocating.writer;
         if (w.buffer.len - w.end < s.len) {
@@ -152,6 +157,7 @@ pub const Output = struct {
                 break;
             }
         }
+
         if (i > 0) {
             try self.text(bytes[0..i]);
         }
@@ -290,7 +296,10 @@ test "the AVM2 emitters' methods write as AssemblyScript's Output does" {
     try out.chars(" !#[]~");
     try out.chars("plain\x7fend");
     try out.chars("\"tail");
-    try std.testing.expectEqualStrings(" !#[]~plain\\x7fend\\\"tail", out.written());
+    // The plain prefix ending at once at a byte past ASCII, and at a control character.
+    try out.chars("ab\xc3\xa9");
+    try out.chars("cd\x01e");
+    try std.testing.expectEqualStrings(" !#[]~plain\\x7fend\\\"tailab\\u00e9cd\\x01e", out.written());
 }
 
 /// A JavaScript number literal for a double: exact, and valid for NaN,
