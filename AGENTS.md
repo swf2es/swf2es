@@ -222,6 +222,9 @@ node --expose-gc tests/bench/codegen-session.ts [--loads N] [--checkout DIR] [--
                               # a large main SWF loading items into its domain, most of them again,
                               # and maps into children; memory, live and dead weight, rebuilds and
                               # which exports grew memory, a window of loads at a time
+node tests/bench/codegen-strings.ts <before.wasm> <after.wasm> [pairs]   # AVM2 module emission
+                              # in two builds of the Zig compiler, interleaved pairs, loading,
+                              # linking and checking the text outside the timer
 node tests/bench/typed/run.ts [<dir A> <dir B>] [runs]   # new of classes and calls the compiler
                               # binds (class-typed parameters given subclasses, interfaces, null),
                               # as the ones above

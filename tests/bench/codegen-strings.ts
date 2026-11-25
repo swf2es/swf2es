@@ -16,6 +16,7 @@ const pairs = Number(count);
 if (!before || !after || !Number.isSafeInteger(pairs) || pairs < 1) {
   throw new Error("usage: codegen-strings.ts <before.wasm> <after.wasm> [positive pair count]");
 }
+
 const modules = await Promise.all(
   [before, after].map((path) => WebAssembly.compile(readFileSync(path))),
 );
