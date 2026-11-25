@@ -208,7 +208,9 @@ fn findTypeOf(dom: *const Domain, ns: u32, name: u32, version: u8, owner: i32, d
         }
 
         const i: u32 = @intCast(id);
-        if (dom.typeNs.get(i) == ns and
+        // The slot's hash first: most slots a probe passes hold another key.
+        if (t.hashAt(slot) == hash and
+            dom.typeNs.get(i) == ns and
             dom.typeName.get(i) == name and
             dom.typeVersion.get(i) <= version and
             dom.typeOwner.get(i) == owner)

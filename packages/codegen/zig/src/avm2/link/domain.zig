@@ -1307,11 +1307,18 @@ pub const Domain = struct {
     /// (see addFound): a binding, or as a type a class; -1 if none.
     pub fn findCached(self: *const Domain, ns: u32, name: u32, version: u8, domain: u32, asType: bool) i32 {
         const c = &self.cached;
-        var slot = c.start(hashPair(ns, name));
+        const hash = hashPair(ns, name);
+        var slot = c.start(hash);
         while (true) {
             const id = c.at(slot);
             if (id < 0) {
                 return -1;
+            }
+
+            // The slot's hash first: most slots a probe passes hold another key.
+            if (c.hashAt(slot) != hash) {
+                slot = c.next(slot);
+                continue;
             }
 
             const i: u32 = @intCast(id);
