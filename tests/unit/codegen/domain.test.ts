@@ -830,3 +830,35 @@ test("an ABC rejected after it named a class leaves no class by that name to the
   assert.equal(testing.domainAdd(classes([{ name: mn("B"), base: mn("A") }]), false, child), 1014);
   assert.equal(find("", "A"), "none");
 });
+
+test("a first builtin ABC rejected after its builtin classes were set leaves none of them", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  const user = classes(
+    [
+      {
+        name: mn("A"),
+        base: mn("Object"),
+        traits: [{ name: mn("x"), kind: SLOT, index: mn("A") }],
+      },
+    ],
+    true,
+  );
+  const compiled = () => {
+    assert.equal(testing.domainAdd(builtin, true), 0);
+    assert.equal(testing.domainAdd(user, false, testing.domainChild(0)), 0);
+    return testing.domainModule("", -1, false, false) as string;
+  };
+  testing.domainReset(SWF_31);
+  const want = compiled();
+
+  // Its classes link, then its class objects' layout fails: a static
+  // method that overrides nothing.
+  const rejected = classes([
+    { name: mn("Object"), statics: [{ name: mn("m"), kind: METHOD, attr: OVERRIDE }] },
+  ]);
+  testing.domainReset(SWF_31);
+  assert.equal(testing.domainAdd(rejected, true), 1053);
+  assert.equal(compiled(), want);
+});

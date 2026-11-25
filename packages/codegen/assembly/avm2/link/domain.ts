@@ -102,6 +102,110 @@ export const LOG_Sign: u8 = 3;
 /** An ABC verified for the first time, or finding scopes for the first time. */
 export const LOG_Verify: u8 = 4;
 
+/** The fields the first builtin ABC's link sets (classes.ts), which a link that fails gives back. */
+@final
+class BuiltinState {
+  hasBuiltins: bool = false;
+  objectClass: i32 = 0;
+  classClass: i32 = 0;
+  functionClass: i32 = 0;
+  voidClass: i32 = 0;
+  transientName: u32 = 0;
+  versionName: u32 = 0;
+  nativeName: u32 = 0;
+  apiName: u32 = 0;
+  voidType: i32 = 0;
+  nullType: i32 = 0;
+  numberType: i32 = 0;
+  floatType: i32 = 0;
+  intType: i32 = 0;
+  uintType: i32 = 0;
+  booleanType: i32 = 0;
+  stringType: i32 = 0;
+  namespaceType: i32 = 0;
+  xmlType: i32 = 0;
+  xmlListType: i32 = 0;
+  qnameType: i32 = 0;
+  classType: i32 = 0;
+  vectorClass: i32 = 0;
+  vectorObjectType: i32 = 0;
+  vectorIntType: i32 = 0;
+  vectorUintType: i32 = 0;
+  vectorDoubleType: i32 = 0;
+  arrayType: i32 = 0;
+  functionType: i32 = 0;
+  mathStatic: i32 = 0;
+  builtinAbc: i32 = 0;
+
+  constructor(dom: Domain) {
+    this.hasBuiltins = dom.hasBuiltins;
+    this.objectClass = dom.objectClass;
+    this.classClass = dom.classClass;
+    this.functionClass = dom.functionClass;
+    this.voidClass = dom.voidClass;
+    this.transientName = dom.transientName;
+    this.versionName = dom.versionName;
+    this.nativeName = dom.nativeName;
+    this.apiName = dom.apiName;
+    this.voidType = dom.voidType;
+    this.nullType = dom.nullType;
+    this.numberType = dom.numberType;
+    this.floatType = dom.floatType;
+    this.intType = dom.intType;
+    this.uintType = dom.uintType;
+    this.booleanType = dom.booleanType;
+    this.stringType = dom.stringType;
+    this.namespaceType = dom.namespaceType;
+    this.xmlType = dom.xmlType;
+    this.xmlListType = dom.xmlListType;
+    this.qnameType = dom.qnameType;
+    this.classType = dom.classType;
+    this.vectorClass = dom.vectorClass;
+    this.vectorObjectType = dom.vectorObjectType;
+    this.vectorIntType = dom.vectorIntType;
+    this.vectorUintType = dom.vectorUintType;
+    this.vectorDoubleType = dom.vectorDoubleType;
+    this.arrayType = dom.arrayType;
+    this.functionType = dom.functionType;
+    this.mathStatic = dom.mathStatic;
+    this.builtinAbc = dom.builtinAbc;
+  }
+
+  restore(dom: Domain): void {
+    dom.hasBuiltins = this.hasBuiltins;
+    dom.objectClass = this.objectClass;
+    dom.classClass = this.classClass;
+    dom.functionClass = this.functionClass;
+    dom.voidClass = this.voidClass;
+    dom.transientName = this.transientName;
+    dom.versionName = this.versionName;
+    dom.nativeName = this.nativeName;
+    dom.apiName = this.apiName;
+    dom.voidType = this.voidType;
+    dom.nullType = this.nullType;
+    dom.numberType = this.numberType;
+    dom.floatType = this.floatType;
+    dom.intType = this.intType;
+    dom.uintType = this.uintType;
+    dom.booleanType = this.booleanType;
+    dom.stringType = this.stringType;
+    dom.namespaceType = this.namespaceType;
+    dom.xmlType = this.xmlType;
+    dom.xmlListType = this.xmlListType;
+    dom.qnameType = this.qnameType;
+    dom.classType = this.classType;
+    dom.vectorClass = this.vectorClass;
+    dom.vectorObjectType = this.vectorObjectType;
+    dom.vectorIntType = this.vectorIntType;
+    dom.vectorUintType = this.vectorUintType;
+    dom.vectorDoubleType = this.vectorDoubleType;
+    dom.arrayType = this.arrayType;
+    dom.functionType = this.functionType;
+    dom.mathStatic = this.mathStatic;
+    dom.builtinAbc = this.builtinAbc;
+  }
+}
+
 @final
 export class Domain {
   /** The version of user ABCs' public namespaces, whose series is the domain's. */
@@ -351,7 +455,7 @@ export class Domain {
     const traitsCount = <u32>this.traits.kind.length;
     const classCount = <u32>this.classAbc.length;
     const typeCount = <u32>this.typeNs.length;
-    const objectClass = this.objectClass;
+    const builtins = new BuiltinState(this);
     if (!link(this, index)) {
       this.abcs.pop();
       this.abcBase.pop();
@@ -384,7 +488,9 @@ export class Domain {
       this.typeClass.length = typeCount;
       this.typeOwner.length = typeCount;
       this.types.forget(typeCount);
-      this.objectClass = objectClass;
+      // The special classes and types, which the first builtin ABC's link
+      // sets before it may still fail: the next builtin finds them again.
+      builtins.restore(this);
       this.clearBindingMemo();
       return false;
     }
