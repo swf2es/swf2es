@@ -288,7 +288,8 @@ test("an interrupted verifier cannot replay as a completed verification", async 
   compiler.reset();
   assert.equal(compiler.add(builtinLibrary, true), 0);
   assert.throws(() => compiler.compileModule(), /ran out of memory/);
-  assert.throws(() => compiler.add(new TextEncoder().encode("\0panic")), CodegenPanic);
+  // Not replayable: the domain is lost to the panic, the compiler goes on.
+  assert.throws(() => compiler.add(new TextEncoder().encode("\0panic")), /its domain lost/);
 });
 
 test("recovery reads a finding's inherited fields once and preserves the finding", async () => {
@@ -401,7 +402,8 @@ test("a missing journal entry cannot silently roll back the compiler after a lat
   compiler.reset();
   assert.equal(compiler.add(script([0x24, 7, 0x48])), 0);
   assert.throws(() => compiler.compileModule(), /ran out of memory/);
-  assert.throws(() => compiler.add(new TextEncoder().encode("\0panic")), CodegenPanic);
+  // Not replayable: the domain is lost to the panic, the compiler goes on.
+  assert.throws(() => compiler.add(new TextEncoder().encode("\0panic")), /its domain lost/);
 });
 
 test("recovery owns the accepted bytes and never consumes an unused revival iterable", async () => {
