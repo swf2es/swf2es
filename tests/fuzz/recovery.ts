@@ -70,7 +70,7 @@ const wrapped = (instance: WebAssembly.Instance) => {
   return { exports } as unknown as WebAssembly.Instance;
 };
 const instantiate = WebAssembly.instantiate;
-WebAssembly.instantiate = (async (module: WebAssembly.Module, imports: WebAssembly.Imports) =>
+WebAssembly.instantiate = (async (module: WebAssembly.Module, imports: object) =>
   wrapped((await instantiate(module, imports)) as WebAssembly.Instance)) as typeof instantiate;
 const Instance = WebAssembly.Instance;
 // A recovery's instance, made synchronously; refused `refusals` times, for the lost path.
