@@ -1,5 +1,5 @@
 // ABCs that link with nothing before them, for the Zig compiler's own tests
-// of linking (packages/codegen/zig/src/testing/domain.zig holds their
+// of linking (packages/codegen/zig/src/testing/domain/abcs.zig holds their
 // bytes, which a unit test checks against these): a builtin one with
 // Object, Class and Function, an interface, and classes with slots, a
 // constant, methods, accessors and overrides; a user one extending its
