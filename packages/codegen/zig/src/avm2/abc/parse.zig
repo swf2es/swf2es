@@ -38,11 +38,11 @@ fn parse(gpa: Allocator, scratch: Allocator, abc: *Abc, data: []const u8, length
     abc.minorVersion = r.u16_();
     abc.majorVersion = r.u16_();
     if (r.failed) {
-        return diag.fail(C.kCorruptABCError);
+        return diag.fail(.kCorruptABCError);
     }
 
     if (!isSupportedVersion(abc.majorVersion, abc.minorVersion)) {
-        return diag.fail(C.kInvalidMagicError);
+        return diag.fail(.kInvalidMagicError);
     }
 
     try readConstantPool(gpa, scratch, &r, abc.hasFloatSupport(), &abc.pool, diag);
@@ -72,7 +72,7 @@ fn tables(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *Diagnosti
 
     // A read past the end returns 0, which can look like an empty table.
     if (r.failed) {
-        return diag.fail(C.kCorruptABCError);
+        return diag.fail(.kCorruptABCError);
     }
 
     lists.push("traitMetadataStart", lists.len("traitMetadata"));

@@ -64,16 +64,10 @@ pub const TraitsKind = enum(u8) {
     }
 };
 
-/// A type: a traits id, or * (any). The verifier's lookups that can fail
-/// (readBinding, typeName and the rest) answer `failed`, below *, and their
-/// callers compare it directly. The same i32 as before.
+/// A type: a traits id, or * (any). The same i32 as before.
 pub const TypeId = enum(i32) {
     any = -1,
     _,
-
-    /// A failed lookup's answer, -2. A declaration rather than a tag: no
-    /// table holds it.
-    pub const failed: TypeId = @fromBackingInt(-2);
 
     /// The type of traits `t`.
     pub fn of(t: u32) TypeId {
@@ -86,7 +80,7 @@ pub const TypeId = enum(i32) {
         return @intCast(@backingInt(t));
     }
 
-    /// Whether it is a traits': neither * nor failed.
+    /// Whether it is a traits': not *.
     pub fn isTraits(t: TypeId) bool {
         return @backingInt(t) >= 0;
     }
@@ -112,7 +106,7 @@ pub const TypeRef = enum(i32) {
         return @fromBackingInt(@intCast(t));
     }
 
-    /// A type's traits: none for * and failed, which have no traits.
+    /// A type's traits: none for *, which has none.
     pub fn ofType(t: TypeId) TypeRef {
         return if (t.isTraits()) of(t.index()) else .none;
     }
@@ -784,7 +778,7 @@ pub const TraitsTable = struct {
         }
 
         if (!legal) {
-            return diag.fail(C.kIllegalOverrideError);
+            return diag.fail(.kIllegalOverrideError);
         }
 
         try dom.put(self.resolved.at(t), 1);

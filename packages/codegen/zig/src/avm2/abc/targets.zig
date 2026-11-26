@@ -10,8 +10,9 @@
 // that throws: never a backward edge, never a loop header. So the
 // recursion is at most target, throwsAt, target, whatever the input.
 const std = @import("std");
-const Allocator = std.mem.Allocator;
-const Error = Allocator.Error;
+const errors = @import("errors.zig");
+const Error = errors.Error;
+const Rejected = errors.Rejected;
 const TypeId = @import("../link/traits.zig").TypeId;
 const code_ = @import("code.zig");
 const BodyDecoder = code_.BodyDecoder;
@@ -60,10 +61,9 @@ fn requeue(bd: *BodyDecoder, t: u32) void {
     }
 }
 
-/// What the head of target decided: failed, done, or a new loop header
-/// whose handlers are to be reached from it.
+/// What the head of target decided: done, or a new loop header whose
+/// handlers are to be reached from it.
 const Head = union(enum) {
-    failed,
     done,
     header: u32,
 };
@@ -71,10 +71,9 @@ const Head = union(enum) {
 /// As Verifier::checkTarget and mergeState: stay in the code, back edges need
 /// a label or known target, and every path into a block has the same stack
 /// and scope depths, whose values merge.
-pub fn target(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!bool {
+pub fn target(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!void {
     const t = switch (try head(bd, from, to, stack, scope)) {
-        .failed => return false,
-        .done => return true,
+        .done => return,
         .header => |t| t,
     };
 
@@ -89,11 +88,13 @@ pub fn target(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Erro
     const scopeNow = bd.scope;
     bd.stack = stack;
     bd.scope = scope;
-    const reached = try throwsAt(bd, t);
-    bd.stack = stackNow;
-    bd.scope = scopeNow;
-    restoreCurrent(bd);
-    return reached;
+    defer {
+        bd.stack = stackNow;
+        bd.scope = scopeNow;
+        restoreCurrent(bd);
+    }
+
+    try throwsAt(bd, t);
 }
 
 /// target up to where it reaches a new loop header's handlers.
@@ -104,15 +105,13 @@ fn head(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!Head
     }
 
     if (to < 0 or to >= bd.length) {
-        bd.code.fail(C.kInvalidBranchTargetError);
-        return .failed;
+        return bd.fail(.kInvalidBranchTargetError);
     }
 
     const t: u32 = @intCast(to);
     const isNew = bd.known[t] == 0;
     if (to <= from and isNew and bd.opAt(t) != .label) {
-        bd.code.fail(C.kInvalidBranchTargetError);
-        return .failed;
+        return bd.fail(.kInvalidBranchTargetError);
     }
 
     if (isNew) {
@@ -120,8 +119,8 @@ fn head(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!Head
         // same state. avmplus walks the code in order: the walk's state at t is
         // the one arriving, this edge's the target's it recorded.
         const walked = bd.cover[t] == .start;
-        if (walked and !sameDepths(bd, stack, scope, bd.stackAt[t], bd.scopeAt[t])) {
-            return .failed;
+        if (walked) {
+            try sameDepths(bd, stack, scope, bd.stackAt[t], bd.scopeAt[t]);
         }
 
         bd.known[t] = 1;
@@ -138,19 +137,9 @@ fn head(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!Head
             requeue(bd, bd.walkOf[t]);
         }
     } else {
-        if (!sameDepths(bd, bd.entryStack[t], bd.entryScope[t], stack, scope)) {
-            return .failed;
-        }
-
-        if (bd.typed) {
-            const changed = bd.mergeEntry(t);
-            if (changed < 0) {
-                return .failed;
-            }
-
-            if (changed != 0) {
-                requeue(bd, t);
-            }
+        try sameDepths(bd, bd.entryStack[t], bd.entryScope[t], stack, scope);
+        if (bd.typed and try bd.mergeEntry(t)) {
+            requeue(bd, t);
         }
     }
 
@@ -165,19 +154,20 @@ fn head(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!Head
 }
 
 /// An edge to a handler's target: forward, so never a loop header.
-fn handlerEdge(bd: *BodyDecoder, pc: u32, to: u32) Error!bool {
-    return switch (try head(bd, pc, to, 1, 0)) {
-        .failed => false,
-        .done => true,
-        .header => unreachable,
-    };
+fn handlerEdge(bd: *BodyDecoder, pc: u32, to: u32) Error!void {
+    switch (try head(bd, pc, to, 1, 0)) {
+        .done => {},
+        // checkHandlers rejects a target before its range's end, and head
+        // makes a loop header of a backward edge alone.
+        .header => @panic("a handler's target is past its range, so never a loop header"),
+    }
 }
 
 /// Edges from `pc` to every handler covering it. A handler starts with the
 /// locals as they are, no scopes, and just the exception on the stack.
-pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!bool {
+pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!void {
     if (bd.emitPass or pc < bd.tryFrom or pc >= bd.tryTo) {
-        return true;
+        return;
     }
 
     const abc = bd.abc;
@@ -189,16 +179,12 @@ pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!bool {
         }
 
         if (bd.maxStack < 1) {
-            bd.code.fail(C.kStackOverflowError);
-            return false;
+            return bd.fail(.kStackOverflowError);
         }
 
         const to = abc.exceptionTarget[h];
         if (!bd.typed) {
-            if (!try handlerEdge(bd, pc, to)) {
-                return false;
-            }
-
+            try handlerEdge(bd, pc, to);
             continue;
         }
 
@@ -218,19 +204,19 @@ pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!bool {
         bd.setValue(base, ty, .{ .not_null = bd.domain.typeNotNull(ty) });
         bd.stack = 1;
         bd.scope = 0;
-        const reached = try handlerEdge(bd, pc, to);
-        bd.stack = stack;
-        bd.scope = scope;
-        bd.setValue(base, firstType, firstFlags);
-        bd.origin[base] = firstOrigin;
-        if (!reached) {
-            return false;
+        {
+            defer {
+                bd.stack = stack;
+                bd.scope = scope;
+                bd.setValue(base, firstType, firstFlags);
+                bd.origin[base] = firstOrigin;
+            }
+
+            try handlerEdge(bd, pc, to);
         }
 
         bd.handlerMerged[i] = bd.localsVersion;
     }
-
-    return true;
 }
 
 fn saveCurrent(bd: *BodyDecoder) Error!void {
@@ -250,16 +236,12 @@ fn restoreCurrent(bd: *BodyDecoder) void {
 }
 
 /// Whether the depths arriving match the target's; avmplus' messages name the arriving first.
-fn sameDepths(bd: *BodyDecoder, targetStack: u32, targetScope: u32, stack: u32, scope: u32) bool {
+fn sameDepths(bd: *BodyDecoder, targetStack: u32, targetScope: u32, stack: u32, scope: u32) Rejected!void {
     if (stack != targetStack) {
-        bd.code.failWith(C.kStackDepthUnbalancedError, stack, targetStack);
-        return false;
+        return bd.failWith(.kStackDepthUnbalancedError, stack, targetStack);
     }
 
     if (scope != targetScope) {
-        bd.code.failWith(C.kScopeDepthUnbalancedError, scope, targetScope);
-        return false;
+        return bd.failWith(.kScopeDepthUnbalancedError, scope, targetScope);
     }
-
-    return true;
 }

@@ -512,19 +512,20 @@ pub const ModuleEmitter = struct {
     /// The factory of method `global`, whose body failed verification with
     /// `err`: the VerifyError with the arguments avmplus' message takes
     /// (module.ts tells which).
-    fn verifyError(self: *ModuleEmitter, err: i32, global: u32, body: u32, decoder: *BodyDecoder) Error!void {
+    fn verifyError(self: *ModuleEmitter, number: i32, global: u32, body: u32, decoder: *BodyDecoder) Error!void {
         const o = self.out();
         try o.text("rt.verifyError(");
-        try o.uint(@intCast(err));
+        try o.uint(@intCast(number));
+        const err = C.VerifyError.of(number);
         switch (err) {
-            C.kIllegalOpcodeError => {
+            .kIllegalOpcodeError => {
                 try o.text(", ");
                 try self.units(try stack_names.stackName(self.domain, self.methods.gpa, self.index, global), "()");
                 try self.errorNumbers(err, global, body, decoder, 2);
             },
-            C.kStackDepthUnbalancedError, C.kScopeDepthUnbalancedError => try self.errorNumbers(err, global, body, decoder, 2),
-            C.kGetScopeObjectBoundsError, C.kInvalidRegisterError => try self.errorNumbers(err, global, body, decoder, 1),
-            C.kIllegalSetDxns, C.kIllegalSuperCallError => {
+            .kStackDepthUnbalancedError, .kScopeDepthUnbalancedError => try self.errorNumbers(err, global, body, decoder, 2),
+            .kGetScopeObjectBoundsError, .kInvalidRegisterError => try self.errorNumbers(err, global, body, decoder, 1),
+            .kIllegalSetDxns, .kIllegalSuperCallError => {
                 try o.text(", ");
                 try self.units(try stack_names.stackName(self.domain, self.methods.gpa, self.index, global), "()");
             },
@@ -536,7 +537,7 @@ pub const ModuleEmitter = struct {
 
     /// The `count` numbers verifying `body` again records with `err`, as
     /// arguments; none for another error, or if it records none.
-    fn errorNumbers(self: *ModuleEmitter, err: i32, global: u32, body: u32, decoder: *BodyDecoder, count: u32) Error!void {
+    fn errorNumbers(self: *ModuleEmitter, err: C.VerifyError, global: u32, body: u32, decoder: *BodyDecoder, count: u32) Error!void {
         const result = try decoder.decode(body, self.domain.traits.scopeOf(global));
         if (result.@"error" != err or !result.numbered) {
             return;
@@ -617,7 +618,7 @@ pub const ModuleEmitter = struct {
         table.resolve(domain, t, &diag) catch |err| switch (err) {
             error.Verify => {
                 try o.text("{ error: ");
-                try o.uint(@as(u32, @bitCast(diag.code)));
+                try o.uint(@as(u32, @bitCast(diag.code.number())));
                 try o.text(", slots: 0, defaults: [], bindings: [], methods: [] }");
                 return;
             },

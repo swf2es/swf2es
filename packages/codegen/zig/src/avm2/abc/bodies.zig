@@ -22,11 +22,11 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, di
     for (0..count) |_| {
         const method = r.u30_();
         if (r.failed) {
-            return diag.fail(C.kCorruptABCError);
+            return diag.fail(.kCorruptABCError);
         }
 
         if (method >= abc.methodCount()) {
-            return diag.fail(C.kMethodInfoExceedsCountError);
+            return diag.fail(.kMethodInfoExceedsCountError);
         }
 
         const maxStack = r.u30_();
@@ -35,15 +35,15 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, di
         const maxScopeDepth = r.u30_();
         const codeLength = r.u30_();
         if (r.failed) {
-            return diag.fail(C.kCorruptABCError);
+            return diag.fail(.kCorruptABCError);
         }
 
         if (codeLength == 0) {
-            return diag.fail(C.kInvalidCodeLengthError);
+            return diag.fail(.kInvalidCodeLengthError);
         }
 
         if (@as(u64, r.pos) + codeLength >= r.end) {
-            return diag.fail(C.kCorruptABCError);
+            return diag.fail(.kCorruptABCError);
         }
 
         const codeStart: u32 = @intCast(r.pos);
@@ -58,11 +58,11 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, di
             lists.push("exceptionType", r.u30_());
             const name = r.u30_();
             if (r.failed) {
-                return diag.fail(C.kCorruptABCError);
+                return diag.fail(.kCorruptABCError);
             }
 
             if (name >= abc.pool.multinameCount()) {
-                return diag.fail(C.kCpoolIndexRangeError);
+                return diag.fail(.kCpoolIndexRangeError);
             }
 
             lists.push("exceptionName", name);
@@ -70,11 +70,11 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, di
 
         const owner = abc.methodOwner[method];
         if (owner >= 0 and @as(u32, @intCast(owner)) < abc.classCount() and abc.instanceFlags[@intCast(owner)].interface) {
-            return diag.fail(C.kIllegalInterfaceMethodBodyError);
+            return diag.fail(.kIllegalInterfaceMethodBodyError);
         }
 
         if (abc.methodBody[method] != -1) {
-            return diag.fail(C.kDuplicateMethodBodyError);
+            return diag.fail(.kDuplicateMethodBodyError);
         }
 
         abc.methodBody[method] = @intCast(lists.len("bodyMethod"));

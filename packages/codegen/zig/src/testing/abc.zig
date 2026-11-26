@@ -141,8 +141,8 @@ pub fn poolDump(gpa: Allocator, bytes: []const u8) Error![]const u8 {
         try writeHex(w, pool.mnKind[i]);
         try w.print(" {d} {d}\n", .{ pool.mnA[i], pool.mnB[i] });
     }
-    if (diag.code != 0) {
-        try w.print("error {d}\n", .{diag.code});
+    if (diag.code != .none) {
+        try w.print("error {d}\n", .{diag.code.number()});
     }
 
     return out.written();
@@ -156,8 +156,8 @@ pub fn abcDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const u
     const abc = try readAbc(gpa, gpa, data, @intCast(bytes.len), builtin);
     var out: Output = try .init(gpa);
     const w = out.writer();
-    if (abc.@"error" != 0) {
-        try w.print("error {d}", .{abc.@"error"});
+    if (abc.@"error" != .none) {
+        try w.print("error {d}", .{abc.@"error".number()});
         return out.written();
     }
 
@@ -331,8 +331,8 @@ pub fn codeDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const 
     const abc = try readAbc(gpa, gpa, data, @intCast(bytes.len), builtin);
     var out: Output = try .init(gpa);
     const w = out.writer();
-    if (abc.@"error" != 0) {
-        try w.print("error {d}", .{abc.@"error"});
+    if (abc.@"error" != .none) {
+        try w.print("error {d}", .{abc.@"error".number()});
         return out.written();
     }
 
@@ -343,9 +343,9 @@ pub fn codeDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const 
         try lines.next();
         try w.print("body {d} method {d}", .{ body, abc.bodyMethod[body] });
         const code = try decoder.decode(body, null);
-        if (code.@"error" != 0) {
+        if (code.@"error" != .none) {
             try lines.next();
-            try w.print("  error {d}", .{code.@"error"});
+            try w.print("  error {d}", .{code.@"error".number()});
             continue;
         }
 
@@ -398,7 +398,7 @@ pub fn benchParse(gpa: Allocator, bytes: []const u8, rounds: i32) Allocator.Erro
 pub fn benchDecode(gpa: Allocator, bytes: []const u8, rounds: i32) Allocator.Error!i32 {
     const data = try padded(gpa, bytes);
     const abc = try readAbc(gpa, gpa, data, @intCast(bytes.len), false);
-    if (abc.@"error" != 0) {
+    if (abc.@"error" != .none) {
         return 0;
     }
 

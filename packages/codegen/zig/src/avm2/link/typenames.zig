@@ -39,7 +39,7 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool, 
         }
 
         if (mn >= pool.multinameCount()) {
-            return diag.fail(C.kCpoolIndexRangeError);
+            return diag.fail(.kCpoolIndexRangeError);
         }
 
         if (pool.mnKind[mn] != .type_name) {
@@ -49,7 +49,7 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool, 
                         break dom.voidType;
                     }
 
-                    return diag.fail(C.kIllegalVoidError);
+                    return diag.fail(.kIllegalVoidError);
                 },
                 error.Verify => return error.Verify,
             };
@@ -61,7 +61,7 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool, 
         // is ambiguous; its own error is not the one avmplus reports.
         var baseDiag: Diagnostics = .{};
         const base: i32 = if (resolveType(dom, index, pool.mnA[mn], &baseDiag)) |c| @intCast(c) else |err| switch (err) {
-            error.Verify => if (baseDiag.code == C.kAmbiguousBindingError) return diag.fail(C.kAmbiguousBindingError) else -1,
+            error.Verify => if (baseDiag.code == .kAmbiguousBindingError) return diag.fail(.kAmbiguousBindingError) else -1,
             error.Void => -1,
         };
         try bases.append(dom.scratch, base);
@@ -76,7 +76,7 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool, 
         const base = bases.items[level];
         const t: TypeRef = if (base >= 0) try parameterized(dom, @intCast(base), param) else .none;
         if (t == .none) {
-            return diag.fail(C.kClassNotFoundError);
+            return diag.fail(.kClassNotFoundError);
         }
 
         param = t.toType();
@@ -177,7 +177,7 @@ fn resolvePlain(dom: *const Domain, index: u32, mn: u32, diag: *Diagnostics) Nam
             const ns = pool.nsSetMembers[m];
             const t = findType(dom, index, ids[ns], strings[nameIndex], versions[ns]);
             if (t >= 0 and found >= 0 and t != found) {
-                return diag.fail(C.kAmbiguousBindingError);
+                return diag.fail(.kAmbiguousBindingError);
             }
 
             if (t >= 0) {
@@ -187,7 +187,7 @@ fn resolvePlain(dom: *const Domain, index: u32, mn: u32, diag: *Diagnostics) Nam
     }
 
     if (found < 0) {
-        return diag.fail(C.kClassNotFoundError);
+        return diag.fail(.kClassNotFoundError);
     }
 
     return if (found == dom.voidClass) error.Void else @intCast(found);

@@ -99,10 +99,10 @@ pub fn restore(dom: *Domain, arena: *memory.Arena, index: u32, bytes: []const u8
     const length: u32 = @intCast(bytes.len);
     const abc, const buffer = try domain_.parseOwned(arena, dom.scratch, bytes, false);
     const err = abc.@"error";
-    if (err != 0) {
+    if (err != .none) {
         // The error read first: the ABC is in what is given back.
         arena.restore(mark);
-        return err;
+        return err.number();
     }
 
     // Rows of an ABC let go of, which only a rebuild's vacate added, never one from before it: raw writes.
@@ -495,7 +495,7 @@ fn reattach(r: *Rebuild, index: u32) Allocator.Error!bool {
     if (!r.parsed_in_fresh) {
         again, buffer = try domain_.parseOwned(r.arena, fresh.scratch, old[0..abc.length], abc.builtin);
     }
-    if (again.@"error" != 0 or !try fresh.attach(again, buffer, dom.abcDomain.get(index))) {
+    if (again.@"error" != .none or !try fresh.attach(again, buffer, dom.abcDomain.get(index))) {
         return false;
     }
 
@@ -846,9 +846,9 @@ pub fn loadAbc(loaded: *Loaded, arena: *memory.Arena, index: u32, bytes: []const
     errdefer arena.restore(mark);
     const abc, const buffer = try domain_.parseOwned(arena, dom.scratch, bytes, loaded.flags.items[index] & SAVED_Builtin != 0);
     const err = abc.@"error";
-    if (err != 0) {
+    if (err != .none) {
         arena.restore(mark);
-        return err;
+        return err.number();
     }
 
     dom.abcs.set(index, abc);

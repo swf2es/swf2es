@@ -92,20 +92,20 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32, diag: *Diagnostics) Er
                 const id = abc.traitId[i];
                 const slot = slots.next(id);
                 if (id > nameCount and slots.early) {
-                    return diag.fail(C.kCorruptABCError);
+                    return diag.fail(.kCorruptABCError);
                 }
 
                 // Slots are final, and cannot override anything else.
                 if (slot < baseSlots) {
-                    return diag.fail(C.kIllegalOverrideError);
+                    return diag.fail(.kIllegalOverrideError);
                 }
 
                 if (traits.own(t, nsId, name, version) != Binding.none) {
-                    return diag.fail(C.kCorruptABCError);
+                    return diag.fail(.kCorruptABCError);
                 }
 
                 if (traits.isInterface.get(t) != 0) {
-                    return diag.fail(C.kIllegalSlotError);
+                    return diag.fail(.kIllegalSlotError);
                 }
 
                 const bkind: BindingKind = if (kind == .slot) .variable else .constant;
@@ -115,21 +115,21 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32, diag: *Diagnostics) Er
                 // As avmplus, a method may take over the name of a slot defined
                 // before it, which keeps its storage; a slot after the method
                 // is refused above.
-                const baseBinding = overridden(traits, t, nsId, nsVersion, name, tag) orelse return diag.fail(C.kIllegalOverrideError);
+                const baseBinding = overridden(traits, t, nsId, nsVersion, name, tag) orelse return diag.fail(.kIllegalOverrideError);
                 if (baseBinding == Binding.none) {
                     try traits.add(gpa, t, nsId, name, version, .of(methodCount, .method));
                     methodCount +%= 1;
                 } else if (baseBinding.kind == .method) {
                     try traits.add(gpa, t, nsId, name, version, baseBinding);
                 } else {
-                    return diag.fail(C.kCorruptABCError);
+                    return diag.fail(.kCorruptABCError);
                 }
             },
             .getter, .setter => {
                 // The other accessor of the pair may be defined here already.
                 var baseBinding = traits.own(t, nsId, name, version);
                 if (baseBinding == Binding.none) {
-                    baseBinding = overridden(traits, t, nsId, nsVersion, name, tag) orelse return diag.fail(C.kIllegalOverrideError);
+                    baseBinding = overridden(traits, t, nsId, nsVersion, name, tag) orelse return diag.fail(.kIllegalOverrideError);
                 }
 
                 const us: BindingKind = if (kind == .getter) .get else .set;
@@ -140,7 +140,7 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32, diag: *Diagnostics) Er
                 } else if (baseBinding.kind.isAccessor()) {
                     try traits.add(gpa, t, nsId, name, version, if (baseBinding.kind == them) .{ .kind = .get_set, .id = baseBinding.id } else baseBinding);
                 } else {
-                    return diag.fail(C.kCorruptABCError);
+                    return diag.fail(.kCorruptABCError);
                 }
             },
             else => {},

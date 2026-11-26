@@ -12,9 +12,12 @@
 // body of the call, and its IR is valid until the next decode.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Error = Allocator.Error;
 const errors = @import("errors.zig");
 const Diagnostics = errors.Diagnostics;
+const Rejected = errors.Rejected;
+/// A body's verification stops early: rejected, its VerifyError in the
+/// Code, or out of memory.
+const Error = errors.Error;
 const memory = @import("../../memory.zig");
 const ir_ = @import("../ir/ir.zig");
 const Ir = ir_.Ir;
@@ -44,8 +47,8 @@ const IrOp = @import("../ir/ir.zig").Op;
 /// case offsets start in `cases`.
 pub const Code = struct {
     gpa: Allocator,
-    /// 0, or the VerifyError number avmplus would throw; then the lists are incomplete.
-    @"error": i32 = 0,
+    /// none, or the VerifyError avmplus would throw; then the lists are incomplete.
+    @"error": C.VerifyError = .none,
     /// The numbers avmplus' message for `error` names, where `numbered`.
     errorA: u32 = 0,
     errorB: u32 = 0,
@@ -62,16 +65,16 @@ pub const Code = struct {
     cases: []i32 = &.{},
     caseCount: u32 = 0,
 
-    pub fn fail(self: *Code, err: i32) void {
-        if (self.@"error" == 0) {
+    pub fn fail(self: *Code, err: C.VerifyError) void {
+        if (self.@"error" == .none) {
             self.@"error" = err;
             self.numbered = false;
         }
     }
 
     /// fail, with the two numbers its message names.
-    pub fn failWith(self: *Code, err: i32, a: u32, b: u32) void {
-        if (self.@"error" == 0) {
+    pub fn failWith(self: *Code, err: C.VerifyError, a: u32, b: u32) void {
+        if (self.@"error" == .none) {
             self.@"error" = err;
             self.errorA = a;
             self.errorB = b;
@@ -80,7 +83,7 @@ pub const Code = struct {
     }
 
     /// Room for `count` instructions; old contents are not kept.
-    fn reserve(self: *Code, count: u32) Error!void {
+    fn reserve(self: *Code, count: u32) Allocator.Error!void {
         if (self.offset.len >= count) {
             return;
         }
@@ -94,7 +97,7 @@ pub const Code = struct {
         self.c = try self.gpa.alloc(u32, capacity);
     }
 
-    fn pushCase(self: *Code, offset: i32) Error!void {
+    fn pushCase(self: *Code, offset: i32) Allocator.Error!void {
         if (self.caseCount == self.cases.len) {
             const grown = try self.gpa.alloc(i32, @max(16, self.cases.len * 2));
             @memcpy(grown[0..self.caseCount], self.cases[0..self.caseCount]);
@@ -324,7 +327,7 @@ pub const BodyDecoder = struct {
     /// A decoder of ABC `index` of `domain`, or untyped, with no domain, its
     /// scratch in `gpa`. Operands may read past the code up to the end of
     /// the ABC, as avmplus' do into its padding.
-    pub fn init(gpa: Allocator, abc: *Abc, data: []const u8, domain: ?*Domain, index: u32) Error!BodyDecoder {
+    pub fn init(gpa: Allocator, abc: *Abc, data: []const u8, domain: ?*Domain, index: u32) Allocator.Error!BodyDecoder {
         const dom = domain orelse stand: {
             const d = try gpa.create(Domain);
             d.* = try .init(gpa, gpa);
@@ -364,10 +367,10 @@ pub const BodyDecoder = struct {
 
     /// Decode body `body`, created in scope chain `outer` (empty by default, as
     /// for a script's initializer); the result is valid until the next call.
-    pub fn decode(self: *BodyDecoder, body: u32, outer: ?*const Scope) Error!*Code {
+    pub fn decode(self: *BodyDecoder, body: u32, outer: ?*const Scope) Allocator.Error!*Code {
         const abc = self.abc;
         const code = &self.code;
-        code.@"error" = 0;
+        code.@"error" = .none;
         code.errorA = 0;
         code.errorB = 0;
         code.numbered = false;
@@ -399,14 +402,24 @@ pub const BodyDecoder = struct {
         self.localCount = abc.bodyLocalCount[body];
         self.outer = outer orelse &empty_scope;
         try self.reset();
+        // A rejected body keeps its Code, with the VerifyError and the
+        // instructions decoded so far.
+        self.walk(body) catch |err| switch (err) {
+            error.Verify => return code,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+        try self.pack();
+        return code;
+    }
 
+    /// decode's walks: the checks, the first pass, and the second.
+    fn walk(self: *BodyDecoder, body: u32) Error!void {
         // As Verifier::verify: frame limits, exception handlers, then parameters.
-        if (!self.checkFrame(body) or !try self.checkHandlers() or !self.checkParams()) {
-            return code;
-        }
-
-        if (self.typed and !try self.initTypes()) {
-            return code;
+        try self.checkFrame(body);
+        try self.checkHandlers();
+        try self.checkParams();
+        if (self.typed) {
+            try self.initTypes();
         }
 
         // Code starting with a label is a block target, so loops may branch to it.
@@ -415,9 +428,7 @@ pub const BodyDecoder = struct {
         self.stack = 0;
         self.scope = 0;
         if (self.opAt(0) == .label) {
-            if (!try targets.target(self, -1, 0, 0, 0)) {
-                return code;
-            }
+            try targets.target(self, -1, 0, 0, 0);
         } else {
             if (self.typed) {
                 self.entryStack[0] = 0;
@@ -425,9 +436,7 @@ pub const BodyDecoder = struct {
                 try targets.saveEntry(self, 0);
             }
 
-            if (!try self.block(0, 0, 0)) {
-                return code;
-            }
+            try self.block(0, 0, 0);
         }
 
         while (self.workCount != 0) {
@@ -435,28 +444,23 @@ pub const BodyDecoder = struct {
             const start = self.work[self.workCount];
             self.pending[start] = 0;
             targets.loadEntry(self, start);
-            if (!try self.block(start, self.entryStack[start], self.entryScope[start])) {
-                return code;
-            }
+            try self.block(start, self.entryStack[start], self.entryScope[start]);
         }
 
         if (self.overlap) {
-            code.fail(C.kInvalidBranchTargetError);
-            return code;
+            return self.fail(.kInvalidBranchTargetError);
         }
 
-        if (self.typed and !try self.secondPass()) {
-            return code;
+        if (self.typed) {
+            try self.secondPass();
         }
-
-        try self.pack();
-        return code;
     }
 
     /// As the verifier's phase 2: walk the blocks in code order with their
     /// final entry states, writing the IR.
-    fn secondPass(self: *BodyDecoder) Error!bool {
+    fn secondPass(self: *BodyDecoder) Error!void {
         self.emitPass = true;
+        defer self.emitPass = false;
         self.captured.clearRetainingCapacity();
         self.claims.clearRetainingCapacity();
         const ir = &self.ir;
@@ -484,18 +488,14 @@ pub const BodyDecoder = struct {
             try ir.addHandler(abc.exceptionFrom[h], abc.exceptionTo[h], self.blockOf[to], self.handlerTypeAt(@intCast(i)), self.handlerScopeAt(@intCast(i)));
         }
 
-        var ok = true;
         var pc: u32 = 0;
-        while (pc < self.length and ok) : (pc += 1) {
+        while (pc < self.length) : (pc += 1) {
             if (pc == 0 or self.known[pc] != 0) {
                 targets.loadEntry(self, pc);
                 try ir.addBlock(pc, self.entryStack[pc], self.entryScope[pc], self.valueType, self.valueFlags);
-                ok = try self.block(pc, self.entryStack[pc], self.entryScope[pc]);
+                try self.block(pc, self.entryStack[pc], self.entryScope[pc]);
             }
         }
-
-        self.emitPass = false;
-        return ok;
     }
 
     /// Write an IR instruction, typed as its destination is now.
@@ -510,7 +510,7 @@ pub const BodyDecoder = struct {
     }
 
     /// Zeroed scratch for this body, growing it if the body is the longest yet.
-    fn reset(self: *BodyDecoder) Error!void {
+    fn reset(self: *BodyDecoder) Allocator.Error!void {
         const length = self.length;
         if (length <= self.capacity) {
             @memset(self.cover[0..length], .unseen);
@@ -542,48 +542,40 @@ pub const BodyDecoder = struct {
     }
 
     /// As Verifier::checkFrameDefinition: a scope size that is a u30, and a frame that fits.
-    fn checkFrame(self: *BodyDecoder, body: u32) bool {
+    fn checkFrame(self: *BodyDecoder, body: u32) Rejected!void {
         const abc = self.abc;
         const scope = @as(i64, abc.bodyMaxScopeDepth[body]) - abc.bodyInitScopeDepth[body];
         const frame = @as(i64, self.localCount) + scope + self.maxStack;
         if (scope < 0 or frame > 0x7fffffff / 8) {
-            self.code.fail(C.kCorruptABCError);
-            return false;
+            return self.fail(.kCorruptABCError);
         }
 
         self.maxScope = @intCast(scope);
         self.frameSize = @intCast(frame);
-        return true;
     }
 
     /// As Verifier::checkParams: registers for this, the parameters and any rest or arguments.
-    fn checkParams(self: *BodyDecoder) bool {
+    fn checkParams(self: *BodyDecoder) Rejected!void {
         const abc = self.abc;
         const params = abc.methodParamStart[self.method + 1] - abc.methodParamStart[self.method];
         if (self.localCount < params +% 1) {
-            self.code.fail(C.kCorruptABCError);
-            return false;
+            return self.fail(.kCorruptABCError);
         }
 
         if (self.methodFlags.need_rest or self.methodFlags.need_arguments) {
-            return self.checkLocal(params + 1);
+            try self.checkLocal(params + 1);
         }
-
-        return true;
     }
 
-    pub fn checkLocal(self: *BodyDecoder, register: u32) bool {
+    pub fn checkLocal(self: *BodyDecoder, register: u32) Rejected!void {
         if (register >= self.localCount) {
-            self.code.failWith(C.kInvalidRegisterError, register, 0);
-            return false;
+            return self.failWith(.kInvalidRegisterError, register, 0);
         }
-
-        return true;
     }
 
     /// As Verifier::parseExceptionHandlers: known catch types, binding catch
     /// names and sane ranges.
-    fn checkHandlers(self: *BodyDecoder) Error!bool {
+    fn checkHandlers(self: *BodyDecoder) Error!void {
         const abc = self.abc;
         const domain = self.domain;
         const typed = self.typed;
@@ -610,19 +602,14 @@ pub const BodyDecoder = struct {
             var ty: TypeId = .any;
             if (typed and abc.exceptionType[h] != 0) {
                 ty = try properties.typeName(self, abc.exceptionType[h]);
-                if (ty == TypeId.failed) {
-                    return false;
-                }
             }
 
             if (name != 0 and !isBinding(&abc.pool, name)) {
-                self.code.fail(C.kCorruptABCError);
-                return false;
+                return self.fail(.kCorruptABCError);
             }
 
             if (to < from or target < to or target >= self.length) {
-                self.code.fail(C.kIllegalExceptionHandlerError);
-                return false;
+                return self.fail(.kIllegalExceptionHandlerError);
             }
 
             if (i == 0 or from < self.tryFrom) {
@@ -644,14 +631,12 @@ pub const BodyDecoder = struct {
             self.tryFrom = 0;
             self.tryTo = 0;
         }
-
-        return true;
     }
 
     /// As the start of Verifier::verify: the method's signature, and the entry
     /// state: `this` and the parameters of their types, `this` not null, the
     /// rest or arguments array, then untyped locals.
-    fn initTypes(self: *BodyDecoder) Error!bool {
+    fn initTypes(self: *BodyDecoder) Error!void {
         const domain = self.domain;
         const traits = &domain.traits;
         self.global = domain.methodStart.get(self.index) + self.method;
@@ -685,8 +670,6 @@ pub const BodyDecoder = struct {
         while (i < self.localCount) : (i += 1) {
             self.setValue(i, .any, .none);
         }
-
-        return true;
     }
 
     // Frame values: locals from 0, scope entries from localCount, the stack from
@@ -764,20 +747,18 @@ pub const BodyDecoder = struct {
     }
 
     /// Push null or undefined, of `type`, as what equalsNull compares with.
-    pub fn pushNullish(self: *BodyDecoder, ty: TypeId) bool {
+    pub fn pushNullish(self: *BodyDecoder, ty: TypeId) void {
         const i = self.stackBase() + self.stack;
         self.setValue(i, ty, .none);
         self.origin[i] = .nullish;
-        return true;
     }
 
     /// Push local `a`, as a copy of it.
-    pub fn pushLocal(self: *BodyDecoder, a: u32) bool {
+    pub fn pushLocal(self: *BodyDecoder, a: u32) void {
         const i = self.stackBase() + self.stack;
         self.setValue(i, self.typeOf(a), self.valueFlags[a].known());
         self.origin[i] = .of(a, .copy);
         self.originWrite[i] = self.localWrites[a];
-        return true;
     }
 
     pub inline fn stackBase(self: *const BodyDecoder) u32 {
@@ -814,31 +795,26 @@ pub const BodyDecoder = struct {
 
     /// As Verifier::mergeState: merge the current values into known target t's
     /// entry state, whose depths are the same: types to their common base, not
-    /// null only if both are. Returns 1 if the entry changed, 0 if not, -1 after
-    /// recording 1068 for a with scope meeting another scope.
-    pub fn mergeEntry(self: *BodyDecoder, t: u32) i32 {
+    /// null only if both are. Whether the entry changed; rejected with 1068
+    /// for a with scope meeting another scope.
+    pub fn mergeEntry(self: *BodyDecoder, t: u32) Rejected!bool {
         const at = self.entryAt[t];
         const base = self.stackBase();
         // The locals and scopes, then the stack, not what lies between.
-        const low = self.mergeRange(at, 0, self.localCount + self.scope);
-        if (low < 0) {
-            return -1;
-        }
-
-        const high = self.mergeRange(at, base, base + self.stack);
-        return if (high < 0) -1 else low | high;
+        const low = try self.mergeRange(at, 0, self.localCount + self.scope);
+        const high = try self.mergeRange(at, base, base + self.stack);
+        return low or high;
     }
 
     /// mergeEntry for values [from, to) of the entry state at `at`.
-    inline fn mergeRange(self: *BodyDecoder, at: u32, from: u32, to: u32) i32 {
-        var changed: i32 = 0;
+    inline fn mergeRange(self: *BodyDecoder, at: u32, from: u32, to: u32) Rejected!bool {
+        var changed = false;
         var i = from;
         while (i < to) : (i += 1) {
             const flags = self.valueFlags[i];
             const entryFlags = self.entryFlags[at + i];
             if (flags.with != entryFlags.with) {
-                _ = self.fail(C.kCannotMergeTypesError);
-                return -1;
+                return self.fail(.kCannotMergeTypesError);
             }
 
             const entryType = self.entryType[at + i];
@@ -853,7 +829,7 @@ pub const BodyDecoder = struct {
             if (merged != entryType or mergedFlags != entryFlags) {
                 self.entryType[at + i] = merged;
                 self.entryFlags[at + i] = mergedFlags;
-                changed = 1;
+                changed = true;
             }
         }
 
@@ -861,7 +837,7 @@ pub const BodyDecoder = struct {
     }
 
     /// Decode and check one block from `start` until it ends or runs into another block.
-    pub fn block(self: *BodyDecoder, start: u32, stack: u32, scope: u32) Error!bool {
+    pub fn block(self: *BodyDecoder, start: u32, stack: u32, scope: u32) Error!void {
         const code = &self.code;
         self.stack = stack;
         self.scope = scope;
@@ -873,8 +849,7 @@ pub const BodyDecoder = struct {
 
         while (true) {
             if (pc >= self.length) {
-                code.fail(C.kCannotFallOffMethodError);
-                return false;
+                return self.fail(.kCannotFallOffMethodError);
             }
 
             const opcode = self.opAt(pc);
@@ -884,8 +859,7 @@ pub const BodyDecoder = struct {
                 (!self.abc.hasFloatSupport() and
                     (opcode == .pushfloat or opcode == .convert_f or opcode == .unplus)))
             {
-                code.failWith(C.kIllegalOpcodeError, @backingInt(opcode), pc);
-                return false;
+                return self.failWith(.kIllegalOpcodeError, @backingInt(opcode), pc);
             }
 
             if (pc != start and (opcode == .label or self.known[pc] != 0)) {
@@ -896,28 +870,24 @@ pub const BodyDecoder = struct {
             // state the block is entered with.
             const flags = info.flags;
             if (flags.throws or (pc == start and self.typed and self.loopHeader[pc] != 0)) {
-                if (!try targets.throwsAt(self, pc)) {
-                    return false;
-                }
+                try targets.throwsAt(self, pc);
             }
 
             // Decoded already, walking through from an earlier block: without types
             // it was checked with the same depths, so only a typed walk goes on.
             if (self.cover[pc] == .start) {
                 if (!self.typed) {
-                    return true;
+                    return;
                 }
-            } else if (!try self.decodeAt(pc, opcode, operands)) {
-                return false;
+            } else {
+                try self.decodeAt(pc, opcode, operands);
             }
 
             self.walkOf[pc] = start;
             self.stackAt[pc] = self.stack;
             self.scopeAt[pc] = self.scope;
             const testing: Origin = if (self.typed) self.nullTest(opcode) else .none;
-            if (!try verify.verifyAt(self, pc, opcode)) {
-                return false;
-            }
+            try verify.verifyAt(self, pc, opcode);
 
             if (testing.isLocal() and (opcode == .equals or opcode == .not)) {
                 const i = self.peek(1);
@@ -934,9 +904,7 @@ pub const BodyDecoder = struct {
                 const local = if (testing.isLocal()) testing.local() else 0;
                 const kind = testing.kind();
                 const before: Flags = if (testing.isLocal() and kind == .if_true) self.markChecked(local) else .none;
-                if (!try targets.target(self, pc, @as(i64, next) + self.slotA[pc], now_stack, now_scope)) {
-                    return false;
-                }
+                try targets.target(self, pc, @as(i64, next) + self.slotA[pc], now_stack, now_scope);
 
                 if (testing.isLocal()) {
                     if (kind == .if_true) {
@@ -947,30 +915,26 @@ pub const BodyDecoder = struct {
                     }
                 }
             } else if (opcode == .lookupswitch) {
-                if (!try targets.target(self, pc, @as(i64, pc) + self.slotA[pc], now_stack, now_scope)) {
-                    return false;
-                }
+                try targets.target(self, pc, @as(i64, pc) + self.slotA[pc], now_stack, now_scope);
 
                 const first = self.slotC[pc];
                 const last = first + self.slotB[pc];
                 var i = first;
                 while (i <= last) : (i += 1) {
-                    if (!try targets.target(self, pc, @as(i64, pc) + code.cases[i], now_stack, now_scope)) {
-                        return false;
-                    }
+                    try targets.target(self, pc, @as(i64, pc) + code.cases[i], now_stack, now_scope);
                 }
             }
 
             if (flags.terminal) {
-                return true;
+                return;
             }
 
             pc = next;
         }
     }
 
-    /// Decode the instruction at `pc` into its slots; false after recording the error.
-    fn decodeAt(self: *BodyDecoder, pc: u32, opcode: Op, operands: ops.Operands) Error!bool {
+    /// Decode the instruction at `pc` into its slots.
+    fn decodeAt(self: *BodyDecoder, pc: u32, opcode: Op, operands: ops.Operands) Error!void {
         const code = &self.code;
         const r = &self.r;
         r.pos = self.start + pc + 1;
@@ -1009,22 +973,19 @@ pub const BodyDecoder = struct {
         }
 
         if (wide & 0xc0000000 != 0) {
-            code.fail(C.kCorruptABCError);
-            return false;
+            return self.fail(.kCorruptABCError);
         }
 
         const codeEnd = self.start + self.length;
         if (r.failed or r.pos > codeEnd) {
-            code.fail(C.kLastInstExceedsCodeSizeError);
-            return false;
+            return self.fail(.kLastInstExceedsCodeSizeError);
         }
 
         if (opcode == .lookupswitch) {
             c = code.caseCount;
             const caseCount = @as(u64, b) + 1;
             if (@as(u64, r.pos) + caseCount * 3 > codeEnd) {
-                code.fail(C.kLastInstExceedsCodeSizeError);
-                return false;
+                return self.fail(.kLastInstExceedsCodeSizeError);
             }
 
             var i: u64 = 0;
@@ -1053,21 +1014,18 @@ pub const BodyDecoder = struct {
         self.slotB[pc] = b;
         self.slotC[pc] = c;
         self.instructions += 1;
-        return true;
     }
 
     // Typed helpers, working on the stack before the instruction's depth change.
 
     /// Push a value; the instruction's stack effect sets the depth afterwards.
-    pub fn push(self: *BodyDecoder, ty: TypeId, flags: Flags) bool {
+    pub fn push(self: *BodyDecoder, ty: TypeId, flags: Flags) void {
         self.setValue(self.stackBase() + self.stack, ty, flags);
-        return true;
     }
 
     /// Replace the top `n` values with one.
-    pub fn popPush(self: *BodyDecoder, n: u32, ty: TypeId, flags: Flags) bool {
+    pub fn popPush(self: *BodyDecoder, n: u32, ty: TypeId, flags: Flags) void {
         self.setValue(self.stackBase() + self.stack -% n, ty, flags);
-        return true;
     }
 
     /// As Verifier::emitCoerce: value i becomes `type`, still null or not.
@@ -1105,46 +1063,49 @@ pub const BodyDecoder = struct {
     }
 
     /// As Verifier::peekType: the value `n` from the top must be exactly `type`.
-    pub fn peekType(self: *BodyDecoder, n: u32, ty: TypeId) bool {
-        return if (self.typeOf(self.peek(n)) == ty) true else self.fail(C.kIllegalOperandTypeError);
+    pub fn peekType(self: *BodyDecoder, n: u32, ty: TypeId) Rejected!void {
+        if (self.typeOf(self.peek(n)) != ty) {
+            return self.fail(.kIllegalOperandTypeError);
+        }
     }
 
     /// Write the instruction's own IR row, instead of the generic one.
-    pub fn emitOn(self: *BodyDecoder, op: IrOp, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32) Error!bool {
+    pub fn emitOn(self: *BodyDecoder, op: IrOp, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32) Error!void {
         if (self.emitPass) {
             try self.emit(op, dst, src, count, a, b, c, self.pc);
             self.emitted = true;
         }
-
-        return true;
     }
 
-    pub fn checkString(self: *BodyDecoder, index: u32) bool {
-        return if (index == 0 or index >= self.abc.pool.stringCount()) self.fail(C.kCpoolIndexRangeError) else true;
+    pub fn checkString(self: *BodyDecoder, index: u32) Rejected!void {
+        if (index == 0 or index >= self.abc.pool.stringCount()) {
+            return self.fail(.kCpoolIndexRangeError);
+        }
     }
 
-    pub fn fail(self: *BodyDecoder, err: i32) bool {
+    /// Reject the body with VerifyError `err`.
+    pub fn fail(self: *BodyDecoder, err: C.VerifyError) Rejected {
         self.code.fail(err);
-        return false;
+        return error.Verify;
     }
 
-    /// fail with the VerifyError linking rejected with, `err` from a call
-    /// given `diag`; running out of memory goes on up.
-    pub fn linkFailed(self: *BodyDecoder, err: errors.Error, diag: *const Diagnostics) Error!bool {
+    /// The body rejected with the VerifyError linking rejected with, `err`
+    /// from a call given `diag`; running out of memory goes on up.
+    pub fn linkFailed(self: *BodyDecoder, err: errors.Error, diag: *const Diagnostics) Error {
         return switch (err) {
             error.Verify => self.fail(diag.code),
             error.OutOfMemory => error.OutOfMemory,
         };
     }
 
-    /// fail, with the number its message names.
-    pub fn failWith(self: *BodyDecoder, err: i32, a: u32) bool {
-        self.code.failWith(err, a, 0);
-        return false;
+    /// fail, with the numbers its message names.
+    pub fn failWith(self: *BodyDecoder, err: C.VerifyError, a: u32, b: u32) Rejected {
+        self.code.failWith(err, a, b);
+        return error.Verify;
     }
 
     /// Copy the decoded instructions into `code` in offset order.
-    fn pack(self: *BodyDecoder) Error!void {
+    fn pack(self: *BodyDecoder) Allocator.Error!void {
         const code = &self.code;
         try code.reserve(self.instructions);
 
@@ -1195,7 +1156,7 @@ pub fn nameParts(pool: *const ConstantPool, index: u32) NameParts {
 /// function's methods once creating them captured their scope chain, as
 /// avmplus verifies each before it first runs. The result is each body's VerifyError, 0
 /// if it verified, or -1 if nothing could run it.
-pub fn verifyMethods(domain: *Domain, index: u32) Error![]i32 {
+pub fn verifyMethods(domain: *Domain, index: u32) Allocator.Error![]i32 {
     var verifier = try Verifier.init(domain, domain.scratch, index);
     _ = try verifier.run(std.math.maxInt(u64));
     return verifier.results;
@@ -1226,7 +1187,7 @@ pub const Verifier = struct {
     /// The bytes of code the last run verified, as its budget counts them.
     spent: u64 = 0,
 
-    pub fn init(domain: *Domain, gpa: Allocator, index: u32) Error!Verifier {
+    pub fn init(domain: *Domain, gpa: Allocator, index: u32) Allocator.Error!Verifier {
         // Logged before what it resolves, as what it captures is a function's
         // scope before its signature; kept if it is the ABC's first, or finds
         // a scope the first did not.
@@ -1246,7 +1207,7 @@ pub const Verifier = struct {
 
     /// Verify until done, or until the bodies verified by this call hold
     /// `budget` bytes of code, counting at least BODY_COST a body: whether done.
-    pub fn run(self: *Verifier, budget: u64) Error!bool {
+    pub fn run(self: *Verifier, budget: u64) Allocator.Error!bool {
         if (self.done) {
             return true;
         }
@@ -1273,7 +1234,7 @@ pub const Verifier = struct {
                 }
 
                 const b: u32 = @intCast(body);
-                self.results[b] = (try decoder.decode(b, scope)).@"error";
+                self.results[b] = (try decoder.decode(b, scope)).@"error".number();
                 self.spent += @max(@as(u64, abc.bodyCode[b].len), BODY_COST);
                 try self.queue.appendSlice(self.gpa, decoder.captured.items);
             }
@@ -1308,7 +1269,7 @@ pub const Verifier = struct {
     }
 
     /// A pass over the ABC from its scripts, as each settling of its contested functions starts again.
-    fn start(self: *Verifier) Error!void {
+    fn start(self: *Verifier) Allocator.Error!void {
         const domain = self.domain;
         const index = self.index;
         const abc = domain.abcs.get(index);
@@ -1341,7 +1302,7 @@ const SETTLE_PASSES = 8;
 /// After verifying ABC `index`: each contested function's scope chain merged
 /// from those it was created in (Scope.merged). Where one changed, the ABC's
 /// functions' chains are let go of, for verifying it again: true.
-fn settleContests(domain: *Domain, index: u32) Error!bool {
+fn settleContests(domain: *Domain, index: u32) Allocator.Error!bool {
     const traits = &domain.traits;
     const start = domain.methodStart.get(index);
     const end = start + domain.abcs.get(index).methodCount();
@@ -1384,7 +1345,7 @@ fn settleContests(domain: *Domain, index: u32) Error!bool {
 /// The one decoder of a call, made for ABC `index`: its scratch kept from
 /// one use to the next within the call, and given back with the call's
 /// arena. The domain holds it for the call: each Change starts without one.
-pub fn bodyDecoder(domain: *Domain, index: u32) Error!*BodyDecoder {
+pub fn bodyDecoder(domain: *Domain, index: u32) Allocator.Error!*BodyDecoder {
     const abc = domain.abcs.get(index);
     const data = domain.abcBuffer.get(index);
     if (domain.decoder) |decoder| {
