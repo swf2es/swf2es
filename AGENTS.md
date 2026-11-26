@@ -207,7 +207,9 @@ node tests/golden/run.ts [--abcs] [--update]   # the generated code's digests (l
                               # blocks) against tests/golden/digests.json; --abcs builds the ABCs ASC
                               # makes (kept in tests/golden/abcs/) again, as after a new case
 node tests/parity/run.ts [--reference <ref>] [suite...]   # old against new: a build of <ref>
-                              # (zig-last-parity by default; built once by this tree's pinned Zig into
+                              # (zig-parity-2 by default, the idiomatic pass's baseline since #1227's
+                              # deliberate fix; zig-last-parity, the last AssemblyScript-checked build;
+                              # built once by this tree's pinned Zig into
                               # ~/.cache/swf2es/parity/) and this tree's (built first where its sources
                               # moved) fed the same calls on 45 suites (libraries, tests' ABCs, Ruffle's
                               # corpus, the oracle's ABCs, mutated and fuzzed inputs, keys, lifetimes,
