@@ -407,6 +407,7 @@ test "input starts a call: the last one's arena and failure are given back" {
 
 test {
     _ = memory;
+    _ = @import("rows.zig");
     _ = output;
     _ = @import("dtoa.zig");
     _ = @import("parse.zig");
