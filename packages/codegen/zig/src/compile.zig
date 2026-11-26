@@ -10,6 +10,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("memory.zig");
+const parseI32 = @import("parse.zig").parseI32;
 const domain_ = @import("avm2/link/domain.zig");
 const Domain = domain_.Domain;
 const lifetime = @import("avm2/link/lifetime.zig");
@@ -149,9 +150,13 @@ pub fn domainChild(parent: i32) Allocator.Error!i32 {
 }
 
 fn isLive(dom: *const Domain, appDomain: i32) bool {
-    return appDomain >= 0 and
-        appDomain < dom.domainParent.len and
-        dom.domainState.get(@intCast(appDomain)) == .live;
+    const d = indexIn(appDomain, dom.domainParent.len) orelse return false;
+    return dom.domainState.get(d) == .live;
+}
+
+/// A number the host gives, as a row of a table `len` long; none if it names no row.
+fn indexIn(n: i32, len: u32) ?u32 {
+    return if (n >= 0 and n < len) @intCast(n) else null;
 }
 
 /// Drop application domain `appDomain` and its descendants, as the runtime
@@ -178,7 +183,8 @@ pub fn domainEvict(appDomain: i32) Allocator.Error!void {
 /// Application domain `appDomain`'s state: 0 live, 1 evicted, 2 dropped, -1 never made.
 pub fn domainState(appDomain: i32) Allocator.Error!i32 {
     const dom = try domain();
-    return if (appDomain >= 0 and appDomain < dom.domainState.len) @backingInt(dom.domainState.get(@intCast(appDomain))) else -1;
+    const d = indexIn(appDomain, dom.domainState.len) orelse return -1;
+    return @backingInt(dom.domainState.get(d));
 }
 
 /// Give ABC `index`, of an evicted application domain, its bytes again, if
@@ -247,41 +253,38 @@ pub fn domainFound(appDomain: i32, nsKind: i32, uri: []const u8, name: []const u
     try changed(Domain.addFound, .{ @as(u32, @bitCast(appDomain)), domain_.NsType.fromWord(@bitCast(nsKind)), uri, name, @as(u32, @bitCast(abc)), asType });
 }
 
-/// ABC `index` of the domain, or the last added for -1; -1 again where
-/// there is none, or its application domain is not live.
-fn abcIndex(dom: *const Domain, index: i32) i32 {
+/// ABC `index` of the domain, or the last added for one below 0; none
+/// where there is no such ABC, or its application domain is not live.
+fn abcIndex(dom: *const Domain, index: i32) ?u32 {
     if (dom.abcs.len == 0 or index >= dom.abcs.len) {
-        return -1;
+        return null;
     }
 
     const at: u32 = if (index < 0) dom.abcs.len - 1 else @intCast(index);
-    return if (dom.isLive(at)) @intCast(at) else -1;
+    return if (dom.isLive(at)) at else null;
 }
 
 /// The indices of the ABCs that ABC `index` (the last added for -1) names as
 /// linked, comma-separated in load order: those before it its domain sees.
 pub fn domainLinked(gpa: Allocator, index: i32) Allocator.Error![]const u8 {
     const dom = try domain();
-    const at = abcIndex(dom, index);
-    if (at < 0) {
-        return "";
-    }
+    const at = abcIndex(dom, index) orelse return "";
 
-    const own = dom.abcDomain.get(@intCast(at));
-    var out: std.ArrayList(u8) = .empty;
+    const own = dom.abcDomain.get(at);
+    var out: Output = try .initCapacity(gpa, 64);
     var first = true;
-    for (0..@intCast(at)) |i| {
+    for (0..at) |i| {
         if (dom.sees(own, dom.abcDomain.get(@intCast(i)))) {
             if (!first) {
-                try out.append(gpa, ',');
+                try out.byte(',');
             }
 
-            try out.print(gpa, "{d}", .{i});
+            try out.uint(i);
             first = false;
         }
     }
 
-    return out.items;
+    return out.written();
 }
 
 /// Whether a rebuild is due, as `want` asks (see wantsRebuild in
@@ -312,14 +315,14 @@ fn partBudget() u64 {
 pub fn domainUsage(gpa: Allocator) Allocator.Error![]const u8 {
     const dom = try domain();
     lifetime.addWeights(dom);
-    const live = dom.liveWeight + dom.keptWeight;
-    return std.fmt.allocPrint(gpa, "{d} {d} {d}", .{ live, dom.deadWeight, lifetime.memorySize() });
+    return numbers(gpa, .{ dom.liveWeight + dom.keptWeight, dom.deadWeight, lifetime.memorySize() });
 }
 
 /// Application domain `appDomain`'s parent; -1 for the root, or for one never made.
 pub fn domainParent(appDomain: i32) Allocator.Error!i32 {
     const dom = try domain();
-    return if (appDomain > 0 and appDomain < dom.domainParent.len) dom.domainParent.get(@intCast(appDomain)) else -1;
+    const d = indexIn(appDomain, dom.domainParent.len) orelse return -1;
+    return if (d == 0) -1 else dom.domainParent.get(d);
 }
 
 // Modules (stage 5). The module written last, kept for its source map and
@@ -407,15 +410,12 @@ pub fn domainModule(gpa: Allocator, hashes: []const u8, index: i32, keep: bool, 
     abandon();
     forgetModules();
     // No ABC, no module: the caller asked before adding one.
-    const at = abcIndex(dom, index);
-    if (at < 0) {
-        return "";
-    }
+    const at = abcIndex(dom, index) orelse return "";
 
     const list = try splitHashes(gpa, hashes);
     const persist = moduleArena();
     const emitter = try persist.create(ModuleEmitter);
-    emitter.* = try .init(persist, gpa, dom, @intCast(at));
+    emitter.* = try .init(persist, gpa, dom, at);
     changed(writeModule, .{ emitter, list, linkedOnly }) catch |err| {
         forgetModules();
         return err;
@@ -445,17 +445,14 @@ pub fn domainModuleBytes(gpa: Allocator, hashes: []const u8, index: i32, keep: b
     const dom = try domain();
     abandon();
     forgetModules();
-    const at = abcIndex(dom, index);
-    if (at < 0) {
-        return null;
-    }
+    const at = abcIndex(dom, index) orelse return null;
 
     const list = try splitHashes(gpa, hashes);
     const persist = moduleArena();
     const emitter = try persist.create(ModuleEmitter);
-    emitter.* = try .init(persist, gpa, dom, @intCast(at));
+    emitter.* = try .init(persist, gpa, dom, at);
     pending = emitter;
-    pending_index = @intCast(at);
+    pending_index = at;
     pending_keep = keep;
     pending_rows = dom.rows();
     changed(startModule, .{ emitter, list, linkedOnly }) catch |err| {
@@ -541,12 +538,9 @@ pub fn domainModuleEntries(gpa: Allocator) Allocator.Error![]const u8 {
 pub fn domainEmitEach(gpa: Allocator, bodies: []const u8, reuse: bool, abc: i32) Allocator.Error![]const u8 {
     const dom = try domain();
     abandon();
-    const at = abcIndex(dom, abc);
-    if (at < 0) {
-        return "";
-    }
+    const at = abcIndex(dom, abc) orelse return "";
 
-    return emitEachOn(dom, arena(), gpa, bodies, reuse, @intCast(at));
+    return emitEachOn(dom, arena(), gpa, bodies, reuse, at);
 }
 
 /// domainEmitEach on domain `dom`, whose arena is `a`, changed all or
@@ -578,7 +572,7 @@ fn emitEach(dom: *Domain, gpa: Allocator, bodies: []const u8, reuse: bool, index
             continue;
         }
 
-        const body: u32 = @bitCast(try parseI32(gpa, item));
+        const body: u32 = @bitCast(parseI32(item));
         if (body >= abc.bodyCount()) {
             continue;
         }
@@ -624,96 +618,6 @@ fn verifiedBodies(dom: *Domain, index: u32) Allocator.Error![]i32 {
     verified_index = index;
     verified_domain = dom;
     return kept;
-}
-
-/// AssemblyScript's i32.parse and I32.parseInt of `text`, given as the
-/// host's string was encoded (WTF-8): its strtol, on the string's UTF-16
-/// units, a radix taken from a 0b, 0o or 0x prefix, 10 otherwise, and 0
-/// where no digit leads; its arithmetic wraps as i32's does.
-fn parseI32(gpa: Allocator, text: []const u8) Allocator.Error!i32 {
-    const units = try output.decodeUnits(gpa, text);
-    var at: usize = 0;
-    var len = units.len;
-    if (len == 0) {
-        return 0;
-    }
-
-    while (at < units.len and isSpace(units[at])) {
-        at += 1;
-        len -%= 1;
-    }
-
-    var sign: i32 = 1;
-    if (at < units.len and (units[at] == '-' or units[at] == '+')) {
-        len -%= 1;
-        if (len == 0) {
-            return 0;
-        }
-
-        if (units[at] == '-') {
-            sign = -1;
-        }
-
-        at += 1;
-    }
-
-    var radix: u32 = 10;
-    if (at + 1 < units.len and units[at] == '0' and len > 2) {
-        switch (units[at + 1] | 32) {
-            'b' => radix = 2,
-            'o' => radix = 8,
-            'x' => radix = 16,
-            else => {},
-        }
-
-        if (radix != 10) {
-            at += 2;
-            len -= 2;
-        }
-    }
-
-    var n: i32 = 0;
-    const initial = len -% 1;
-    while (len > 0 and at < units.len) {
-        len -= 1;
-        var digit: u32 = units[at];
-        if (digit -% '0' < 10) {
-            digit -= '0';
-        } else if (digit -% 'A' <= 'Z' - 'A') {
-            digit -= 'A' - 10;
-        } else if (digit -% 'a' <= 'z' - 'a') {
-            digit -= 'a' - 10;
-        }
-
-        if (digit >= radix) {
-            if (initial == len) {
-                return 0;
-            }
-
-            break;
-        }
-
-        n = n *% @as(i32, @intCast(radix)) +% @as(i32, @intCast(digit));
-        at += 1;
-    }
-
-    return sign *% n;
-}
-
-/// AssemblyScript's isSpace, of a UTF-16 unit.
-fn isSpace(c: u32) bool {
-    if (c < 0x1680) {
-        return (c | 0x80) == 0xa0 or c -% 0x09 <= 0x0d - 0x09;
-    }
-
-    if (c -% 0x2000 <= 0x200a - 0x2000) {
-        return true;
-    }
-
-    return switch (c) {
-        0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff => true,
-        else => false,
-    };
 }
 
 // Context, keys and the log (compile.ts tells each export's why).
@@ -858,15 +762,12 @@ fn firstAfter(dom: *const Domain, after: i32) u32 {
 /// "" if there is no such ABC.
 pub fn domainContext(gpa: Allocator, index: i32, after: i32, upTo: i32) Allocator.Error![]const u8 {
     const dom = try domain();
-    const at = abcIndex(dom, index);
-    if (at < 0) {
-        return "";
-    }
+    const at = abcIndex(dom, index) orelse return "";
 
-    const own = dom.abcDomain.get(@intCast(at));
+    const own = dom.abcDomain.get(at);
     const seen = try seenBy(dom, gpa, own);
     var out: Output = try .init(gpa);
-    try writeSeen(&out, seen, @intCast(at));
+    try writeSeen(&out, seen, at);
     var count: u32 = 0;
     for (0..dom.logKind.len) |e_| {
         const e: u32 = @intCast(e_);
@@ -891,19 +792,16 @@ pub fn domainContext(gpa: Allocator, index: i32, after: i32, upTo: i32) Allocato
 /// no such ABC.
 pub fn domainKeyHeaderBytes(gpa: Allocator, index: i32) Allocator.Error!?[]const u8 {
     const dom = try domain();
-    const at = abcIndex(dom, index);
-    if (at < 0) {
-        return null;
-    }
+    const at = abcIndex(dom, index) orelse return null;
 
-    const own = dom.abcDomain.get(@intCast(at));
+    const own = dom.abcDomain.get(at);
     const seen = try seenBy(dom, gpa, own);
     if (seen.len == 0) {
         return null;
     }
 
     var out: Output = try .init(gpa);
-    try writeSeen(&out, seen, @intCast(at));
+    try writeSeen(&out, seen, at);
     try out.byte('\n');
     try out.uint(own);
     try out.byte('\n');
@@ -990,7 +888,21 @@ pub fn domainKeyLogBytes(gpa: Allocator, appDomain: i32, after: i32, from: i32, 
 /// long the log is, and how many rebuilds the domain is from its reset.
 pub fn domainRevision(gpa: Allocator) Allocator.Error![]const u8 {
     const dom = try domain();
-    return std.fmt.allocPrint(gpa, "{d} {d} {d}", .{ dom.abcs.len, dom.logKind.len, dom.generation });
+    return numbers(gpa, .{ dom.abcs.len, dom.logKind.len, dom.generation });
+}
+
+/// Three numbers, a space between each.
+fn numbers(gpa: Allocator, values: [3]u64) Allocator.Error![]const u8 {
+    var out: Output = try .initCapacity(gpa, 64);
+    for (values, 0..) |n, i| {
+        if (i > 0) {
+            try out.byte(' ');
+        }
+
+        try out.uint(n);
+    }
+
+    return out.written();
 }
 
 /// How long the domain's log is, to tell what a compile adds to it (domainLogSince).
@@ -1003,12 +915,12 @@ pub fn domainLogMark() Allocator.Error!i32 {
 /// ABC the domain does not see.
 pub fn domainLogSince(gpa: Allocator, mark: i32, index: i32) Allocator.Error![]const u8 {
     const dom = try domain();
-    const at = abcIndex(dom, index);
-    if (at < 0 or mark < 0) {
+    const at = abcIndex(dom, index) orelse return "!";
+    if (mark < 0) {
         return "!";
     }
 
-    const seen = try seenBy(dom, gpa, dom.abcDomain.get(@intCast(at)));
+    const seen = try seenBy(dom, gpa, dom.abcDomain.get(at));
     var out: Output = try .init(gpa);
     var lines: u32 = 0;
     var e: u32 = @intCast(mark);
@@ -1047,8 +959,14 @@ pub fn journalBytes(gpa: Allocator, mark: u32) Allocator.Error!?[]const u8 {
     for (@min(mark, dom.logKind.len)..dom.logKind.len) |e_| {
         const e: u32 = @intCast(e_);
         const kind = dom.logKind.get(e);
-        if (kind == .none) continue;
-        if (kind == .found) return null;
+        if (kind == .none) {
+            continue;
+        }
+
+        if (kind == .found) {
+            return null;
+        }
+
         try words.appendSlice(gpa, &.{ @backingInt(kind), dom.logAbc.get(e), dom.logA.get(e), dom.logB.get(e) });
     }
     return std.mem.sliceAsBytes(words.items);
@@ -1056,7 +974,9 @@ pub fn journalBytes(gpa: Allocator, mark: u32) Allocator.Error!?[]const u8 {
 
 pub fn replayEntry(kind: u32, index: u32, a: u32, b: u32) Allocator.Error!bool {
     const dom = try domain();
-    if (kind > @backingInt(domain_.LogKind.verify) or index >= dom.abcs.len or !dom.isLive(index)) return false;
+    if (kind > @backingInt(domain_.LogKind.verify) or index >= dom.abcs.len or !dom.isLive(index)) {
+        return false;
+    }
 
     return changed(replayOne, .{ domain_.LogKind.fromWord(kind), index, a, b });
 }
@@ -1075,14 +995,11 @@ fn replayOne(dom: *Domain, kind: domain_.LogKind, index: u32, a: u32, b: u32) Al
 pub fn domainReplay(gpa: Allocator, log: []const u8, index: i32) Allocator.Error!bool {
     const dom = try domain();
     abandon();
-    const at = abcIndex(dom, index);
-    if (at < 0) {
-        return false;
-    }
+    const at = abcIndex(dom, index) orelse return false;
 
     forgetVerified();
     forgetModules();
-    return changed(replayLog, .{ gpa, log, @as(u32, @intCast(at)) });
+    return changed(replayLog, .{ gpa, log, at });
 }
 
 fn replayLog(dom: *Domain, gpa: Allocator, log: []const u8, at: u32) Allocator.Error!bool {
@@ -1107,10 +1024,10 @@ fn replayLog(dom: *Domain, gpa: Allocator, log: []const u8, at: u32) Allocator.E
                 break;
             }
 
-            const kind = try parseI32(gpa, fields[0]);
-            const place = try parseI32(gpa, fields[1]);
-            const a = try parseI32(gpa, fields[2]);
-            const b = try parseI32(gpa, fields[3]);
+            const kind = parseI32(fields[0]);
+            const place = parseI32(fields[1]);
+            const a = parseI32(fields[2]);
+            const b = parseI32(fields[3]);
             // As replayEntry: no kind past verify, nor one read as its low byte.
             if (kind < 0 or kind > @backingInt(domain_.LogKind.verify) or place < 0 or place >= seen.len or a < 0 or b < 0) {
                 ok = false;
@@ -1380,11 +1297,8 @@ pub fn domainSaveBytes(gpa: Allocator) Allocator.Error![]const u8 {
 /// The bytes of live ABC `index`, as added, for domainLoadAbc; null, no address, for another.
 pub fn domainSavedAbcBytes(index: i32) Allocator.Error!?[]const u8 {
     const dom = try domain();
-    if (index < 0 or !lifetime.savedLive(dom, @intCast(index))) {
-        return null;
-    }
-
-    return lifetime.savedBytes(dom, @intCast(index));
+    const i = indexIn(index, dom.abcs.len) orelse return null;
+    return if (lifetime.savedLive(dom, i)) lifetime.savedBytes(dom, i) else null;
 }
 
 /// In a new instance, start a domain as another's domainSaveBytes saved
