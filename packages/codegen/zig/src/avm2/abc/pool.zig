@@ -197,6 +197,11 @@ pub const ConstantPool = struct {
         return @intCast(self.nsSetStart.len - 1);
     }
 
+    /// Namespace set `set`'s members, as namespace indices.
+    pub inline fn nsSet(self: *const ConstantPool, set: u32) []const u32 {
+        return self.nsSetMembers[self.nsSetStart[set]..self.nsSetStart[set + 1]];
+    }
+
     pub inline fn multinameCount(self: *const ConstantPool) u32 {
         return @intCast(self.mnKind.len);
     }

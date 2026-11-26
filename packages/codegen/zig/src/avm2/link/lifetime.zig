@@ -125,11 +125,7 @@ pub fn revive(dom: *Domain, domain: u32) i32 {
         return -1;
     }
 
-    var top = domain;
-    while (dom.domainState.get(@intCast(dom.domainParent.get(top))) == .evicted) {
-        top = @intCast(dom.domainParent.get(top));
-    }
-
+    const top = evictedTop(dom, domain);
     if (dom.domainState.get(@intCast(dom.domainParent.get(top))) != .live) {
         return -1;
     }
@@ -141,8 +137,8 @@ pub fn revive(dom: *Domain, domain: u32) i32 {
     }
 
     var stale = false;
-    var d = domain;
-    while (true) : (d = @intCast(dom.domainParent.get(d))) {
+    var it = dom.ancestors(domain);
+    while (it.next()) |d| {
         stale = stale or dom.domainEvicted.get(d) != dom.generation;
         dom.domainState.set(d, .live);
         if (d == top) {
@@ -155,8 +151,8 @@ pub fn revive(dom: *Domain, domain: u32) i32 {
 
 /// Make `domain` and its ancestors up to `top` evicted again, as revive found them.
 pub fn unrevive(dom: *Domain, domain: u32, top: u32) void {
-    var d = domain;
-    while (true) : (d = @intCast(dom.domainParent.get(d))) {
+    var it = dom.ancestors(domain);
+    while (it.next()) |d| {
         dom.domainState.set(d, .evicted);
         if (d == top) {
             break;
@@ -176,12 +172,18 @@ pub fn evictedTop(dom: *const Domain, domain: u32) u32 {
 
 /// Whether `d` is `bottom` or one of its ancestors up to `top`.
 fn inChain(dom: *const Domain, d: u32, top: u32, bottom: u32) bool {
-    var x = bottom;
-    while (x != d and x != top) {
-        x = @intCast(dom.domainParent.get(x));
+    var it = dom.ancestors(bottom);
+    while (it.next()) |x| {
+        if (x == d) {
+            return true;
+        }
+
+        if (x == top) {
+            return false;
+        }
     }
 
-    return x == d;
+    return false;
 }
 
 /// The size of wasm memory, as AssemblyScript's memory.size() << 16 gives it;

@@ -504,6 +504,27 @@ pub const TraitsTable = struct {
         }
     }
 
+    /// The traits from `from` up its base chain, as traits ids: from, its
+    /// base, its base's base, and so on; nothing for none.
+    pub fn bases(self: *const TraitsTable, from: TypeRef) Bases {
+        return .{ .table = self, .at = from };
+    }
+
+    pub const Bases = struct {
+        table: *const TraitsTable,
+        at: TypeRef,
+
+        pub fn next(it: *Bases) ?u32 {
+            if (it.at == .none) {
+                return null;
+            }
+
+            const t = it.at.index();
+            it.at = it.table.base.get(t);
+            return t;
+        }
+    };
+
     /// As TraitsBindings::findBinding: t's own members, then its base's.
     pub fn find(self: *const TraitsTable, type_: TypeId, ns: u32, name: u32, version: u8) Binding {
         return self.findFrom(.ofType(type_), ns, name, version);
@@ -511,9 +532,9 @@ pub const TraitsTable = struct {
 
     /// find from traits `ref`, none finding nothing.
     pub fn findFrom(self: *const TraitsTable, ref: TypeRef, ns: u32, name: u32, version: u8) Binding {
-        var t = ref;
-        while (t != .none) : (t = self.base.get(t.index())) {
-            const b = self.own(t.index(), ns, name, version);
+        var it = self.bases(ref);
+        while (it.next()) |t| {
+            const b = self.own(t, ns, name, version);
             if (b != Binding.none) {
                 return b;
             }
@@ -525,10 +546,10 @@ pub const TraitsTable = struct {
     /// As TraitsBindings::findBinding by name alone: the first member named
     /// `name` in any namespace of t or its bases.
     pub fn findName(self: *const TraitsTable, type_: TypeId, name: u32) Binding {
-        var t = TypeRef.ofType(type_);
-        while (t != .none) : (t = self.base.get(t.index())) {
-            const last = self.memberEnd.get(t.index());
-            var m = self.memberStart.get(t.index());
+        var it = self.bases(.ofType(type_));
+        while (it.next()) |t| {
+            const last = self.memberEnd.get(t);
+            var m = self.memberStart.get(t);
             while (m < last) : (m += 1) {
                 if (self.memberName.get(m) == name) {
                     return self.memberBinding.get(m);
@@ -584,12 +605,10 @@ pub const TraitsTable = struct {
         var version = versions[ns];
         if (pool.mnKind[mn] == .multiname) {
             const set = ns;
-            const last = pool.nsSetStart[set + 1];
             ns = domain_.firstMember(pool, set);
             version = domain_.API_Internal;
-            var m = pool.nsSetStart[set];
-            while (m < last) : (m += 1) {
-                const v = versions[pool.nsSetMembers[m]];
+            for (pool.nsSet(set)) |member| {
+                const v = versions[member];
                 if (v < version) {
                     version = v;
                 }
@@ -607,13 +626,13 @@ pub const TraitsTable = struct {
     /// reach another ABC's private members.
     pub fn allowEarlyBinding(self: *const TraitsTable, t: u32) bool {
         const abc = self.abc.get(t);
-        var b = self.base.get(t);
-        while (b != .none) : (b = self.base.get(b.index())) {
-            if (self.slotCount.get(b.index()) == 0) {
+        var it = self.bases(self.base.get(t));
+        while (it.next()) |b| {
+            if (self.slotCount.get(b) == 0) {
                 break;
             }
 
-            if (self.abc.get(b.index()) != abc) {
+            if (self.abc.get(b) != abc) {
                 return false;
             }
         }
@@ -630,11 +649,11 @@ pub const TraitsTable = struct {
     pub fn allInterfaces(self: *const TraitsTable, scratch: Allocator, t: u32) Allocator.Error![]u32 {
         var all: std.ArrayList(u32) = .empty;
         var stack: std.ArrayList(InterfaceFrame) = .empty;
-        var c = TypeRef.of(t);
-        while (c != .none) : (c = self.base.get(c.index())) {
+        var it = self.bases(.of(t));
+        while (it.next()) |c| {
             // Most bases name none: nothing taken for them, along a chain as long as the input's.
-            if (self.interfaceStart.get(c.index()) != self.interfaceEnd.get(c.index())) {
-                try self.addInterfaces(scratch, c.index(), &all, &stack);
+            if (self.interfaceStart.get(c) != self.interfaceEnd.get(c)) {
+                try self.addInterfaces(scratch, c, &all, &stack);
             }
         }
 
@@ -664,9 +683,9 @@ pub const TraitsTable = struct {
 
     /// As Traits::subtypeof: t is s, extends it, or implements it.
     pub fn subtypeOf(self: *const TraitsTable, scratch: Allocator, t: u32, s: u32) Allocator.Error!bool {
-        var c = TypeRef.of(t);
-        while (c != .none) : (c = self.base.get(c.index())) {
-            if (c.index() == s) {
+        var it = self.bases(.of(t));
+        while (it.next()) |c| {
+            if (c == s) {
                 return true;
             }
         }
