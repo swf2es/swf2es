@@ -11,9 +11,6 @@ const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
 const TypeId = traits_.TypeId;
-const copies = @import("copies.zig");
-const CONSTANT = copies.CONSTANT;
-const NONE = copies.NONE;
 const memory = @import("memory.zig");
 const method_ = @import("method.zig");
 const MethodEmitter = method_.MethodEmitter;
@@ -599,10 +596,9 @@ fn getProperty(em: *MethodEmitter, i: u32, a: u32, src: i32) Error!void {
     const guarded = maybeStringLength(em, a, src);
     if (guarded) {
         // Read twice, so from its register, not from a text held for it.
-        const copy = em.copyOf[u(src)];
-        const r = if (copy == NONE) src else copy;
-        if (r >= 0) {
-            try em.release(r);
+        const from = em.copyOf[u(src)].orRegister(src);
+        if (from.isRegister()) {
+            try em.release(from.register());
         }
     }
 
@@ -808,11 +804,11 @@ fn name(em: *MethodEmitter, a: u32, from: i32) Error!void {
     const copy = em.copyOf[u(from)];
     if ((kind == .multiname_l or kind == .multiname_la) and
         from != em.pendingNull and
-        copy <= CONSTANT and
-        em.ir.op[u(CONSTANT - copy)] == .pushstring)
+        copy.isConstant() and
+        em.ir.op[copy.instruction()] == .pushstring)
     {
         try out.text("T[");
-        try out.uint(try em.literalSlot(a, em.ir.a[u(CONSTANT - copy)]));
+        try out.uint(try em.literalSlot(a, em.ir.a[copy.instruction()]));
         try out.text("]");
         return;
     }
@@ -1022,9 +1018,8 @@ fn arrayElements(em: *MethodEmitter, a: u32, r: i32) Error!bool {
 /// Register r read before a `.`, null checked unless it is known not to
 /// be null here: `(r ?? nn(r))` or `r`.
 fn receiver(em: *MethodEmitter, r: i32) Error!void {
-    const copy = em.copyOf[u(r)];
-    const checked = if (copy == NONE) r else copy;
-    if (r != em.pendingNull and checked >= 0 and em.checked[u(checked)] != 0) {
+    const checked = em.copyOf[u(r)].orRegister(r);
+    if (r != em.pendingNull and checked.isRegister() and em.checked[u(checked.register())] != 0) {
         return em.read(r);
     }
 
@@ -1033,8 +1028,8 @@ fn receiver(em: *MethodEmitter, r: i32) Error!void {
         try em.reg(r);
     } else {
         try em.checkedRead(r);
-        if (checked >= 0) {
-            em.checked[u(checked)] = 1;
+        if (checked.isRegister()) {
+            em.checked[u(checked.register())] = 1;
         }
     }
 

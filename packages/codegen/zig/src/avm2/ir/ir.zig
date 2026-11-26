@@ -123,9 +123,11 @@ pub const EntryFlags = packed struct(u8) {
 };
 
 comptime {
-    // The verifier's first two flags, bit for bit.
-    std.debug.assert(@as(u8, @bitCast(EntryFlags{ .not_null = true })) == @as(u8, @bitCast(Flags{ .not_null = true })));
-    std.debug.assert(@as(u8, @bitCast(EntryFlags{ .with = true })) == @as(u8, @bitCast(Flags{ .with = true })));
+    if (@as(u8, @bitCast(EntryFlags{ .not_null = true })) != @as(u8, @bitCast(Flags{ .not_null = true })) or
+        @as(u8, @bitCast(EntryFlags{ .with = true })) != @as(u8, @bitCast(Flags{ .with = true })))
+    {
+        @compileError("EntryFlags must start with Flags' not_null and with, bit for bit");
+    }
 }
 
 pub const Ir = struct {

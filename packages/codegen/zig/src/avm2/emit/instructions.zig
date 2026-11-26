@@ -8,8 +8,6 @@ const Error = std.mem.Allocator.Error;
 const ops = @import("../abc/opcodes.zig");
 const ir_ = @import("../ir/ir.zig");
 const copies = @import("copies.zig");
-const CONSTANT = copies.CONSTANT;
-const NONE = copies.NONE;
 const floats = @import("floats.zig");
 const MethodEmitter = @import("method.zig").MethodEmitter;
 const objects = @import("objects.zig");
@@ -42,7 +40,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
     if (copies.pushesConstant(op) and ir.dst[i] >= @as(i32, @intCast(ir.localCount + ir.maxScope))) {
         // Read as the literal until the register changes or a branch needs
         // it: V8 then gives the operation the constant in its own bytecode.
-        em.setCopy(ir.dst[i], CONSTANT - @as(i32, @intCast(i)));
+        em.setCopy(ir.dst[i], .constant(i));
         em.kept = true;
         return;
     }
@@ -151,8 +149,9 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
             // A register checked since it was last written is not null.
             const src = ir.src[i];
             const copy = em.copyOf[@intCast(src)];
-            const r = if (copy == NONE) src else copy;
-            if (r >= 0) {
+            const from = copy.orRegister(src);
+            if (from.isRegister()) {
+                const r = from.register();
                 if (em.checked[@intCast(r)] != 0) {
                     return;
                 }
@@ -174,14 +173,14 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
                 next += 1;
             }
 
-            // Not a copy of a constant (copyOf below NONE), which has no name for unpend.
-            if (copy >= NONE and
+            // Not a copy of a constant, which has no name for unpend.
+            if (!copy.isConstant() and
                 next < em.blockLast and
                 ir.pc[next] == ir.pc[i] and
                 readsFirst(ir.op[next]))
             {
                 em.pendingNull = src;
-                em.pendingRead = if (copy == NONE) src else copy;
+                em.pendingRead = from.register();
                 em.pendingUntil = next;
                 em.pendingAt = out.len();
                 em.pendingMarks = em.map.count();

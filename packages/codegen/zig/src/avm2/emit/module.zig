@@ -25,7 +25,6 @@ const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
 const method_ = @import("method.zig");
 const MethodEmitter = method_.MethodEmitter;
-const METHOD_SLOT = method_.METHOD_SLOT;
 const refs = @import("refs.zig");
 const SourceMap = @import("sourcemap.zig").SourceMap;
 const stack_names = @import("stack-names.zig");
@@ -458,22 +457,17 @@ pub const ModuleEmitter = struct {
         try o.text(")(");
         for (types, 0..) |t, k| {
             try o.text(if (k != 0) ", " else "");
-            if (t >= 0) {
-                try refs.typeExpr(methods, .of(@intCast(t)));
-                continue;
+            switch (t) {
+                .type => |ty| try refs.typeExpr(methods, ty),
+                .method => try o.text("null"),
+                .literal => |n| {
+                    try o.text("rt.literalName(M[");
+                    try o.uint(methods.literalMultinames.items[n]);
+                    try o.text("], ");
+                    try refs.poolString(methods, methods.literalStrings.items[n]);
+                    try o.text(")");
+                },
             }
-
-            if (t == METHOD_SLOT) {
-                try o.text("null");
-                continue;
-            }
-
-            const n: usize = @intCast(-1 - t);
-            try o.text("rt.literalName(M[");
-            try o.uint(methods.literalMultinames.items[n]);
-            try o.text("], ");
-            try refs.poolString(methods, methods.literalStrings.items[n]);
-            try o.text(")");
         }
 
         try o.text(")");

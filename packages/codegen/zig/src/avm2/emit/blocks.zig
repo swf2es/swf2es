@@ -8,7 +8,7 @@ const Error = std.mem.Allocator.Error;
 const traits_ = @import("../link/traits.zig");
 const TypeId = traits_.TypeId;
 const copies = @import("copies.zig");
-const NONE = copies.NONE;
+const Fact = copies.Fact;
 const handlers = @import("handlers.zig");
 const instructions = @import("instructions.zig");
 const MethodEmitter = @import("method.zig").MethodEmitter;
@@ -289,14 +289,14 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
             }
 
             i += moves;
-            em.setCopy(sinking, NONE);
+            em.setCopy(sinking, .none);
             if (ir.op[i] == .pushscope) {
                 em.scopeWith[em.scopeDepth] = 0;
                 em.scopeDepth += 1;
             }
 
             if (duplicated) {
-                em.setCopy(dst, sinking);
+                em.setCopy(dst, .of(sinking));
                 em.uncopy(dst + 1);
             } else {
                 em.uncopy(dst);
@@ -309,13 +309,13 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
             // What the branch took is gone.
             em.uncopy(ir.src[i]);
         } else if (op == .swap) {
-            em.setCopy(ir.src[i], NONE);
-            em.setCopy(ir.src[i] + 1, NONE);
+            em.setCopy(ir.src[i], .none);
+            em.setCopy(ir.src[i] + 1, .none);
         } else if (op == .popscope) {
-            em.setCopy(ir.src[i], NONE);
+            em.setCopy(ir.src[i], .none);
         } else {
             if (dst >= 0 and !em.kept) {
-                em.setCopy(dst, NONE);
+                em.setCopy(dst, .none);
             }
 
             // What is above the stack now is gone.
@@ -341,7 +341,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
 
 /// Whether register r stands for a value not written to it: a copy, or a held text.
 fn virtual(em: *const MethodEmitter, r: i32) bool {
-    return em.copyOf[u(r)] != NONE or em.held[u(r)] != 0;
+    return em.copyOf[u(r)] != .none or em.held[u(r)] != 0;
 }
 
 fn swap(comptime T: type, table: []T, x: usize, y: usize) void {
@@ -358,7 +358,7 @@ fn swapVirtual(em: *MethodEmitter, x: i32) Error!void {
     const ux = u(x);
     const uy = u(y);
     // A dup's copy below its original: the same value either way round.
-    if (em.copyOf[uy] == x) {
+    if (em.copyOf[uy] == Fact.of(x)) {
         swap(TypeId, em.regType, ux, uy);
         return;
     }
@@ -651,7 +651,7 @@ fn copyFor(em: *MethodEmitter, t: u32, limit: i32) Error!void {
     var r = base;
     while (r < end) : (r += 1) {
         const copy = em.copyOf[u(r)];
-        if (copy == NONE or em.copyIn[u(row + r)] == copy) {
+        if (copy == .none or em.copyIn[u(row + r)] == copy) {
             continue;
         }
 
@@ -678,7 +678,7 @@ fn copyAll(em: *MethodEmitter, w: i32, limit: i32) Error!void {
     const end = @min(@min(limit, @as(i32, @intCast(ir.frameSize))), em.copyTop);
     var r: i32 = @intCast(ir.localCount);
     while (r < end) : (r += 1) {
-        if (em.copyOf[u(r)] == w) {
+        if (em.copyOf[u(r)] == Fact.of(w)) {
             try writeCopy(em, r);
         }
     }
@@ -690,7 +690,7 @@ fn copyAll(em: *MethodEmitter, w: i32, limit: i32) Error!void {
 fn writeCopy(em: *MethodEmitter, r: i32) Error!void {
     try em.clobber(r, -1, -1);
     const from = em.copyOf[u(r)];
-    em.setCopy(r, NONE);
+    em.setCopy(r, .none);
     em.checked[u(r)] = 0;
     try em.regName(r);
     try em.out.text(" = ");
@@ -724,7 +724,7 @@ fn boxRaw(em: *MethodEmitter, limit: i32) Error!void {
     var r: i32 = @intCast(em.ir.localCount + em.ir.maxScope);
     while (r < @min(limit, em.rawTop)) : (r += 1) {
         if (em.rawFloat[u(r)] != 0) {
-            if (em.copyOf[u(r)] == NONE) {
+            if (em.copyOf[u(r)] == .none) {
                 try em.regName(r);
                 try em.out.text(" = rt.float(");
                 try em.regName(r);
