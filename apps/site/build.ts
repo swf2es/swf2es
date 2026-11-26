@@ -123,6 +123,11 @@ for (const [from, to] of [
 ]) {
   copyFileSync(join(here, "demos/mandel", from), join(licenses, to));
 }
+// The compiler's notices: Zig's standard library and AssemblyScript's ported parts in codegen.wasm.
+copyFileSync(
+  join(root, "packages/codegen/LICENSE.third-party"),
+  join(licenses, "codegen-third-party.txt"),
+);
 // Every notice of the C in @swf2es/native's binaries, the LZMA SDK's among them.
 copyFileSync(
   join(root, "packages/native/LICENSE.third-party"),
