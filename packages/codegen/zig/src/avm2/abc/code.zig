@@ -104,33 +104,97 @@ pub const Code = struct {
     }
 };
 
-// Byte states in BodyDecoder.cover, which starts zeroed: unseen.
-pub const START: u8 = 1;
-const INSIDE: u8 = 2;
+/// What each byte of a body is: the start of an instruction, inside one,
+/// or not decoded yet (BodyDecoder.cover starts zeroed).
+pub const Cover = enum(u8) { unseen = 0, start = 1, inside = 2 };
 
-// Frame value flags.
-pub const NOT_NULL: u8 = 1;
-pub const WITH: u8 = 2;
-/// Neither null nor undefined, as a null check of the same local found it
-/// since it was last set, on every path here: the verifier still does not
-/// know it not null, as avmplus' marks only the stack value it checked, but
-/// no check of it needs code.
-pub const CHECKED: u8 = 4;
-pub const KNOWN: u8 = NOT_NULL | CHECKED;
+/// A frame value's flags. Their first two bits are the IR's entry flags.
+pub const Flags = packed struct(u8) {
+    not_null: bool = false,
+    /// A with scope's.
+    with: bool = false,
+    /// Neither null nor undefined, as a null check of the same local found
+    /// it since it was last set, on every path here: the verifier still does
+    /// not know it not null, as avmplus' marks only the stack value it
+    /// checked, but no check of it needs code.
+    checked: bool = false,
+    _: u5 = 0,
 
-// What a stack value tells of a local: it is a copy of the local, or the local
-// is neither null nor undefined when the value is true, or when it is false.
-pub const ORIGIN_Copy: i32 = 0;
-pub const ORIGIN_IfTrue: i32 = 1;
-pub const ORIGIN_IfFalse: i32 = 2;
-/// A stack value pushnull or pushundefined pushed.
-pub const ORIGIN_Nullish: i32 = -2;
+    pub const none: Flags = .{};
 
-// Multiname parts, as avmplus' Multiname flags.
-pub const MN_Attr: u8 = 1;
-pub const MN_Rtns: u8 = 2;
-pub const MN_Rtname: u8 = 4;
-pub const MN_QName: u8 = 8;
+    /// What a copy, a coercion or a conversion keeps: not null, checked.
+    pub fn known(f: Flags) Flags {
+        return .{ .not_null = f.not_null, .checked = f.checked };
+    }
+
+    /// Whether no null check of it needs code.
+    pub fn isKnown(f: Flags) bool {
+        return f.not_null or f.checked;
+    }
+
+    /// An entry state's flags merged with a path's: not null and checked
+    /// only if both are; with as the entry has it (mergeRange rejects a
+    /// path that differs).
+    pub fn merge(entry: Flags, value: Flags) Flags {
+        return .{
+            .not_null = entry.not_null and value.not_null,
+            .with = entry.with,
+            .checked = entry.checked and value.checked,
+        };
+    }
+};
+
+/// What a stack value tells of a local: that it is a copy of the local, or
+/// that the local is neither null nor undefined when the value is true, or
+/// when it is false. Non-exhaustive: `local << 2 | kind`, as the decoder
+/// computes them.
+pub const Origin = enum(i32) {
+    /// Nothing.
+    none = -1,
+    /// A stack value pushnull or pushundefined pushed.
+    nullish = -2,
+    _,
+
+    /// Non-exhaustive: negated flips the two tests' bits, which a copy never is.
+    pub const Kind = enum(u2) { copy = 0, if_true = 1, if_false = 2, _ };
+
+    pub fn of(local_: u32, kind_: Kind) Origin {
+        return @fromBackingInt(@bitCast((local_ << 2) | @backingInt(kind_)));
+    }
+
+    /// Whether it tells of a local: neither none nor nullish.
+    pub fn isLocal(o: Origin) bool {
+        return @backingInt(o) >= 0;
+    }
+
+    pub fn local(o: Origin) u32 {
+        return @intCast(@backingInt(o) >> 2);
+    }
+
+    pub fn kind(o: Origin) Kind {
+        return @fromBackingInt(@as(u2, @truncate(@as(u32, @bitCast(@backingInt(o))))));
+    }
+
+    /// A copy's origin as the test `k`: what its truth tells.
+    pub fn asTest(o: Origin, k: Kind) Origin {
+        return @fromBackingInt(@backingInt(o) | @backingInt(k));
+    }
+
+    /// The other test: what the value's falsehood tells.
+    pub fn negated(o: Origin) Origin {
+        return @fromBackingInt(@backingInt(o) ^ 3);
+    }
+};
+
+/// The parts of a multiname given at run time, and whether it is an
+/// attribute's or a qualified name's, as avmplus' Multiname flags.
+pub const NameParts = packed struct(u8) {
+    attr: bool = false,
+    rtns: bool = false,
+    rtname: bool = false,
+    qname: bool = false,
+    _: u4 = 0,
+};
 
 const empty_scope: Scope = .{};
 
@@ -146,7 +210,7 @@ pub const BodyDecoder = struct {
     // Scratch for the body being decoded, sized to the longest body so far.
     capacity: u32 = 0,
     /// Whether each byte starts an instruction, lies inside one, or is unseen (0).
-    cover: []u8 = &.{},
+    cover: []Cover = &.{},
     /// Offsets with a known frame state: branch and handler targets.
     known: []u8 = &.{},
     /// Targets of backward branches.
@@ -203,13 +267,13 @@ pub const BodyDecoder = struct {
     frameSize: u32 = 0,
     /// The current values: locals, then maxScope scope entries, then the stack.
     valueType: []TypeId = &.{},
-    valueFlags: []u8 = &.{},
+    valueFlags: []Flags = &.{},
     entryType: []TypeId = &.{},
-    entryFlags: []u8 = &.{},
+    entryFlags: []Flags = &.{},
     entryUsed: u32 = 0,
-    /// By stack value, what it tells of a local in the block being walked, as
-    /// `local << 2 | ORIGIN_*`, or -1; with that local's count of writes then.
-    origin: []i32 = &.{},
+    /// By stack value, what it tells of a local in the block being walked,
+    /// with that local's count of writes then.
+    origin: []Origin = &.{},
     originWrite: []u32 = &.{},
     /// The count of writes of the local nullTest's result tells of.
     testWrite: u32 = 0,
@@ -244,7 +308,7 @@ pub const BodyDecoder = struct {
     // The values of the block being walked, while a loop header's handler
     // edges are followed from its entry state instead.
     savedType: []TypeId = &.{},
-    savedFlags: []u8 = &.{},
+    savedFlags: []Flags = &.{},
 
     /// A decoder of ABC `index` of `domain`, or untyped, with no domain, its
     /// scratch in `gpa`. Operands may read past the code up to the end of
@@ -430,7 +494,7 @@ pub const BodyDecoder = struct {
         if (dst >= 0) {
             const d: u32 = @intCast(dst);
             ir.type[i] = typeColumn(self.valueType[d]);
-            ir.notNull[i] = self.valueFlags[d] & NOT_NULL;
+            ir.notNull[i] = @intFromBool(self.valueFlags[d].not_null);
         }
     }
 
@@ -438,7 +502,7 @@ pub const BodyDecoder = struct {
     fn reset(self: *BodyDecoder) Error!void {
         const length = self.length;
         if (length <= self.capacity) {
-            @memset(self.cover[0..length], 0);
+            @memset(self.cover[0..length], .unseen);
             @memset(self.known[0..length], 0);
             @memset(self.loopHeader[0..length], 0);
             @memset(self.pending[0..length], 0);
@@ -447,7 +511,7 @@ pub const BodyDecoder = struct {
 
         const capacity = @max(length, self.capacity *| 2);
         const gpa = self.gpa;
-        self.cover = try memory.allocZeroed(gpa, u8, capacity);
+        self.cover = try memory.allocZeroed(gpa, Cover, capacity);
         self.known = try memory.allocZeroed(gpa, u8, capacity);
         self.loopHeader = try memory.allocZeroed(gpa, u8, capacity);
         self.pending = try memory.allocZeroed(gpa, u8, capacity);
@@ -589,28 +653,28 @@ pub const BodyDecoder = struct {
         if (self.valueType.len < self.frameSize) {
             const gpa = self.gpa;
             self.valueType = try memory.allocZeroed(gpa, TypeId, self.frameSize);
-            self.valueFlags = try memory.allocZeroed(gpa, u8, self.frameSize);
-            self.origin = try memory.allocZeroed(gpa, i32, self.frameSize);
+            self.valueFlags = try memory.allocZeroed(gpa, Flags, self.frameSize);
+            self.origin = try memory.allocZeroed(gpa, Origin, self.frameSize);
             self.originWrite = try memory.allocZeroed(gpa, u32, self.frameSize);
             self.localWrites = try memory.allocZeroed(gpa, u32, self.frameSize);
         }
 
         const m = self.global;
         const count = traits.paramCount.get(m);
-        self.setValue(0, traits.receiverType.get(m), NOT_NULL);
+        self.setValue(0, traits.receiverType.get(m), .{ .not_null = true });
         for (0..count) |p| {
-            self.setValue(@intCast(p + 1), traits.paramType.get(traits.paramStart.get(m) + @as(u32, @intCast(p))), 0);
+            self.setValue(@intCast(p + 1), traits.paramType.get(traits.paramStart.get(m) + @as(u32, @intCast(p))), .none);
         }
 
         var firstLocal = count + 1;
         if (self.methodFlags.need_rest or self.methodFlags.need_arguments) {
-            self.setValue(firstLocal, domain.arrayType, NOT_NULL);
+            self.setValue(firstLocal, domain.arrayType, .{ .not_null = true });
             firstLocal += 1;
         }
 
         var i = firstLocal;
         while (i < self.localCount) : (i += 1) {
-            self.setValue(i, .any, 0);
+            self.setValue(i, .any, .none);
         }
 
         return true;
@@ -619,22 +683,22 @@ pub const BodyDecoder = struct {
     // Frame values: locals from 0, scope entries from localCount, the stack from
     // localCount + maxScope.
 
-    pub inline fn setValue(self: *BodyDecoder, i: u32, ty: TypeId, flags: u8) void {
+    pub inline fn setValue(self: *BodyDecoder, i: u32, ty: TypeId, flags: Flags) void {
         self.valueType[i] = ty;
         self.valueFlags[i] = flags;
         if (i < self.localCount) {
             self.localsVersion += 1;
             self.localWrites[i] +%= 1;
         } else {
-            self.origin[i] = -1;
+            self.origin[i] = .none;
         }
     }
 
-    /// What stack value i tells of a local, if its local is unchanged since: an ORIGIN_* encoding or -1.
-    fn originOf(self: *BodyDecoder, i: u32) i32 {
+    /// What stack value i tells of a local, if its local is unchanged since.
+    fn originOf(self: *BodyDecoder, i: u32) Origin {
         const o = self.origin[i];
-        if (o < 0 or self.originWrite[i] != self.localWrites[@intCast(o >> 2)]) {
-            return -1;
+        if (!o.isLocal() or self.originWrite[i] != self.localWrites[o.local()]) {
+            return .none;
         }
 
         self.testWrite = self.originWrite[i];
@@ -642,48 +706,50 @@ pub const BodyDecoder = struct {
     }
 
     /// As originOf, a copy as what its truth tells: no local is null or undefined and true.
-    fn truthOf(self: *BodyDecoder, i: u32) i32 {
+    fn truthOf(self: *BodyDecoder, i: u32) Origin {
         const o = self.originOf(i);
-        return if (o >= 0 and (o & 3) == ORIGIN_Copy) o | ORIGIN_IfTrue else o;
+        return if (o.isLocal() and o.kind() == .copy) o.asTest(.if_true) else o;
     }
 
     /// What `==` of the top two values tells, one of them a null or undefined pushed, the other a local's copy.
-    fn equalsNull(self: *BodyDecoder) i32 {
+    fn equalsNull(self: *BodyDecoder) Origin {
         const lhs = self.peek(2);
         const rhs = self.peek(1);
-        var o: i32 = -1;
-        if (self.origin[rhs] == ORIGIN_Nullish) {
+        var o: Origin = .none;
+        if (self.origin[rhs] == .nullish) {
             o = self.originOf(lhs);
-        } else if (self.origin[lhs] == ORIGIN_Nullish) {
+        } else if (self.origin[lhs] == .nullish) {
             o = self.originOf(rhs);
         }
 
-        return if (o >= 0 and (o & 3) == ORIGIN_Copy) o | ORIGIN_IfFalse else -1;
+        return if (o.isLocal() and o.kind() == .copy) o.asTest(.if_false) else .none;
     }
 
     /// What instruction `opcode` tells of a local's being neither null nor
-    /// undefined, from its operands: as an ORIGIN_* encoding, for a test
-    /// its result's, for a conditional branch its condition's; -1 for nothing.
-    fn nullTest(self: *BodyDecoder, opcode: Op) i32 {
+    /// undefined, from its operands: for a test its result's, for a
+    /// conditional branch its condition's.
+    fn nullTest(self: *BodyDecoder, opcode: Op) Origin {
         // Too few values fail the instruction's verification after this.
         const one = self.stack >= 1;
         const two = self.stack >= 2;
-        var o: i32 = -1;
+        var o: Origin = .none;
         switch (opcode) {
-            .iftrue => return if (one) self.truthOf(self.peek(1)) else -1,
-            .iffalse, .not => o = if (one) self.truthOf(self.peek(1)) else -1,
-            .equals, .ifeq => return if (two) self.equalsNull() else -1,
-            .ifne => o = if (two) self.equalsNull() else -1,
-            else => return -1,
+            .iftrue => return if (one) self.truthOf(self.peek(1)) else .none,
+            .iffalse, .not => o = if (one) self.truthOf(self.peek(1)) else .none,
+            .equals, .ifeq => return if (two) self.equalsNull() else .none,
+            .ifne => o = if (two) self.equalsNull() else .none,
+            else => return .none,
         }
 
-        return if (o < 0) o else o ^ (ORIGIN_IfTrue | ORIGIN_IfFalse);
+        return if (!o.isLocal()) o else o.negated();
     }
 
     /// Mark local `local` checked, returning its flags before.
-    fn markChecked(self: *BodyDecoder, local: u32) u8 {
+    fn markChecked(self: *BodyDecoder, local: u32) Flags {
         const flags = self.valueFlags[local];
-        self.valueFlags[local] = flags | CHECKED;
+        var checked = flags;
+        checked.checked = true;
+        self.valueFlags[local] = checked;
         self.localsVersion += 1;
         return flags;
     }
@@ -691,16 +757,16 @@ pub const BodyDecoder = struct {
     /// Push null or undefined, of `type`, as what equalsNull compares with.
     pub fn pushNullish(self: *BodyDecoder, ty: TypeId) bool {
         const i = self.stackBase() + self.stack;
-        self.setValue(i, ty, 0);
-        self.origin[i] = ORIGIN_Nullish;
+        self.setValue(i, ty, .none);
+        self.origin[i] = .nullish;
         return true;
     }
 
     /// Push local `a`, as a copy of it.
     pub fn pushLocal(self: *BodyDecoder, a: u32) bool {
         const i = self.stackBase() + self.stack;
-        self.setValue(i, self.typeOf(a), self.valueFlags[a] & KNOWN);
-        self.origin[i] = @bitCast((a << 2) | @as(u32, @bitCast(ORIGIN_Copy)));
+        self.setValue(i, self.typeOf(a), self.valueFlags[a].known());
+        self.origin[i] = .of(a, .copy);
         self.originWrite[i] = self.localWrites[a];
         return true;
     }
@@ -719,19 +785,22 @@ pub const BodyDecoder = struct {
     }
 
     /// Handler i's exception type and catch scope type, as checkHandlers
-    /// wrote them for this body: in a typed walk, i below handlerCount.
+    /// wrote them for this body: in a typed walk (an untyped decoder has
+    /// handlers but no types), i below handlerCount, which the callers'
+    /// loops and verify's newcatch check keep it. The poison build's fill
+    /// in checkHandlers is what catches an entry this body did not write.
     pub inline fn handlerTypeAt(self: *const BodyDecoder, i: u32) TypeId {
-        std.debug.assert(i < self.handlerCount);
+        std.debug.assert(self.typed and i < self.handlerCount);
         return self.handlerType[i];
     }
 
     pub inline fn handlerScopeAt(self: *const BodyDecoder, i: u32) TypeId {
-        std.debug.assert(i < self.handlerCount);
+        std.debug.assert(self.typed and i < self.handlerCount);
         return self.handlerScope[i];
     }
 
     pub inline fn isNotNull(self: *const BodyDecoder, i: u32) bool {
-        return (self.valueFlags[i] & NOT_NULL) != 0;
+        return self.valueFlags[i].not_null;
     }
 
     /// As Verifier::mergeState: merge the current values into known target t's
@@ -758,14 +827,14 @@ pub const BodyDecoder = struct {
         while (i < to) : (i += 1) {
             const flags = self.valueFlags[i];
             const entryFlags = self.entryFlags[at + i];
-            if ((flags ^ entryFlags) & WITH != 0) {
+            if (flags.with != entryFlags.with) {
                 _ = self.fail(C.kCannotMergeTypesError);
                 return -1;
             }
 
             const entryType = self.entryType[at + i];
             const valueType = self.valueType[i];
-            const mergedFlags = entryFlags & (flags | WITH);
+            const mergedFlags = entryFlags.merge(flags);
             // Most merges meet the same type, which stays.
             if (valueType == entryType and mergedFlags == entryFlags) {
                 continue;
@@ -790,7 +859,7 @@ pub const BodyDecoder = struct {
         var pc = start;
         // Every way in has its own copies.
         if (self.typed) {
-            @memset(self.origin[0..self.frameSize], -1);
+            @memset(self.origin[0..self.frameSize], .none);
         }
 
         while (true) {
@@ -825,7 +894,7 @@ pub const BodyDecoder = struct {
 
             // Decoded already, walking through from an earlier block: without types
             // it was checked with the same depths, so only a typed walk goes on.
-            if (self.cover[pc] == START) {
+            if (self.cover[pc] == .start) {
                 if (!self.typed) {
                     return true;
                 }
@@ -836,12 +905,12 @@ pub const BodyDecoder = struct {
             self.walkOf[pc] = start;
             self.stackAt[pc] = self.stack;
             self.scopeAt[pc] = self.scope;
-            const testing = if (self.typed) self.nullTest(opcode) else -1;
+            const testing: Origin = if (self.typed) self.nullTest(opcode) else .none;
             if (!try verify.verifyAt(self, pc, opcode)) {
                 return false;
             }
 
-            if (testing >= 0 and (opcode == .equals or opcode == .not)) {
+            if (testing.isLocal() and (opcode == .equals or opcode == .not)) {
                 const i = self.peek(1);
                 self.origin[i] = testing;
                 self.originWrite[i] = self.testWrite;
@@ -853,15 +922,15 @@ pub const BodyDecoder = struct {
             const now_scope = self.scope;
             if (operands == .branch) {
                 // A test of a local goes on with it neither null nor undefined where it tells so.
-                const local: u32 = @bitCast(testing >> 2);
-                const kind = testing & 3;
-                const before = if (testing >= 0 and kind == ORIGIN_IfTrue) self.markChecked(local) else 0;
+                const local = if (testing.isLocal()) testing.local() else 0;
+                const kind = testing.kind();
+                const before: Flags = if (testing.isLocal() and kind == .if_true) self.markChecked(local) else .none;
                 if (!try targets.target(self, pc, @as(i64, next) + self.slotA[pc], now_stack, now_scope)) {
                     return false;
                 }
 
-                if (testing >= 0) {
-                    if (kind == ORIGIN_IfTrue) {
+                if (testing.isLocal()) {
+                    if (kind == .if_true) {
                         self.valueFlags[local] = before;
                         self.localsVersion += 1;
                     } else {
@@ -958,18 +1027,18 @@ pub const BodyDecoder = struct {
         const next: u32 = @intCast(r.pos - self.start);
         var p = pc + 1;
         while (p < next) : (p += 1) {
-            if (self.cover[p] == START) {
+            if (self.cover[p] == .start) {
                 self.overlap = true;
             }
 
-            self.cover[p] = INSIDE;
+            self.cover[p] = .inside;
         }
 
-        if (self.cover[pc] == INSIDE) {
+        if (self.cover[pc] == .inside) {
             self.overlap = true;
         }
 
-        self.cover[pc] = START;
+        self.cover[pc] = .start;
         self.slotNext[pc] = next;
         self.slotA[pc] = a;
         self.slotB[pc] = b;
@@ -981,13 +1050,13 @@ pub const BodyDecoder = struct {
     // Typed helpers, working on the stack before the instruction's depth change.
 
     /// Push a value; the instruction's stack effect sets the depth afterwards.
-    pub fn push(self: *BodyDecoder, ty: TypeId, flags: u8) bool {
+    pub fn push(self: *BodyDecoder, ty: TypeId, flags: Flags) bool {
         self.setValue(self.stackBase() + self.stack, ty, flags);
         return true;
     }
 
     /// Replace the top `n` values with one.
-    pub fn popPush(self: *BodyDecoder, n: u32, ty: TypeId, flags: u8) bool {
+    pub fn popPush(self: *BodyDecoder, n: u32, ty: TypeId, flags: Flags) bool {
         self.setValue(self.stackBase() + self.stack -% n, ty, flags);
         return true;
     }
@@ -996,7 +1065,7 @@ pub const BodyDecoder = struct {
     pub fn coerce(self: *BodyDecoder, i: u32, ty: TypeId) Error!void {
         const changes = self.typeOf(i) != ty;
         // A coercion of a value neither null nor undefined is not either.
-        self.setValue(i, ty, self.valueFlags[i] & KNOWN);
+        self.setValue(i, ty, self.valueFlags[i].known());
         if (self.emitPass and changes and ty != .any) {
             try self.emit(.ir_coerce, @intCast(i), @intCast(i), 1, 0, 0, typeColumn(ty), self.pc);
         }
@@ -1004,25 +1073,25 @@ pub const BodyDecoder = struct {
 
     /// As FrameState::setType from a conversion instruction: value i becomes `type`, without IR of its own.
     pub fn retype(self: *BodyDecoder, i: u32, ty: TypeId) void {
-        self.setValue(i, ty, self.valueFlags[i] & KNOWN);
+        self.setValue(i, ty, self.valueFlags[i].known());
     }
 
     /// As Verifier::emitCheckNull: value i is known not null from here on. The
     /// local it copies, unchanged since, is checked too.
     pub fn checkNull(self: *BodyDecoder, i: u32) Error!void {
-        if (self.emitPass and self.valueFlags[i] & KNOWN == 0) {
+        if (self.emitPass and !self.valueFlags[i].isKnown()) {
             try self.emit(.ir_check_null, -1, @intCast(i), 1, 0, 0, 0, self.pc);
         }
 
-        self.valueFlags[i] = self.valueFlags[i] | NOT_NULL;
+        self.valueFlags[i].not_null = true;
         if (i < self.localCount) {
             self.localsVersion += 1;
             return;
         }
 
         const o = self.originOf(i);
-        if (o >= 0 and (o & 3) == ORIGIN_Copy) {
-            _ = self.markChecked(@intCast(o >> 2));
+        if (o.isLocal() and o.kind() == .copy) {
+            _ = self.markChecked(o.local());
         }
     }
 
@@ -1064,7 +1133,7 @@ pub const BodyDecoder = struct {
         var i: u32 = 0;
         for (0..self.length) |p_| {
             const p: u32 = @intCast(p_);
-            if (self.cover[p] == START) {
+            if (self.cover[p] == .start) {
                 code.offset[i] = p;
                 code.next[i] = self.slotNext[p];
                 code.opcode[i] = self.opAt(p);
@@ -1089,17 +1158,18 @@ pub fn isBinding(pool: *const ConstantPool, index: u32) bool {
     };
 }
 
-/// A multiname's MN_* parts, as avmplus' Multiname flags.
-pub fn nameParts(pool: *const ConstantPool, index: u32) u8 {
+/// A multiname's parts.
+pub fn nameParts(pool: *const ConstantPool, index: u32) NameParts {
     const mn = pool.baseName(index);
-    const attr: u8 = if (mn.isAttribute()) MN_Attr else 0;
-    return attr | switch (mn) {
-        .qname => MN_QName,
-        .rtqname => MN_QName | MN_Rtns,
-        .rtqname_late => MN_QName | MN_Rtns | MN_Rtname,
-        .multiname_late => MN_Rtname,
-        .multiname, .type_name, .none => 0,
+    var parts: NameParts = switch (mn) {
+        .qname => .{ .qname = true },
+        .rtqname => .{ .qname = true, .rtns = true },
+        .rtqname_late => .{ .qname = true, .rtns = true, .rtname = true },
+        .multiname_late => .{ .rtname = true },
+        .multiname, .type_name, .none => .{},
     };
+    parts.attr = mn.isAttribute();
+    return parts;
 }
 
 /// Verify, with types, every method of ABC `index` that its scripts can

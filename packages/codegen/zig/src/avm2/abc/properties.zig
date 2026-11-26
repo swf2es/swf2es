@@ -12,14 +12,13 @@ const TypeId = traits_.TypeId;
 const types = @import("../link/types.zig");
 const code_ = @import("code.zig");
 const BodyDecoder = code_.BodyDecoder;
-const NOT_NULL = code_.NOT_NULL;
-const WITH = code_.WITH;
+const Flags = code_.Flags;
 const C = @import("constants.zig");
 const Op = @import("opcodes.zig").Op;
 const IrOp = @import("../ir/ir.zig").Op;
 
-fn notNullIf(bd: *BodyDecoder, ty: TypeId) u8 {
-    return if (bd.domain.typeNotNull(ty)) NOT_NULL else 0;
+fn notNullIf(bd: *BodyDecoder, ty: TypeId) Flags {
+    return .{ .not_null = bd.domain.typeNotNull(ty) };
 }
 
 /// As Verifier::checkPropertyMultiname: count the runtime parts of
@@ -30,15 +29,15 @@ pub fn propertyDepth(bd: *BodyDecoder, mn: u32, depth: u32) u32 {
     const domain = bd.domain;
     var n = depth;
     const parts = code_.nameParts(&bd.abc.pool, mn);
-    if (parts & code_.MN_Rtname != 0) {
-        if (parts & code_.MN_QName != 0 and !bd.peekType(n, domain.stringType)) {
+    if (parts.rtname) {
+        if (parts.qname and !bd.peekType(n, domain.stringType)) {
             return 0;
         }
 
         n +%= 1;
     }
 
-    if (parts & code_.MN_Rtns != 0) {
+    if (parts.rtns) {
         if (!bd.peekType(n, domain.namespaceType)) {
             return 0;
         }
@@ -163,7 +162,7 @@ pub fn globalScope(bd: *BodyDecoder) TypeId {
     const outer = bd.outer;
     if (outer.size > 0) {
         const t = outer.types[0];
-        _ = bd.push(t, NOT_NULL);
+        _ = bd.push(t, .{ .not_null = true });
         return t;
     }
 
@@ -173,7 +172,7 @@ pub fn globalScope(bd: *BodyDecoder) TypeId {
     }
 
     const i = bd.localCount;
-    _ = bd.push(bd.typeOf(i), bd.valueFlags[i] & NOT_NULL);
+    _ = bd.push(bd.typeOf(i), .{ .not_null = bd.valueFlags[i].not_null });
     return bd.typeOf(i);
 }
 
@@ -205,11 +204,11 @@ pub fn findProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
             }
 
             if (b != Binding.none) {
-                _ = bd.push(bd.typeOf(v), bd.valueFlags[v] & NOT_NULL);
+                _ = bd.push(bd.typeOf(v), .{ .not_null = bd.valueFlags[v].not_null });
                 return emitFound(bd, .getscopeobject, top, i, v - bd.localCount, 0);
             }
 
-            if (bd.valueFlags[v] & WITH != 0) {
+            if (bd.valueFlags[v].with) {
                 break;
             }
         }
@@ -224,7 +223,7 @@ pub fn findProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
                 }
 
                 if (b != Binding.none) {
-                    _ = bd.push(t, NOT_NULL);
+                    _ = bd.push(t, .{ .not_null = true });
                     return emitFound(bd, .getouterscope, top, -1, @intCast(j), 0);
                 }
 
@@ -236,7 +235,7 @@ pub fn findProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
             if (j <= 0) {
                 const script = domain.findScript(bd.index, mn);
                 if (script != .none) {
-                    _ = bd.push(script.toType(), NOT_NULL);
+                    _ = bd.push(script.toType(), .{ .not_null = true });
 
                     // Defined by this very script: its global object.
                     if (domain.traits.init.get(script.index()) == @as(i32, @bitCast(bd.global))) {
@@ -260,7 +259,7 @@ pub fn findProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
         return false;
     }
 
-    _ = bd.popPush(n - 1, domain.objectType(), NOT_NULL);
+    _ = bd.popPush(n - 1, domain.objectType(), .{ .not_null = true });
     if (global) {
         const op: IrOp = if (opcode == .findproperty) .ir_find_prop_global else .ir_find_prop_global_strict;
         return emitFound(bd, op, top, -1, mn, @bitCast(locals));
@@ -315,7 +314,7 @@ fn emitFound(bd: *BodyDecoder, op: IrOp, dst: i32, src: i32, a: u32, c: i32) Err
 pub fn findDef(bd: *BodyDecoder, mn: u32) bool {
     const domain = bd.domain;
     const script = domain.findScript(bd.index, mn);
-    return bd.push(if (script != .none) script.toType() else domain.objectType(), NOT_NULL);
+    return bd.push(if (script != .none) script.toType() else domain.objectType(), .{ .not_null = true });
 }
 
 /// As Verifier::emitGetProperty: a slot's or getter's type when the name
@@ -339,7 +338,7 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
     if (kind == .variable or kind == .constant) {
         // The builtin global's Math and Number are never null.
         const notNull = domain.traits.abc.get(ty.index()) == @as(u32, @bitCast(domain.builtinAbc)) and domain.isMathOrNumber(bd.index, mn);
-        _ = bd.popPush(n, propType, if (notNull) NOT_NULL else 0);
+        _ = bd.popPush(n, propType, .{ .not_null = notNull });
         return bd.emitOn(.getslot, @bitCast(obj), @bitCast(obj), 1, b.index(), 0, 0);
     }
 
@@ -383,7 +382,7 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
 fn numericIndex(bd: *BodyDecoder, mn: u32) bool {
     const domain = bd.domain;
     const parts = code_.nameParts(&bd.abc.pool, mn);
-    if (parts & code_.MN_Attr != 0 or parts & code_.MN_Rtname == 0 or !domain.hasPublicNamespace(bd.index, mn)) {
+    if (parts.attr or !parts.rtname or !domain.hasPublicNamespace(bd.index, mn)) {
         return false;
     }
 
@@ -514,7 +513,7 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
         const top = bd.peek(1);
         if (converted != TypeId.failed) {
             if (converted.isTraits() and domain.isConversion(slotType)) {
-                bd.setValue(top, converted, NOT_NULL);
+                bd.setValue(top, converted, .{ .not_null = true });
                 _ = try bd.emitOn(conversionOp(bd, converted), @bitCast(top), @bitCast(top), 1, 0, 0, 0);
             } else {
                 try bd.coerce(top, converted);
@@ -527,12 +526,12 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
 
             const flags = bd.valueFlags[top];
             const value = bd.typeOf(top);
-            _ = bd.popPush(n, value, flags & NOT_NULL);
+            _ = bd.popPush(n, value, .{ .not_null = flags.not_null });
             return bd.emitOn(.ir_nip, @bitCast(obj), @bitCast(obj), n, 0, 0, 0);
         }
     }
 
-    _ = bd.popPush(n, .any, 0);
+    _ = bd.popPush(n, .any, .none);
     return bd.emitOn(ir_.of(opcode), if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, mn, argc, 0);
 }
 

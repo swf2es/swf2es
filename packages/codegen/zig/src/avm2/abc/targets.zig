@@ -15,8 +15,7 @@ const Error = Allocator.Error;
 const TypeId = @import("../link/traits.zig").TypeId;
 const code_ = @import("code.zig");
 const BodyDecoder = code_.BodyDecoder;
-const NOT_NULL = code_.NOT_NULL;
-const START = code_.START;
+const Flags = code_.Flags;
 const C = @import("constants.zig");
 
 /// Save the current state as known target t's entry state.
@@ -25,7 +24,7 @@ pub fn saveEntry(bd: *BodyDecoder, t: u32) Error!void {
     if (bd.entryUsed + size > bd.entryType.len) {
         const capacity = @max(bd.entryUsed + size, bd.entryType.len * 2);
         const types = try bd.gpa.alloc(TypeId, capacity);
-        const flags = try bd.gpa.alloc(u8, capacity);
+        const flags = try bd.gpa.alloc(Flags, capacity);
         @memcpy(types[0..bd.entryUsed], bd.entryType[0..bd.entryUsed]);
         @memcpy(flags[0..bd.entryUsed], bd.entryFlags[0..bd.entryUsed]);
         bd.entryType = types;
@@ -120,7 +119,7 @@ fn head(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!Head
         // Code decoded as part of another block must have been reached with the
         // same state. avmplus walks the code in order: the walk's state at t is
         // the one arriving, this edge's the target's it recorded.
-        const walked = bd.cover[t] == START;
+        const walked = bd.cover[t] == .start;
         if (walked and !sameDepths(bd, stack, scope, bd.stackAt[t], bd.scopeAt[t])) {
             return .failed;
         }
@@ -216,7 +215,7 @@ pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!bool {
         const firstFlags = bd.valueFlags[base];
         const firstOrigin = bd.origin[base];
         const ty = bd.handlerTypeAt(i);
-        bd.setValue(base, ty, if (bd.domain.typeNotNull(ty)) NOT_NULL else 0);
+        bd.setValue(base, ty, .{ .not_null = bd.domain.typeNotNull(ty) });
         bd.stack = 1;
         bd.scope = 0;
         const reached = try handlerEdge(bd, pc, to);
@@ -237,7 +236,7 @@ pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!bool {
 fn saveCurrent(bd: *BodyDecoder) Error!void {
     if (bd.savedType.len < bd.frameSize) {
         bd.savedType = try bd.gpa.alloc(TypeId, bd.frameSize);
-        bd.savedFlags = try bd.gpa.alloc(u8, bd.frameSize);
+        bd.savedFlags = try bd.gpa.alloc(Flags, bd.frameSize);
     }
 
     @memcpy(bd.savedType[0..bd.frameSize], bd.valueType[0..bd.frameSize]);
