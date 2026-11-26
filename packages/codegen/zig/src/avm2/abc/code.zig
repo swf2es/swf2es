@@ -16,7 +16,6 @@ const Error = Allocator.Error;
 const memory = @import("../../memory.zig");
 const ir_ = @import("../ir/ir.zig");
 const Ir = ir_.Ir;
-const columnType = ir_.columnType;
 const typeColumn = ir_.typeColumn;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
@@ -202,9 +201,9 @@ pub const BodyDecoder = struct {
     outer: *const Scope = &empty_scope,
     frameSize: u32 = 0,
     /// The current values: locals, then maxScope scope entries, then the stack.
-    valueType: []i32 = &.{},
+    valueType: []TypeId = &.{},
     valueFlags: []u8 = &.{},
-    entryType: []i32 = &.{},
+    entryType: []TypeId = &.{},
     entryFlags: []u8 = &.{},
     entryUsed: u32 = 0,
     /// By stack value, what it tells of a local in the block being walked, as
@@ -215,14 +214,15 @@ pub const BodyDecoder = struct {
     testWrite: u32 = 0,
     /// By local: how many times it was set.
     localWrites: []u32 = &.{},
-    /// Each handler's exception type and catch scope type.
-    handlerType: std.ArrayList(i32) = .empty,
+    /// Each handler's exception type and catch scope type, the first
+    /// handlerCount of them once a typed walk's checkHandlers succeeds.
+    handlerType: []TypeId = &.{},
     /// Bumped whenever a local may have changed: a local set, or the frame
     /// loaded whole. A handler edge whose locals are the same as at the last
     /// merge into it, at the version of handlerMerged, changes nothing there.
     localsVersion: u64 = 1,
     handlerMerged: []u64 = &.{},
-    handlerScope: std.ArrayList(i32) = .empty,
+    handlerScope: []TypeId = &.{},
     /// avmplus' second verifier phase, writing the IR.
     emitPass: bool = false,
     /// Methods (domain-wide ids) whose scope chain the last decode captured.
@@ -242,7 +242,7 @@ pub const BodyDecoder = struct {
 
     // The values of the block being walked, while a loop header's handler
     // edges are followed from its entry state instead.
-    savedType: []i32 = &.{},
+    savedType: []TypeId = &.{},
     savedFlags: []u8 = &.{},
 
     /// A decoder of ABC `index` of `domain`, or untyped, with no domain, its
@@ -405,7 +405,7 @@ pub const BodyDecoder = struct {
                 continue;
             }
 
-            try ir.addHandler(abc.exceptionFrom[h], abc.exceptionTo[h], self.blockOf[to], self.handlerType.items[i], self.handlerScope.items[i]);
+            try ir.addHandler(abc.exceptionFrom[h], abc.exceptionTo[h], self.blockOf[to], self.handlerType[i], self.handlerScope[i]);
         }
 
         var ok = true;
@@ -428,7 +428,7 @@ pub const BodyDecoder = struct {
         const i = try ir.add(op, dst, src, count, a, b, c, pc);
         if (dst >= 0) {
             const d: u32 = @intCast(dst);
-            ir.type[i] = self.valueType[d];
+            ir.type[i] = typeColumn(self.valueType[d]);
             ir.notNull[i] = self.valueFlags[d] & NOT_NULL;
         }
     }
@@ -511,8 +511,12 @@ pub const BodyDecoder = struct {
         const abc = self.abc;
         const domain = self.domain;
         const typed = self.typed;
-        self.handlerType.clearRetainingCapacity();
-        self.handlerScope.clearRetainingCapacity();
+        if (typed and self.handlerType.len < self.handlerCount) {
+            const capacity = @max(self.handlerCount, self.handlerType.len * 2);
+            self.handlerType = try self.gpa.alloc(TypeId, capacity);
+            self.handlerScope = try self.gpa.alloc(TypeId, capacity);
+        }
+
         for (0..self.handlerCount) |i_| {
             const i: u32 = @intCast(i_);
             const h = self.handlerFirst + i;
@@ -547,9 +551,9 @@ pub const BodyDecoder = struct {
             }
 
             if (typed) {
-                try self.handlerType.append(self.gpa, typeColumn(ty));
+                self.handlerType[i] = ty;
                 const scope = if (name == 0) domain.objectType() else try domain.catchTraits(self.index, h, name, ty);
-                try self.handlerScope.append(self.gpa, typeColumn(scope));
+                self.handlerScope[i] = scope;
             }
         }
 
@@ -576,7 +580,7 @@ pub const BodyDecoder = struct {
 
         if (self.valueType.len < self.frameSize) {
             const gpa = self.gpa;
-            self.valueType = try memory.allocZeroed(gpa, i32, self.frameSize);
+            self.valueType = try memory.allocZeroed(gpa, TypeId, self.frameSize);
             self.valueFlags = try memory.allocZeroed(gpa, u8, self.frameSize);
             self.origin = try memory.allocZeroed(gpa, i32, self.frameSize);
             self.originWrite = try memory.allocZeroed(gpa, u32, self.frameSize);
@@ -608,7 +612,7 @@ pub const BodyDecoder = struct {
     // localCount + maxScope.
 
     pub inline fn setValue(self: *BodyDecoder, i: u32, ty: TypeId, flags: u8) void {
-        self.valueType[i] = typeColumn(ty);
+        self.valueType[i] = ty;
         self.valueFlags[i] = flags;
         if (i < self.localCount) {
             self.localsVersion += 1;
@@ -703,7 +707,7 @@ pub const BodyDecoder = struct {
     }
 
     pub inline fn typeOf(self: *const BodyDecoder, i: u32) TypeId {
-        return columnType(self.valueType[i]);
+        return self.valueType[i];
     }
 
     pub inline fn isNotNull(self: *const BodyDecoder, i: u32) bool {
@@ -747,7 +751,7 @@ pub const BodyDecoder = struct {
                 continue;
             }
 
-            const merged = typeColumn(types.commonBase(self.domain, columnType(entryType), columnType(valueType)));
+            const merged = types.commonBase(self.domain, entryType, valueType);
             if (merged != entryType or mergedFlags != entryFlags) {
                 self.entryType[at + i] = merged;
                 self.entryFlags[at + i] = mergedFlags;

@@ -104,8 +104,8 @@ pub fn opcodeIs(op: Op, comptime is: fn (ops.Op) bool) bool {
 }
 
 /// A type as an i32, as the IR's columns (type, c, entryType,
-/// handlerType), the verifier's frames and the emitters' registers hold
-/// it, and back: the one place the two meet, until those hold TypeId too.
+/// handlerType) and the emitters' registers hold it, and back: the one
+/// place the two meet, until those hold TypeId too.
 pub fn typeColumn(t: TypeId) i32 {
     return @backingInt(t);
 }
@@ -217,7 +217,7 @@ pub const Ir = struct {
     /// Start a block at ABC offset `pc` with the next instruction, entered with
     /// stack and scope depths `stack` and `scope` and the frame values `types`
     /// and `flags` (1: not null, 2: with scope).
-    pub fn addBlock(self: *Ir, pc: u32, stack: u32, scope: u32, types: []const i32, flags: []const u8) Allocator.Error!void {
+    pub fn addBlock(self: *Ir, pc: u32, stack: u32, scope: u32, types: []const TypeId, flags: []const u8) Allocator.Error!void {
         const gpa = self.gpa;
         const k = self.blockCount;
         if (k == self.blockFirst.len) {
@@ -242,7 +242,7 @@ pub const Ir = struct {
         }
 
         for (0..size) |i| {
-            self.entryType[used + i] = types[i];
+            self.entryType[used + i] = typeColumn(types[i]);
             self.entryFlags[used + i] = flags[i] & 3;
         }
 
@@ -253,7 +253,7 @@ pub const Ir = struct {
         self.blockCount += 1;
     }
 
-    pub fn addHandler(self: *Ir, from: u32, to: u32, block: u32, type_: i32, scope: i32) Allocator.Error!void {
+    pub fn addHandler(self: *Ir, from: u32, to: u32, block: u32, type_: TypeId, scope: TypeId) Allocator.Error!void {
         const h = self.handlerCount;
         if (h == self.handlerFrom.len) {
             const capacity = @max(4, self.handlerFrom.len * 2);
@@ -268,8 +268,8 @@ pub const Ir = struct {
         self.handlerFrom[h] = from;
         self.handlerTo[h] = to;
         self.handlerBlock[h] = block;
-        self.handlerType[h] = type_;
-        self.handlerScope[h] = scope;
+        self.handlerType[h] = typeColumn(type_);
+        self.handlerScope[h] = typeColumn(scope);
         self.handlerCount += 1;
     }
 
