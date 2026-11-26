@@ -7,11 +7,10 @@
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
 const ir_ = @import("../ir/ir.zig");
-const columnType = ir_.columnType;
-const typeColumn = ir_.typeColumn;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
+const TypeId = traits_.TypeId;
 const copies = @import("copies.zig");
 const CONSTANT = copies.CONSTANT;
 const NONE = copies.NONE;
@@ -22,7 +21,6 @@ const hasBoundEntry = method_.hasBoundEntry;
 const refs = @import("refs.zig");
 const values = @import("values.zig");
 const IrOp = @import("../ir/ir.zig").Op;
-const CONVERTS = values.CONVERTS;
 
 fn u(r: i32) usize {
     return @intCast(r);
@@ -30,7 +28,7 @@ fn u(r: i32) usize {
 
 /// Whether register r may hold XML or an XMLList: untyped, Object, or either.
 fn mayBeXml(em: *const MethodEmitter, r: i32) bool {
-    const ty = columnType(em.regType[u(r)]);
+    const ty = em.regType[u(r)];
     const bt = em.domain.builtin(ty);
     return bt == .any or
         bt == .object or
@@ -53,7 +51,7 @@ fn notesDxns(em: *MethodEmitter, op: IrOp, src: i32) void {
             }
         },
         .call => {
-            if (mayBeXml(em, src) or columnType(em.regType[u(src)]) == em.domain.classType) {
+            if (mayBeXml(em, src) or em.regType[u(src)] == em.domain.classType) {
                 em.seesDxns = true;
             }
         },
@@ -337,7 +335,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: IrOp) Error!bool {
             // As rt.constructSuper, without an array of the arguments to apply;
             // the verifier coerced them to the base's constructor, so they may
             // go to its entry for bound calls.
-            try out.text(superEntry(em, ir.c[i]));
+            try out.text(superEntry(em, ir.cType(i)));
             em.usesSup = true;
             try em.reg(src);
             try args(em, src + 1, a);
@@ -352,7 +350,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: IrOp) Error!bool {
         },
         .ir_construct_slot => {
             try em.assign(i, false);
-            try constructSlot(em, src, a, ir.b[i], ir.c[i]);
+            try constructSlot(em, src, a, ir.b[i], ir.cType(i));
         },
         .call => {
             try em.assign(i, false);
@@ -657,8 +655,8 @@ fn setProperty(em: *MethodEmitter, i: u32, a: u32, src: i32) Error!void {
         // its element type where that runs no AS3, written in place; the
         // rest goes to the helper (objects.ts tells why).
         const array = try arrayElements(em, a, src);
-        const element = if (array or !vectorElements(em, a, kind)) CONVERTS else try storedType(em, kind, src);
-        if (array or element != CONVERTS) {
+        const element: ?TypeId = if (array or !vectorElements(em, a, kind)) null else try storedType(em, kind, src);
+        if (array or element != null) {
             const index = em.builtinOf(src + 1);
             try out.text("if (");
             try receiver(em, src);
@@ -683,7 +681,7 @@ fn setProperty(em: *MethodEmitter, i: u32, a: u32, src: i32) Error!void {
             if (array) {
                 try em.reg(src + 2);
             } else {
-                try values.convert(em, "", src + 2, element, em.regType[u(src + 2)], false);
+                try values.convert(em, "", src + 2, element.?, em.regType[u(src + 2)], false);
             }
 
             try out.text("; else ");
@@ -836,9 +834,9 @@ fn name(em: *MethodEmitter, a: u32, from: i32) Error!void {
 const Kind = enum { none, Int, Uint, Double, Float, Object };
 
 /// The kind of Vector type t's elements.
-fn vectorKind(em: *MethodEmitter, type_: i32) Error!Kind {
+fn vectorKind(em: *MethodEmitter, type_: TypeId) Error!Kind {
     const domain = em.domain;
-    const t = columnType(type_);
+    const t = type_;
     if (!t.isTraits()) {
         return .none;
     }
@@ -884,13 +882,13 @@ fn stringIs(domain: *const Domain, id: u32, text: []const u8) bool {
 /// The string's own method, `.charAt(` or `.charCodeAt(`, where the call by
 /// dispatch id `disp` on the String in register `src` is of AS3::charAt or
 /// AS3::charCodeAt with no argument or a number; else "" (objects.ts tells why).
-fn stringMethod(em: *MethodEmitter, ty: i32, disp: u32, src: i32, argc: u32) []const u8 {
+fn stringMethod(em: *MethodEmitter, ty: TypeId, disp: u32, src: i32, argc: u32) []const u8 {
     const domain = em.domain;
-    if (columnType(ty) != domain.stringType or argc > 1 or (argc == 1 and !values.isNumber(em, src + 1))) {
+    if (ty != domain.stringType or argc > 1 or (argc == 1 and !values.isNumber(em, src + 1))) {
         return "";
     }
 
-    const m = refs.aliasedMember(domain, @intCast(ty), disp);
+    const m = refs.aliasedMember(domain, ty.index(), disp);
     if (m < 0) {
         return "";
     }
@@ -953,33 +951,34 @@ fn vectorElements(em: *MethodEmitter, a: u32, kind: Kind) bool {
 
 /// The element type the value in register src + 2 converts to when it is
 /// written into the Vector of `kind` in register `src`, where the
-/// conversion runs no AS3; else CONVERTS (objects.ts tells why).
-fn storedType(em: *MethodEmitter, kind: Kind, src: i32) Error!i32 {
+/// conversion runs no AS3; else null, the helper's (objects.ts tells why).
+fn storedType(em: *MethodEmitter, kind: Kind, src: i32) Error!?TypeId {
     const domain = em.domain;
-    const t = columnType(em.regType[u(src)]);
-    const ty: i32 = switch (kind) {
-        .Int => typeColumn(domain.intType),
-        .Uint => typeColumn(domain.uintType),
-        .Double => typeColumn(domain.numberType),
-        .Object => if (t != domain.vectorObjectType) typeColumn(domain.traits.param.get(t.index())) else CONVERTS,
-        else => CONVERTS,
+    const t = em.regType[u(src)];
+    const ty: TypeId = switch (kind) {
+        .Int => domain.intType,
+        .Uint => domain.uintType,
+        .Double => domain.numberType,
+        .Object => if (t != domain.vectorObjectType) domain.traits.param.get(t.index()) else return null,
+        else => return null,
     };
 
     const from = em.regType[u(src + 2)];
-    const fromBt = domain.builtin(columnType(from));
-    if (ty == CONVERTS or fromBt == .float) {
-        return CONVERTS;
+    const fromBt = domain.builtin(from);
+    if (fromBt == .float) {
+        return null;
     }
 
     const numeric = fromBt == .int or fromBt == .uint or fromBt == .number;
-    return switch (domain.builtin(columnType(ty))) {
-        .int, .uint => if (numeric or fromBt == .boolean) ty else CONVERTS,
-        .number => if (numeric) ty else CONVERTS,
-        .boolean, .object => ty,
-        .string => if (try values.keeps(em, ty, from)) ty else CONVERTS,
+    const stores = switch (domain.builtin(ty)) {
+        .int, .uint => numeric or fromBt == .boolean,
+        .number => numeric,
+        .boolean, .object => true,
+        .string => try values.keeps(em, ty, from),
         // A class's instances: an instance check, which throws as the helper would.
-        else => if (refs.isClassRef(em, ty)) ty else CONVERTS,
+        else => refs.isClassRef(em, ty),
     };
+    return if (stores) ty else null;
 }
 
 /// Whether getproperty or setproperty by multiname `a`, a runtime name
@@ -1014,7 +1013,7 @@ fn keyed(em: *MethodEmitter, a: u32, r: i32) bool {
 /// class that extends it, and a public namespace in the set.
 fn arrayElements(em: *MethodEmitter, a: u32, r: i32) Error!bool {
     const domain = em.domain;
-    const t = columnType(em.regType[u(r)]);
+    const t = em.regType[u(r)];
     return t.isTraits() and
         domain.arrayType != .any and
         try domain.traits.subtypeOf(em.gpa, t.index(), domain.arrayType.index()) and
@@ -1047,7 +1046,7 @@ fn receiver(em: *MethodEmitter, r: i32) Error!void {
 /// arguments after it: in place where the runtime marked the class as one
 /// constructClass would only allocate and initialize (`$new`); anything
 /// else by rt.construct (objects.ts tells why).
-fn constructSlot(em: *MethodEmitter, src: i32, slot: u32, argc: u32, ctraits: i32) Error!void {
+fn constructSlot(em: *MethodEmitter, src: i32, slot: u32, argc: u32, ctraits: TypeId) Error!void {
     const out = &em.out;
     em.constructsInPlace = true;
     try out.text("($c = ");
@@ -1064,7 +1063,7 @@ fn constructSlot(em: *MethodEmitter, src: i32, slot: u32, argc: u32, ctraits: i3
         for (0..argc) |k| {
             const r = src + 1 + @as(i32, @intCast(k));
             try out.text(", ");
-            try values.convert(em, "", r, typeColumn(traits.paramType.get(start + @as(u32, @intCast(k)))), em.regType[u(r)], false);
+            try values.convert(em, "", r, traits.paramType.get(start + @as(u32, @intCast(k))), em.regType[u(r)], false);
         }
     } else {
         try out.text("$init.call($o");
@@ -1084,8 +1083,8 @@ fn constructSlot(em: *MethodEmitter, src: i32, slot: u32, argc: u32, ctraits: i3
 
 /// How `super()` calls the constructor of `base`: by its entry for bound
 /// calls, if it has one.
-fn superEntry(em: *MethodEmitter, base: i32) []const u8 {
-    const init = if (base >= 0) em.domain.traits.init.get(@intCast(base)) else -1;
+fn superEntry(em: *MethodEmitter, base: TypeId) []const u8 {
+    const init = if (base.isTraits()) em.domain.traits.init.get(base.index()) else -1;
     return if (init >= 0 and hasBoundEntry(em, @intCast(init)))
         "sup.$it.proto.$binit.call("
     else
@@ -1095,7 +1094,7 @@ fn superEntry(em: *MethodEmitter, base: i32) []const u8 {
 /// The instance initializer of the class whose class traits are
 /// `ctraits`, where `new` of it with `argc` arguments can call its entry
 /// for bound calls with them coerced; else -1.
-fn boundConstructor(em: *MethodEmitter, ctraits: i32, argc: u32) i32 {
+fn boundConstructor(em: *MethodEmitter, ctraits: TypeId, argc: u32) i32 {
     const init = knownConstructor(em, ctraits, argc);
     return if (init >= 0 and hasBoundEntry(em, @intCast(init))) init else -1;
 }
@@ -1103,10 +1102,10 @@ fn boundConstructor(em: *MethodEmitter, ctraits: i32, argc: u32) i32 {
 /// The instance initializer, domain-wide, of the class whose class traits
 /// are `ctraits`, where avmplus' JIT binds `new` of it with `argc`
 /// arguments; else -1.
-fn knownConstructor(em: *MethodEmitter, ctraits: i32, argc: u32) i32 {
+fn knownConstructor(em: *MethodEmitter, ctraits: TypeId, argc: u32) i32 {
     const domain = em.domain;
     const traits = &domain.traits;
-    const itraits = domain.instanceTraitsOf(columnType(ctraits));
+    const itraits = domain.instanceTraitsOf(ctraits);
     const init = if (itraits.isTraits()) traits.init.get(itraits.index()) else -1;
     if (init < 0 or traits.signed.get(@intCast(init)) == 0) {
         return -1;
@@ -1125,7 +1124,7 @@ fn interfaceCall(em: *MethodEmitter, disp: u32, src: i32, argc: u32) Error!void 
     const out = &em.out;
     const domain = em.domain;
     const ifc = em.regType[u(src)];
-    const m = refs.aliasedMember(domain, @intCast(ifc), disp);
+    const m = refs.aliasedMember(domain, ifc.index(), disp);
     try em.member(src);
     if (m >= 0) {
         try out.text("[");
@@ -1171,7 +1170,7 @@ fn virtual(em: *MethodEmitter, disp: u32, src: i32, argc: u32, m: i32) Error!voi
     const out = &em.out;
     const ty = em.regType[u(src)];
     // XML's methods look names up in the default XML namespace.
-    const t = columnType(ty);
+    const t = ty;
     if (t == em.domain.xmlType or t == em.domain.xmlListType) {
         em.seesDxns = true;
     }

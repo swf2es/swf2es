@@ -21,7 +21,7 @@ const Error = errors.Error;
 const memory = @import("../../memory.zig");
 const ir_ = @import("../ir/ir.zig");
 const Ir = ir_.Ir;
-const typeColumn = ir_.typeColumn;
+const typeOperand = ir_.typeOperand;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
@@ -504,7 +504,7 @@ pub const BodyDecoder = struct {
         const i = try ir.add(op, dst, src, count, a, b, c, pc);
         if (dst >= 0) {
             const d: u32 = @intCast(dst);
-            ir.type[i] = typeColumn(self.valueType[d]);
+            ir.type[i] = self.valueType[d];
             ir.notNull[i] = @intFromBool(self.valueFlags[d].not_null);
         }
     }
@@ -1034,7 +1034,7 @@ pub const BodyDecoder = struct {
         // A coercion of a value neither null nor undefined is not either.
         self.setValue(i, ty, self.valueFlags[i].known());
         if (self.emitPass and changes and ty != .any) {
-            try self.emit(.ir_coerce, @intCast(i), @intCast(i), 1, 0, 0, typeColumn(ty), self.pc);
+            try self.emit(.ir_coerce, @intCast(i), @intCast(i), 1, 0, 0, typeOperand(ty), self.pc);
         }
     }
 

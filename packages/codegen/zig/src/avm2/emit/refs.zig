@@ -9,7 +9,6 @@ const output = @import("../../output.zig");
 const Output = output.Output;
 const C = @import("../abc/constants.zig");
 const ir_ = @import("../ir/ir.zig");
-const columnType = ir_.columnType;
 const Value = @import("../abc/pool.zig").Value;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
@@ -36,8 +35,8 @@ pub fn slotMember(out: *Output, slot: u32) Error!void {
 }
 
 /// Whether typeRef writes type t as T[k], a class's instances; else a literal.
-pub fn isClassRef(e: *MethodEmitter, t: i32) bool {
-    const ty = columnType(t);
+pub fn isClassRef(e: *MethodEmitter, t: TypeId) bool {
+    const ty = t;
     // What typeExpr writes as a literal stays one.
     const bt = if (!ty.isTraits()) .any else e.domain.builtin(ty);
     return ty.isTraits() and
@@ -48,9 +47,9 @@ pub fn isClassRef(e: *MethodEmitter, t: i32) bool {
 
 /// Type t in a method: an entry of the module's table T for a class or
 /// Vector; the builtin types, and * as null, as they are.
-pub fn typeRef(e: *MethodEmitter, t: i32) Error!void {
+pub fn typeRef(e: *MethodEmitter, t: TypeId) Error!void {
     if (!isClassRef(e, t)) {
-        return typeExpr(e, columnType(t));
+        return typeExpr(e, t);
     }
 
     try e.out.text("T[");

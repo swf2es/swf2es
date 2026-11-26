@@ -72,7 +72,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
 
             try bd.coerce(top, domain.classInstanceType());
             bd.setValue(top, domain.staticTraitsOf(bd.index, a), .{ .not_null = true });
-            bd.rowC = ir_.typeColumn(domain.staticTraitsOf(bd.index, a));
+            bd.rowC = ir_.typeOperand(domain.staticTraitsOf(bd.index, a));
             return;
         },
         .finddef => return p.findDef(bd, a),
@@ -119,7 +119,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         .coerce => {
             const t = try p.typeName(bd, a);
 
-            bd.rowC = ir_.typeColumn(t);
+            bd.rowC = ir_.typeOperand(t);
             bd.retype(top, t);
             return;
         },
@@ -203,7 +203,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             const ctraits = try p.readBinding(bd, ty, found);
 
             try bd.checkNull(obj);
-            bd.rowC = ir_.typeColumn(ctraits);
+            bd.rowC = ir_.typeOperand(ctraits);
             const itraits = domain.instanceTraitsOf(ctraits);
             bd.popPush(n, itraits, .{ .not_null = itraits != .any });
             // A name bound to a slot, as `new` of a script's class names one:
@@ -217,7 +217,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
                     _ = try domain.traits.signs(domain, @intCast(init));
                 }
 
-                return bd.emitOn(.ir_construct_slot, @bitCast(obj), @bitCast(obj), n, found.index(), b, ir_.typeColumn(ctraits));
+                return bd.emitOn(.ir_construct_slot, @bitCast(obj), @bitCast(obj), n, found.index(), b, ir_.typeOperand(ctraits));
             }
 
             return;

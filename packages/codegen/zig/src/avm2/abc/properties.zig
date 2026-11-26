@@ -113,7 +113,7 @@ pub fn coerceSuper(bd: *BodyDecoder, i: u32) Error!TypeId {
     }
 
     try bd.coerce(i, base.toType());
-    bd.rowC = ir_.typeColumn(base.toType());
+    bd.rowC = ir_.typeOperand(base.toType());
     return base.toType();
 }
 
@@ -218,7 +218,7 @@ pub fn findProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!void {
                             emitFound(bd, .ir_get_global_scope, top, -1, 0, 0);
                     }
 
-                    return emitFound(bd, .finddef, top, -1, mn, ir_.typeColumn(script.toType()));
+                    return emitFound(bd, .finddef, top, -1, mn, ir_.typeOperand(script.toType()));
                 }
 
                 global = true;

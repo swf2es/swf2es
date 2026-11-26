@@ -405,7 +405,7 @@ fn catchClause(em: *MethodEmitter, h: u32, y: u32) Error!void {
     }
 
     const ty = ir.handlerType[h];
-    if (ty >= 0) {
+    if (ty.isTraits()) {
         try out.text(" && rt.catches(x, ");
         try refs.typeRef(em, ty);
         try out.text(")");
@@ -502,7 +502,11 @@ fn save(em: *MethodEmitter) Error!void {
     const ir = em.ir;
     const gpa = em.gpa;
     const saved = &em.saved;
-    try saved.appendSlice(gpa, em.regType[0..ir.frameSize]);
+    // The stack holds words: the types as theirs.
+    for (em.regType[0..ir.frameSize]) |t| {
+        try saved.append(gpa, @backingInt(t));
+    }
+
     for (em.scopeWith[0..ir.maxScope]) |w| {
         try saved.append(gpa, w);
     }
@@ -547,6 +551,6 @@ fn restore(em: *MethodEmitter) void {
 
     r = @as(i32, @intCast(ir.frameSize)) - 1;
     while (r >= 0) : (r -= 1) {
-        em.regType[@intCast(r)] = saved.pop().?;
+        em.regType[@intCast(r)] = @fromBackingInt(saved.pop().?);
     }
 }

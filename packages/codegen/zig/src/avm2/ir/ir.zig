@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ops = @import("../abc/opcodes.zig");
+const options = @import("options");
 const TypeId = @import("../link/traits.zig").TypeId;
 const Flags = @import("../abc/code.zig").Flags;
 
@@ -104,15 +105,9 @@ pub fn opcodeIs(op: Op, comptime is: fn (ops.Op) bool) bool {
     return b < 0x100 and is(@fromBackingInt(@as(u8, @truncate(b))));
 }
 
-/// A type as an i32, as the IR's columns (type, c, entryType,
-/// handlerType) and the emitters' registers hold it, and back: the one
-/// place the two meet, until those hold TypeId too.
-pub fn typeColumn(t: TypeId) i32 {
+/// A type as operand c holds it (see Ir.cType).
+pub fn typeOperand(t: TypeId) i32 {
     return @backingInt(t);
-}
-
-pub fn columnType(c: i32) TypeId {
-    return @fromBackingInt(c);
 }
 
 pub const Ir = struct {
@@ -127,7 +122,7 @@ pub const Ir = struct {
     b: []u32 = &.{},
     c: []i32 = &.{},
     /// The type of dst after the instruction, and whether it is known not null.
-    type: []i32 = &.{},
+    type: []TypeId = &.{},
     notNull: []u8 = &.{},
     /// The ABC offset of the instruction it comes from.
     pc: []u32 = &.{},
@@ -142,7 +137,7 @@ pub const Ir = struct {
 
     /// Each block's entry state: frameSize types and flags from block *
     /// frameSize, flag 1 for known not null and 2 for a with scope.
-    entryType: []i32 = &.{},
+    entryType: []TypeId = &.{},
     entryFlags: []u8 = &.{},
 
     /// Exception handlers: the ABC range they cover, their block, exception type and catch scope type.
@@ -150,8 +145,8 @@ pub const Ir = struct {
     handlerFrom: []u32 = &.{},
     handlerTo: []u32 = &.{},
     handlerBlock: []u32 = &.{},
-    handlerType: []i32 = &.{},
-    handlerScope: []i32 = &.{},
+    handlerType: []TypeId = &.{},
+    handlerScope: []TypeId = &.{},
 
     /// lookupswitch targets as block numbers; an instruction's are cases[b .. b + c].
     cases: []u32 = &.{},
@@ -162,6 +157,20 @@ pub const Ir = struct {
     maxScope: u32 = 0,
     frameSize: u32 = 0,
     outerSize: u32 = 0,
+
+    /// Operand c as a type, where the emitters read it as one: the type
+    /// ir_coerce and coerce convert to, the class ir_construct_slot
+    /// constructs, constructsuper's base. (The verifier also writes the
+    /// types of newclass, constructprop, finddef and the other super
+    /// instructions there, which the emitters do not read.)
+    pub inline fn cType(self: *const Ir, i: u32) TypeId {
+        if (options.checks) {
+            const op = self.op[i];
+            std.debug.assert(op == .ir_coerce or op == .coerce or op == .ir_construct_slot or op == .constructsuper);
+        }
+
+        return @fromBackingInt(self.c[i]);
+    }
 
     pub fn reset(self: *Ir, localCount: u32, maxScope: u32, frameSize: u32) void {
         self.count = 0;
@@ -209,7 +218,7 @@ pub const Ir = struct {
         self.a[i] = a;
         self.b[i] = b;
         self.c[i] = c;
-        self.type[i] = -1;
+        self.type[i] = .any;
         self.notNull[i] = 0;
         self.pc[i] = pc;
         return i;
@@ -234,7 +243,7 @@ pub const Ir = struct {
         const used = k * size;
         if (used + size > self.entryType.len) {
             const capacity = @max(used + size, self.entryType.len * 2);
-            const types_to = try gpa.alloc(i32, capacity);
+            const types_to = try gpa.alloc(TypeId, capacity);
             const flags_to = try gpa.alloc(u8, capacity);
             @memcpy(types_to[0..used], self.entryType[0..used]);
             @memcpy(flags_to[0..used], self.entryFlags[0..used]);
@@ -243,7 +252,7 @@ pub const Ir = struct {
         }
 
         for (0..size) |i| {
-            self.entryType[used + i] = typeColumn(types[i]);
+            self.entryType[used + i] = types[i];
             // Not null and with, the first two bits.
             self.entryFlags[used + i] = @as(u8, @bitCast(flags[i])) & 3;
         }
@@ -270,8 +279,8 @@ pub const Ir = struct {
         self.handlerFrom[h] = from;
         self.handlerTo[h] = to;
         self.handlerBlock[h] = block;
-        self.handlerType[h] = typeColumn(type_);
-        self.handlerScope[h] = typeColumn(scope);
+        self.handlerType[h] = type_;
+        self.handlerScope[h] = scope;
         self.handlerCount += 1;
     }
 
