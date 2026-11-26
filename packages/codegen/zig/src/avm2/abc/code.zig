@@ -22,6 +22,7 @@ const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
 const Scope = traits_.Scope;
 const TypeId = traits_.TypeId;
+const TypeRef = traits_.TypeRef;
 const types = @import("../link/types.zig");
 const Abc = @import("abc.zig").Abc;
 const C = @import("constants.zig");
@@ -195,9 +196,9 @@ pub const BodyDecoder = struct {
     domain: *Domain,
     typed: bool,
     index: u32 = 0,
-    /// The method's domain-wide id, and the traits it belongs to or -1.
+    /// The method's domain-wide id, and the traits it belongs to, if any.
     global: u32 = 0,
-    declarer: i32 = -1,
+    declarer: TypeRef = .none,
     outer: *const Scope = &empty_scope,
     frameSize: u32 = 0,
     /// The current values: locals, then maxScope scope entries, then the stack.

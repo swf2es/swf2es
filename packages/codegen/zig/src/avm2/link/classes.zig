@@ -12,6 +12,7 @@ const domain_ = @import("domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("traits.zig");
 const Scope = traits_.Scope;
+const TypeRef = traits_.TypeRef;
 const typenames = @import("typenames.zig");
 const errors = @import("../abc/errors.zig");
 const Diagnostics = errors.Diagnostics;
@@ -189,16 +190,16 @@ fn layoutScripts(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
 fn layoutActivations(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
     const gpa = dom.gpa;
     const abc = dom.abcs.get(index);
-    const bodies = try memory.allocZeroed(gpa, i32, abc.bodyCount());
+    const bodies = try gpa.alloc(TypeRef, abc.bodyCount());
     for (0..abc.bodyCount()) |b_| {
         const b: u32 = @intCast(b_);
         const first = abc.bodyTraitStart[b];
         const end = abc.bodyTraitStart[b + 1];
         const flags = abc.methodFlags[abc.bodyMethod[b]];
-        bodies[b] = -1;
+        bodies[b] = .none;
         if (flags.need_activation or end > first) {
             const t = try dom.traits.create(gpa, .activation, index, b, .none, -1, first, end);
-            bodies[b] = @intCast(t);
+            bodies[b] = .of(t);
             const err = try layout(&dom.traits, dom, t);
             if (err != 0) {
                 return diag.fail(err);
@@ -226,7 +227,7 @@ fn bindMethods(dom: *Domain, t: u32, init: i32, final: bool) Allocator.Error!voi
         if (kind.bindsMethod()) {
             // A method of this ABC's, whose rows its link added.
             const m = methods + abc.traitIndex[i];
-            traits.methodTraits.set(m, @intCast(t));
+            traits.methodTraits.set(m, .of(t));
             traits.methodVirtual.set(m, 1);
             traits.methodFinal.set(m, if (tag.final or final) 1 else 0);
         }
@@ -234,7 +235,7 @@ fn bindMethods(dom: *Domain, t: u32, init: i32, final: bool) Allocator.Error!voi
 
     if (init >= 0) {
         const m = methods + @as(u32, @intCast(init));
-        traits.methodTraits.set(m, @intCast(t));
+        traits.methodTraits.set(m, .of(t));
         traits.init.set(t, @intCast(m));
     }
 }
