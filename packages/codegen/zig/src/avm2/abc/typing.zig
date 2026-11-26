@@ -312,7 +312,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             // A body without activation traits pushes *.
             return bd.push(t.orAny(), NOT_NULL);
         },
-        .newcatch => return bd.push(bd.handlerScope[a], NOT_NULL),
+        .newcatch => return bd.push(bd.handlerScopeAt(a), NOT_NULL),
         .getscopeobject => {
             const i = bd.localCount + bd.byteAt(pc + 1);
             return bd.push(bd.typeOf(i), bd.valueFlags[i] & NOT_NULL);
