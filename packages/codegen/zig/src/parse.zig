@@ -4,9 +4,10 @@
 // logs are read with. It reads the string's UTF-16 units, which the host
 // gave as WTF-8 (packages/codegen/src/zig.ts): whitespace is
 // AssemblyScript's set (isSpace), then a sign, a radix prefix, and digits
-// up to the first that is not one, wrapping as i32 arithmetic does. Where
-// it reads past the string's end, as it does after trailing whitespace,
-// it reads 0 here; AssemblyScript reads whatever memory follows.
+// up to the first that is not one, wrapping as i32 arithmetic does.
+// Units.unit() gives 0 past the string's end, where AssemblyScript read
+// whatever memory followed; parseI32 asks there only as a string of
+// whitespace ends, and 0 is no space, sign or digit.
 const std = @import("std");
 
 /// The UTF-16 units of WTF-8 bytes, one at a time.
