@@ -6,6 +6,7 @@ const std = @import("std");
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
+const TraitKind = abc_.TraitKind;
 const Diagnostics = abc_.Diagnostics;
 const Error = abc_.Error;
 const C = @import("constants.zig");
@@ -36,23 +37,25 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
         }
 
         const tag: u8 = @truncate(r.u8_());
-        const kind = tag & 0x0f;
+        const kind: TraitKind = .of(tag);
         var id: u32 = 0;
         var index: u32 = 0;
         var value: u32 = 0;
         var valueKind: u8 = 0;
-        if (kind == C.TRAIT_Slot or kind == C.TRAIT_Const) {
-            id = r.u30_();
-            index = r.u30_();
-            value = r.u30_();
-            if (value != 0) {
-                valueKind = @truncate(r.u8_());
-            }
-        } else if (kind == C.TRAIT_Class or kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
-            id = r.u30_();
-            index = r.u30_();
-        } else {
-            return diag.fail(if (r.failed) C.kCorruptABCError else C.kUnsupportedTraitsKindError);
+        switch (kind) {
+            .slot, .constant => {
+                id = r.u30_();
+                index = r.u30_();
+                value = r.u30_();
+                if (value != 0) {
+                    valueKind = @truncate(r.u8_());
+                }
+            },
+            .class, .method, .getter, .setter => {
+                id = r.u30_();
+                index = r.u30_();
+            },
+            _ => return diag.fail(if (r.failed) C.kCorruptABCError else C.kUnsupportedTraitsKindError),
         }
 
         lists.push("traitMetadataStart", lists.len("traitMetadata"));
@@ -72,7 +75,7 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
             return diag.fail(C.kCorruptABCError);
         }
 
-        if (kind == C.TRAIT_Class) {
+        if (kind == .class) {
             if (index >= abc.classCount()) {
                 return diag.fail(C.kClassInfoExceedsCountError);
             }
@@ -80,13 +83,13 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
             if (index >= classesDefined) {
                 return diag.fail(C.kClassInfoOrderError);
             }
-        } else if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
+        } else if (kind.bindsMethod()) {
             if (index >= abc.methodCount()) {
                 return diag.fail(C.kMethodInfoExceedsCountError);
             }
         }
 
-        if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
+        if (kind.bindsMethod()) {
             if (abc.methodOwner[index] != -1) {
                 owned = true;
             } else {
@@ -116,19 +119,9 @@ pub fn bindingNameError(pool: *const ConstantPool, index: u32, builtin: bool) i3
         return C.kCpoolIndexRangeError;
     }
 
-    var mn = index;
-    if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
-        mn = pool.mnA[mn];
-    }
-
-    const kind = pool.mnKind[mn];
-    if (builtin and kind == C.CONSTANT_Multiname and pool.mnB[mn] != 0) {
-        return 0;
-    }
-
-    if (kind != C.CONSTANT_Qname or pool.mnA[mn] == 0 or pool.mnB[mn] == 0) {
-        return C.kCpoolEntryWrongTypeError;
-    }
-
-    return 0;
+    return switch (pool.baseName(index)) {
+        .qname => |q| if (q.attribute or q.ns == 0 or q.name == 0) C.kCpoolEntryWrongTypeError else 0,
+        .multiname => |m| if (builtin and !m.attribute and m.name != 0) 0 else C.kCpoolEntryWrongTypeError,
+        else => C.kCpoolEntryWrongTypeError,
+    };
 }

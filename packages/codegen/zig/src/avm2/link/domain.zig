@@ -556,7 +556,7 @@ pub const Domain = struct {
         const pool = &abc.pool;
         const strings = try memory.allocZeroed(gpa, u32, pool.stringCount());
         for (1..@max(pool.stringCount(), 1)) |i| {
-            strings[i] = try self.internString(buffer[pool.stringStart[i]..][0..pool.stringLength[i]]);
+            strings[i] = try self.internString(pool.string(buffer, @intCast(i)));
         }
 
         try self.abcString.push(gpa, strings);
@@ -1133,46 +1133,16 @@ pub const Domain = struct {
             return 0;
         }
 
+        const illegal = if (type_ == TYPE_Any) C.kCorruptABCError else C.kIllegalDefaultValue;
         if (kind == C.CONSTANT_Float and !hasFloats) {
-            return if (type_ == TYPE_Any) C.kCorruptABCError else C.kIllegalDefaultValue;
+            return illegal;
         }
 
-        if (!traits_.isDefaultKind(kind)) {
-            return if (type_ == TYPE_Any) C.kCorruptABCError else C.kIllegalDefaultValue;
-        }
-
-        const pool = &self.abcs.get(index).pool;
-        var number: f64 = 0;
-        var count: u32 = 0xffffffff;
-        switch (kind) {
-            C.CONSTANT_Int => {
-                count = @intCast(pool.ints.len);
-                number = if (value < count) @floatFromInt(pool.ints[value]) else 0;
-            },
-            C.CONSTANT_UInt => {
-                count = @intCast(pool.uints.len);
-                number = if (value < count) @floatFromInt(pool.uints[value]) else 0;
-            },
-            C.CONSTANT_Float => {
-                count = @intCast(pool.floats.len);
-                number = if (value < count) pool.floats[value] else 0;
-            },
-            C.CONSTANT_Double => {
-                count = @intCast(pool.doubles.len);
-                number = if (value < count) pool.doubles[value] else 0;
-            },
-            C.CONSTANT_Utf8 => count = pool.stringCount(),
-            // The value is the kind; its index is not read.
-            C.CONSTANT_True, C.CONSTANT_False, C.CONSTANT_Null => {},
-            // A namespace's kinds.
-            else => count = pool.nsCount(),
-        }
-
-        if (value >= count) {
-            return C.kCpoolIndexRangeError;
-        }
-
-        return if (traits_.legalDefault(self.builtin(type_), kind, number)) 0 else C.kIllegalDefaultValue;
+        const constant = self.abcs.get(index).pool.value(kind, value) catch |err| return switch (err) {
+            error.IllegalKind => illegal,
+            error.OutOfRange => C.kCpoolIndexRangeError,
+        };
+        return if (traits_.legalDefault(self.builtin(type_), constant)) 0 else C.kIllegalDefaultValue;
     }
 
     pub fn findText(self: *const Domain, bytes: []const u8) i32 {

@@ -292,8 +292,8 @@ pub const BodyDecoder = struct {
         self.captured.clearRetainingCapacity();
         self.claims.clearRetainingCapacity();
 
-        self.start = abc.bodyCodeStart[body];
-        self.length = abc.bodyCodeLength[body];
+        self.start = abc.bodyCode[body].start;
+        self.length = abc.bodyCode[body].len;
         self.handlerFirst = abc.bodyExceptionStart[body];
         self.handlerCount = abc.bodyExceptionStart[body + 1] - self.handlerFirst;
         if (self.handlerMerged.len < self.handlerCount) {
@@ -1048,37 +1048,23 @@ pub const BodyDecoder = struct {
 /// As avmplus' Multiname::isBinding for a catch variable: a QName or Multiname
 /// with a name, not an attribute or runtime name. A TypeName stands for its base.
 pub fn isBinding(pool: *const ConstantPool, index: u32) bool {
-    var mn = index;
-    if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
-        mn = pool.mnA[mn];
-    }
-
-    const kind = pool.mnKind[mn];
-    if (kind == C.CONSTANT_Qname) {
-        return pool.mnA[mn] != 0 and pool.mnB[mn] != 0;
-    }
-
-    return kind == C.CONSTANT_Multiname and pool.mnB[mn] != 0;
+    return switch (pool.baseName(index)) {
+        .qname => |q| !q.attribute and q.ns != 0 and q.name != 0,
+        .multiname => |m| !m.attribute and m.name != 0,
+        else => false,
+    };
 }
 
 /// A multiname's MN_* parts, as avmplus' Multiname flags.
 pub fn nameParts(pool: *const ConstantPool, index: u32) u8 {
-    var kind = pool.mnKind[index];
-    if (kind == C.CONSTANT_TypeName) {
-        kind = pool.mnKind[pool.mnA[index]];
-    }
-
-    return switch (kind) {
-        C.CONSTANT_Qname => MN_QName,
-        C.CONSTANT_QnameA => MN_QName | MN_Attr,
-        C.CONSTANT_RTQname => MN_QName | MN_Rtns,
-        C.CONSTANT_RTQnameA => MN_QName | MN_Rtns | MN_Attr,
-        C.CONSTANT_RTQnameL => MN_QName | MN_Rtns | MN_Rtname,
-        C.CONSTANT_RTQnameLA => MN_QName | MN_Rtns | MN_Rtname | MN_Attr,
-        C.CONSTANT_MultinameL => MN_Rtname,
-        C.CONSTANT_MultinameLA => MN_Rtname | MN_Attr,
-        C.CONSTANT_MultinameA => MN_Attr,
-        else => 0,
+    const mn = pool.baseName(index);
+    const attr: u8 = if (mn.isAttribute()) MN_Attr else 0;
+    return attr | switch (mn) {
+        .qname => MN_QName,
+        .rtqname => MN_QName | MN_Rtns,
+        .rtqname_late => MN_QName | MN_Rtns | MN_Rtname,
+        .multiname_late => MN_Rtname,
+        .multiname, .type_name, .none => 0,
     };
 }
 
@@ -1166,7 +1152,7 @@ pub const Verifier = struct {
 
                 const b: u32 = @intCast(body);
                 self.results[b] = (try decoder.decode(b, scope)).@"error";
-                self.spent += @max(@as(u64, abc.bodyCodeLength[b]), BODY_COST);
+                self.spent += @max(@as(u64, abc.bodyCode[b].len), BODY_COST);
                 try self.queue.appendSlice(self.gpa, decoder.captured.items);
             }
 

@@ -8,6 +8,7 @@ const Error = Allocator.Error;
 const output = @import("../../output.zig");
 const Output = output.Output;
 const C = @import("../abc/constants.zig");
+const Value = @import("../abc/pool.zig").Value;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
@@ -242,7 +243,7 @@ pub fn className(e: *MethodEmitter, traits: *const TraitsTable, t: u32) Error![]
 /// Pool string `index` as a JavaScript string literal.
 pub fn poolString(e: *MethodEmitter, index: u32) Error!void {
     const pool = &e.abc.pool;
-    try e.out.string(e.data[pool.stringStart[index]..][0..pool.stringLength[index]]);
+    try e.out.string(pool.string(e.data, index));
 }
 
 /// A constant of default-value kind `kind`, index `value`, for a slot or
@@ -276,18 +277,21 @@ pub fn constant(e: *MethodEmitter, value: u32, kind: u8, type_: i32) Error!void 
         return;
     }
 
-    switch (kind) {
-        0x03 => try out.int(pool.ints[value]),
-        0x04 => try out.uint(pool.uints[value]),
-        0x06 => try out.double(pool.doubles[value]),
-        0x01 => try poolString(e, value),
-        0x0a => try out.text("false"),
-        0x0b => try out.text("true"),
-        0x0c => try out.text("null"),
-        else => {
-            // A namespace, as the Namespace object it is to AS3.
+    // Linking checked the value (Domain.checkDefault); one it did not
+    // check is written as a namespace, never a trap.
+    switch (pool.value(kind, value) catch Value{ .namespace = value }) {
+        .int => |n| try out.int(n),
+        .uint => |n| try out.uint(n),
+        .double => |n| try out.double(n),
+        // Taken above: only an ABC with float support has floats past entry 0.
+        .float => |n| try out.double(n),
+        .string => |i| try poolString(e, i),
+        .boolean => |b| try out.text(if (b) "true" else "false"),
+        .null => try out.text("null"),
+        .namespace => |i| {
+            // As the Namespace object it is to AS3.
             try out.text("rt.namespace(N[");
-            try out.uint(value);
+            try out.uint(i);
             try out.text("])");
         },
     }

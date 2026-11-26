@@ -105,9 +105,9 @@ pub fn poolDump(gpa: Allocator, bytes: []const u8) Error![]const u8 {
         try output.writeF64(w, pool.floats[i]);
         try w.writeByte('\n');
     }
-    for (1..pool.stringStart.len) |i| {
+    for (1..pool.strings.len) |i| {
         try w.print("string {d} ", .{i});
-        try output.writeDecoded(w, data[pool.stringStart[i]..][0..pool.stringLength[i]]);
+        try output.writeDecoded(w, pool.string(data, @intCast(i)));
         try w.writeByte('\n');
     }
     for (1..pool.nsKind.len) |i| {
@@ -219,7 +219,7 @@ pub fn abcDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const u
         try lines.next();
         try w.print("body {d} method={d} stack={d} locals={d}", .{ b, method, abc.bodyMaxStack[b], abc.bodyLocalCount[b] });
         try w.print(" scope={d}..{d}", .{ abc.bodyInitScopeDepth[b], abc.bodyMaxScopeDepth[b] });
-        try w.print(" code={d}+{d}", .{ abc.bodyCodeStart[b], abc.bodyCodeLength[b] });
+        try w.print(" code={d}+{d}", .{ abc.bodyCode[b].start, abc.bodyCode[b].len });
         const start = abc.bodyExceptionStart[b];
         const end = abc.bodyExceptionStart[b + 1];
         if (end > start) {
@@ -366,7 +366,7 @@ pub fn codeDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const 
         }
 
         try lines.next();
-        try w.print("  unreachable {d}", .{abc.bodyCodeLength[body] - decoded});
+        try w.print("  unreachable {d}", .{abc.bodyCode[body].len - decoded});
     }
 
     return out.written();

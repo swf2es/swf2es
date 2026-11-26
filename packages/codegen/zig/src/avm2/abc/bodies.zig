@@ -82,8 +82,7 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, di
         lists.push("bodyLocalCount", localCount);
         lists.push("bodyInitScopeDepth", initScopeDepth);
         lists.push("bodyMaxScopeDepth", maxScopeDepth);
-        lists.push("bodyCodeStart", codeStart);
-        lists.push("bodyCodeLength", codeLength);
+        lists.push("bodyCode", .{ .start = codeStart, .len = codeLength });
         lists.push("bodyExceptionStart", exceptionStart);
         lists.push("bodyTraitStart", lists.len("traitName"));
 

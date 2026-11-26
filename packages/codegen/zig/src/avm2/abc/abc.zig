@@ -9,6 +9,7 @@
 const std = @import("std");
 const memory = @import("../../memory.zig");
 const ConstantPool = @import("pool.zig").ConstantPool;
+const Range = @import("pool.zig").Range;
 
 /// The ABC's tables that its parse grows across entries, whose sizes it
 /// does not write up front (each method's parameters, each owner's traits).
@@ -24,8 +25,7 @@ const growing = [_][]const u8{
     "bodyLocalCount",
     "bodyInitScopeDepth",
     "bodyMaxScopeDepth",
-    "bodyCodeStart",
-    "bodyCodeLength",
+    "bodyCode",
     "bodyExceptionStart",
     "exceptionFrom",
     "exceptionTo",
@@ -131,6 +131,28 @@ pub const Diagnostics = struct {
     }
 };
 
+/// A trait's kind, the low four bits of its tag (AVM2 overview 4.8.1).
+/// Kind 5, a function, is one avmplus does not read, as no other kind may
+/// be either.
+pub const TraitKind = enum(u4) {
+    slot = 0,
+    method = 1,
+    getter = 2,
+    setter = 3,
+    class = 4,
+    constant = 6,
+    _,
+
+    pub fn of(tag: u8) TraitKind {
+        return @fromBackingInt(@intCast(@as(u4, @truncate(tag))));
+    }
+
+    /// Whether it binds a method: a method or an accessor.
+    pub fn bindsMethod(self: TraitKind) bool {
+        return self == .method or self == .getter or self == .setter;
+    }
+};
+
 pub const Abc = struct {
     /// 0, or the VerifyError number avmplus would throw; then the tables are incomplete.
     @"error": i32 = 0,
@@ -190,9 +212,8 @@ pub const Abc = struct {
     bodyLocalCount: []u32 = &.{},
     bodyInitScopeDepth: []u32 = &.{},
     bodyMaxScopeDepth: []u32 = &.{},
-    /// Offset of the bytecode from the start of the ABC.
-    bodyCodeStart: []u32 = &.{},
-    bodyCodeLength: []u32 = &.{},
+    /// Each body's bytecode in the ABC.
+    bodyCode: []Range = &.{},
     bodyExceptionStart: []u32 = &.{},
     exceptionFrom: []u32 = &.{},
     exceptionTo: []u32 = &.{},
@@ -275,6 +296,11 @@ pub const Abc = struct {
     /// The owner of method m's activation traits.
     pub inline fn activationOwner(self: *const Abc, m: u32) i32 {
         return @bitCast(2 *% self.classCount() +% self.scriptCount() +% m);
+    }
+
+    /// Trait `t`'s kind.
+    pub inline fn traitKind(self: *const Abc, t: u32) TraitKind {
+        return .of(self.traitTag[t]);
     }
 
     pub inline fn bodyCount(self: *const Abc) u32 {

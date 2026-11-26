@@ -281,15 +281,13 @@ fn callable(bd: *BodyDecoder, m: u32) bool {
 
 /// Values a multiname takes from the stack: a runtime namespace, a runtime name, or both.
 fn runtimeParts(pool: *const ConstantPool, index: u32) u32 {
-    const kind = pool.mnKind[index];
-    if (kind == C.CONSTANT_RTQname or kind == C.CONSTANT_RTQnameA or kind == C.CONSTANT_MultinameL or kind == C.CONSTANT_MultinameLA) {
-        return 1;
-    }
-
-    return if (kind == C.CONSTANT_RTQnameL or kind == C.CONSTANT_RTQnameLA) 2 else 0;
+    return switch (pool.multiname(index)) {
+        .rtqname, .multiname_late => 1,
+        .rtqname_late => 2,
+        .none, .qname, .multiname, .type_name => 0,
+    };
 }
 
 fn isAttribute(pool: *const ConstantPool, index: u32) bool {
-    const kind = pool.mnKind[index];
-    return kind == C.CONSTANT_QnameA or kind == C.CONSTANT_RTQnameA or kind == C.CONSTANT_RTQnameLA or kind == C.CONSTANT_MultinameA or kind == C.CONSTANT_MultinameLA;
+    return pool.multiname(index).isAttribute();
 }

@@ -348,7 +348,7 @@ pub fn domainCheckIr(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
             const k: u32 = @intCast(k_);
             const first = ir.blockFirst[k];
             const last = if (k + 1 < ir.blockCount) ir.blockFirst[k + 1] else ir.count;
-            const end = if (k + 1 < ir.blockCount) ir.blockPc[k + 1] else abc.bodyCodeLength[body];
+            const end = if (k + 1 < ir.blockCount) ir.blockPc[k + 1] else abc.bodyCode[body].len;
             if (last == first and k + 1 == ir.blockCount) {
                 return std.fmt.allocPrint(gpa, "body {d} B{d}: empty last block", .{ body, k });
             }

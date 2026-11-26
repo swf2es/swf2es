@@ -33,14 +33,14 @@ pub fn addNamespaces(dom: *Domain, abc: *const Abc, base: [*]const u8, strings: 
     var highestMark: i32 = -1;
     for (1..@max(count, 1)) |i| {
         const index = pool.nsName[i];
-        const mark = if (index != 0) versionMark(base, pool.stringStart[index], pool.stringLength[index]) else -1;
+        const mark = if (index != 0) versionMark(base, pool.strings[index].start, pool.strings[index].len) else -1;
         marks[i] = mark;
         if (mark > highestMark) {
             highestMark = mark;
         }
 
         if (abc.builtin and mark >= 0 and namespaceType(pool.nsKind[i]) == domain_.NS_Public) {
-            const uri = try dom.internString(base[pool.stringStart[index]..][0 .. pool.stringLength[index] - 3]);
+            const uri = try dom.internString(base[pool.strings[index].start..][0 .. pool.strings[index].len - 3]);
             try dom.put(dom.versioned.at(uri), 1);
         }
     }
@@ -53,7 +53,7 @@ pub fn addNamespaces(dom: *Domain, abc: *const Abc, base: [*]const u8, strings: 
         var uri = if (index != 0) strings[index] else domain_.URI_None;
         var version = domain_.API_AllVersions;
         if (mark >= 0) {
-            uri = try dom.internString(base[pool.stringStart[index]..][0 .. pool.stringLength[index] - 3]);
+            uri = try dom.internString(base[pool.strings[index].start..][0 .. pool.strings[index].len - 3]);
             version = @intCast(mark);
         }
 

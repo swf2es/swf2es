@@ -9,6 +9,64 @@ const abc_ = @import("abc.zig");
 const Diagnostics = abc_.Diagnostics;
 const Error = abc_.Error;
 
+/// Bytes `len` long from `start` in the ABC: a string's, a body's code.
+pub const Range = struct {
+    start: u32 = 0,
+    len: u32 = 0,
+
+    /// The bytes in `data`, the ABC block these offsets are from.
+    pub fn of(self: Range, data: []const u8) []const u8 {
+        return data[self.start..][0..self.len];
+    }
+};
+
+/// A multiname as its kind lays out its operands (AVM2 overview 4.4.4);
+/// `attribute` marks the kinds that name an XML attribute. The pool keeps
+/// multinames as three flat tables (mnKind, mnA, mnB), which this reads.
+pub const Multiname = union(enum) {
+    /// Entry 0, the any name.
+    none,
+    qname: struct { ns: u32, name: u32, attribute: bool },
+    /// The namespace from the stack.
+    rtqname: struct { name: u32, attribute: bool },
+    /// The namespace and the name from the stack.
+    rtqname_late: struct { attribute: bool },
+    multiname: struct { set: u32, name: u32, attribute: bool },
+    /// The name from the stack.
+    multiname_late: struct { set: u32, attribute: bool },
+    /// A parameterized type, Vector.<param>; param 0 is *.
+    type_name: struct { base: u32, param: u32 },
+
+    /// Whether it names an XML attribute.
+    pub fn isAttribute(self: Multiname) bool {
+        return switch (self) {
+            .qname => |q| q.attribute,
+            .rtqname => |q| q.attribute,
+            .rtqname_late => |q| q.attribute,
+            .multiname => |m| m.attribute,
+            .multiname_late => |m| m.attribute,
+            .none, .type_name => false,
+        };
+    }
+};
+
+/// A default value, of a slot or an optional parameter (AVM2 overview
+/// 4.5.1). The ABC keeps each as its kind and index (traitValueKind and
+/// traitValue, optionalKind and optionalValue), which ConstantPool.value
+/// reads.
+pub const Value = union(enum) {
+    int: i32,
+    uint: u32,
+    double: f64,
+    float: f32,
+    /// A string's index in the pool.
+    string: u32,
+    boolean: bool,
+    null,
+    /// A namespace's index in the pool.
+    namespace: u32,
+};
+
 /// Flat tables indexed like the ABC's pools; entry 0 of each is the
 /// implicit default. Strings stay byte ranges into the ABC, so only the
 /// names codegen uses get decoded. A table the parse did not reach keeps
@@ -20,9 +78,8 @@ pub const ConstantPool = struct {
     doubles: []f64 = &.{},
     floats: []f32 = &.{},
 
-    /// Offset from the start of the ABC, and byte length, of each string.
-    stringStart: []u32 = &.{},
-    stringLength: []u32 = &.{},
+    /// Each string's bytes in the ABC.
+    strings: []Range = &.{},
 
     nsKind: []u8 = &.{},
     /// String index of the namespace URI; 0 if it has none.
@@ -45,8 +102,7 @@ pub const ConstantPool = struct {
             .uints = try memory.allocZeroed(gpa, u32, 1),
             .doubles = try memory.allocZeroed(gpa, f64, 1),
             .floats = try memory.allocZeroed(gpa, f32, 1),
-            .stringStart = try memory.allocZeroed(gpa, u32, 1),
-            .stringLength = try memory.allocZeroed(gpa, u32, 1),
+            .strings = try memory.allocZeroed(gpa, Range, 1),
             .nsKind = try memory.allocZeroed(gpa, u8, 1),
             .nsName = try memory.allocZeroed(gpa, u32, 1),
             .nsSetStart = try memory.allocZeroed(gpa, u32, 2),
@@ -56,8 +112,76 @@ pub const ConstantPool = struct {
         };
     }
 
+    /// Multiname `i`, as its kind lays it out.
+    pub fn multiname(self: *const ConstantPool, i: u32) Multiname {
+        const a = self.mnA[i];
+        const b = self.mnB[i];
+        return switch (self.mnKind[i]) {
+            C.CONSTANT_Qname, C.CONSTANT_QnameA => .{ .qname = .{ .ns = a, .name = b, .attribute = self.mnKind[i] == C.CONSTANT_QnameA } },
+            C.CONSTANT_RTQname, C.CONSTANT_RTQnameA => .{ .rtqname = .{ .name = b, .attribute = self.mnKind[i] == C.CONSTANT_RTQnameA } },
+            C.CONSTANT_RTQnameL, C.CONSTANT_RTQnameLA => .{ .rtqname_late = .{ .attribute = self.mnKind[i] == C.CONSTANT_RTQnameLA } },
+            C.CONSTANT_Multiname, C.CONSTANT_MultinameA => .{ .multiname = .{ .set = a, .name = b, .attribute = self.mnKind[i] == C.CONSTANT_MultinameA } },
+            C.CONSTANT_MultinameL, C.CONSTANT_MultinameLA => .{ .multiname_late = .{ .set = a, .attribute = self.mnKind[i] == C.CONSTANT_MultinameLA } },
+            C.CONSTANT_TypeName => .{ .type_name = .{ .base = a, .param = b } },
+            else => .none,
+        };
+    }
+
+    /// Multiname `i`, or the base it parameterizes where it is a TypeName,
+    /// which stands for its base wherever a name is read.
+    pub fn baseName(self: *const ConstantPool, i: u32) Multiname {
+        return switch (self.multiname(i)) {
+            .type_name => |t| self.multiname(t.base),
+            else => |m| m,
+        };
+    }
+
+    /// The default value of kind `kind` at `index`: IllegalKind where no
+    /// default value may be of that kind, OutOfRange where `index` is past
+    /// its table. True, false and null are their kind alone; their index
+    /// is not read.
+    pub fn value(self: *const ConstantPool, kind: u8, index: u32) error{ IllegalKind, OutOfRange }!Value {
+        const count: usize = switch (kind) {
+            C.CONSTANT_Int => self.ints.len,
+            C.CONSTANT_UInt => self.uints.len,
+            C.CONSTANT_Double => self.doubles.len,
+            C.CONSTANT_Float => self.floats.len,
+            C.CONSTANT_Utf8 => self.strings.len,
+            C.CONSTANT_True, C.CONSTANT_False, C.CONSTANT_Null => std.math.maxInt(usize),
+            C.CONSTANT_Namespace,
+            C.CONSTANT_PackageNamespace,
+            C.CONSTANT_PackageInternalNs,
+            C.CONSTANT_ProtectedNamespace,
+            C.CONSTANT_ExplicitNamespace,
+            C.CONSTANT_StaticProtectedNs,
+            C.CONSTANT_PrivateNs,
+            => self.nsKind.len,
+            else => return error.IllegalKind,
+        };
+        if (index >= count) {
+            return error.OutOfRange;
+        }
+
+        return switch (kind) {
+            C.CONSTANT_Int => .{ .int = self.ints[index] },
+            C.CONSTANT_UInt => .{ .uint = self.uints[index] },
+            C.CONSTANT_Double => .{ .double = self.doubles[index] },
+            C.CONSTANT_Float => .{ .float = self.floats[index] },
+            C.CONSTANT_Utf8 => .{ .string = index },
+            C.CONSTANT_True => .{ .boolean = true },
+            C.CONSTANT_False => .{ .boolean = false },
+            C.CONSTANT_Null => .null,
+            else => .{ .namespace = index },
+        };
+    }
+
+    /// String `i`'s bytes in `data`, the ABC block.
+    pub fn string(self: *const ConstantPool, data: []const u8, i: u32) []const u8 {
+        return self.strings[i].of(data);
+    }
+
     pub inline fn stringCount(self: *const ConstantPool) u32 {
-        return @intCast(self.stringStart.len);
+        return @intCast(self.strings.len);
     }
 
     pub inline fn nsCount(self: *const ConstantPool) u32 {
@@ -121,8 +245,7 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
     }
 
     const stringCount = @max(readCount(r), 1);
-    pool.stringStart = try memory.allocZeroed(gpa, u32, stringCount);
-    pool.stringLength = try memory.allocZeroed(gpa, u32, stringCount);
+    pool.strings = try memory.allocZeroed(gpa, Range, stringCount);
     for (1..stringCount) |i| {
         // As avmplus: a string may not end at the end of the ABC, and its
         // UTF-8 is not validated.
@@ -131,8 +254,7 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
             return diag.fail(C.kCorruptABCError);
         }
 
-        pool.stringStart[i] = @intCast(r.pos);
-        pool.stringLength[i] = length;
+        pool.strings[i] = .{ .start = @intCast(r.pos), .len = length };
         r.pos += length;
     }
 
