@@ -15,6 +15,7 @@ const instructions = @import("instructions.zig");
 const MethodEmitter = @import("method.zig").MethodEmitter;
 const structure = @import("structure.zig");
 const values = @import("values.zig");
+const IrOp = @import("../ir/ir.zig").Op;
 
 fn u(r: i32) usize {
     return @intCast(r);
@@ -84,22 +85,22 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
             try copyAll(em, dst, if (pops) ir.src[i] else if (push) dst else frame);
         }
 
-        if (op == ops.OP_hasnext2) {
+        if (op == .hasnext2) {
             try copyAll(em, @bitCast(ir.a[i]), frame);
             try copyAll(em, @bitCast(ir.b[i]), frame);
-        } else if (op == ops.OP_popscope or op == ops.OP_swap) {
+        } else if (op == .popscope or op == .swap) {
             try copyAll(em, ir.src[i], frame);
         } else if (structure.conditional(op)) {
             try boxRaw(em, ir.src[i]);
             try copyFor(em, ir.a[i], ir.src[i]);
-        } else if (op == ops.OP_lookupswitch) {
+        } else if (op == .lookupswitch) {
             try boxRaw(em, ir.src[i]);
             try copyFor(em, ir.a[i], ir.src[i]);
             var c: u32 = 0;
             while (c <= @as(u32, @bitCast(ir.c[i]))) : (c += 1) {
                 try copyFor(em, ir.cases[ir.b[i] + c], ir.src[i]);
             }
-        } else if (op == ops.OP_jump) {
+        } else if (op == .jump) {
             try boxRaw(em, frame);
             try copyFor(em, ir.a[i], frame);
         }
@@ -107,7 +108,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
         // A swap of two values neither of which is written yet, copies or
         // held texts, swaps what the registers stand for and writes nothing.
         // Not with float's raw values, which a branch boxes by register.
-        if (op == ops.OP_swap and !em.abc.hasFloatSupport() and em.pendingNull < 0) {
+        if (op == .swap and !em.abc.hasFloatSupport() and em.pendingNull < 0) {
             // Where one is written, it is written to the other register: a
             // text that reads that register is written first.
             const x = ir.src[i];
@@ -129,7 +130,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
         var moves: u32 = 0;
         var duplicated = false;
         const floatType = em.domain.floatType;
-        if (dst >= stack and op != ops.OP_hasnext2) {
+        if (dst >= stack and op != .hasnext2) {
             var n = i + 1;
             var ty = ir.type[i];
             while (n < last) {
@@ -145,9 +146,9 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
 
             if (n < last and ir.src[n] == dst) {
                 const next = ir.op[n];
-                if (copies.setsLocal(next) or next == ops.OP_pushscope) {
+                if (copies.setsLocal(next) or next == .pushscope) {
                     moves = n - i;
-                } else if (next == ops.OP_dup) {
+                } else if (next == .dup) {
                     var set = n + 1;
                     while (set < last and floatType >= 0 and ty == floatType) {
                         if (debugRecord(ir.op[set])) {
@@ -234,9 +235,9 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
 
         unchecks(em, i);
         em.target = -1;
-        if (structure.conditional(op) or op == ops.OP_jump or op == ops.OP_lookupswitch) {
+        if (structure.conditional(op) or op == .jump or op == .lookupswitch) {
             em.clearRaw(0);
-        } else if (op == ops.OP_swap) {
+        } else if (op == .swap) {
             em.rawFloat[u(ir.src[i])] = 0;
             em.rawFloat[u(ir.src[i] + 1)] = 0;
         } else if (dst >= stack and !em.kept) {
@@ -246,7 +247,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
             }
         }
 
-        if (op == ops.OP_swap) {
+        if (op == .swap) {
             // Its one destination is the new top, whose type the IR gives; the
             // register below it now holds what the top did, and its type.
             const x = ir.src[i];
@@ -258,10 +259,10 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
             em.promoted[u(dst)] = if (promotes) 1 else 0;
         }
 
-        if (op == ops.OP_swap) {
+        if (op == .swap) {
             em.promoted[u(ir.src[i])] = 0;
             em.promoted[u(ir.src[i] + 1)] = 0;
-        } else if (op == ops.OP_hasnext2) {
+        } else if (op == .hasnext2) {
             em.promoted[ir.a[i]] = 0;
             em.promoted[ir.b[i]] = 0;
         }
@@ -279,9 +280,9 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
                 if (to >= 0) {
                     em.promoted[u(to)] = if (em.promotes(j)) 1 else 0;
                     em.regType[u(to)] = ir.type[j];
-                } else if (ir.op[j] == ops.OP_debugfile) {
+                } else if (ir.op[j] == .debugfile) {
                     em.file = @bitCast(ir.a[j]);
-                } else if (ir.op[j] == ops.OP_debugline) {
+                } else if (ir.op[j] == .debugline) {
                     em.line = ir.a[j];
                     try em.mark();
                 }
@@ -289,7 +290,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
 
             i += moves;
             em.setCopy(sinking, NONE);
-            if (ir.op[i] == ops.OP_pushscope) {
+            if (ir.op[i] == .pushscope) {
                 em.scopeWith[em.scopeDepth] = 0;
                 em.scopeDepth += 1;
             }
@@ -304,13 +305,13 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
             continue;
         }
 
-        if (structure.conditional(op) or op == ops.OP_lookupswitch) {
+        if (structure.conditional(op) or op == .lookupswitch) {
             // What the branch took is gone.
             em.uncopy(ir.src[i]);
-        } else if (op == ops.OP_swap) {
+        } else if (op == .swap) {
             em.setCopy(ir.src[i], NONE);
             em.setCopy(ir.src[i] + 1, NONE);
-        } else if (op == ops.OP_popscope) {
+        } else if (op == .popscope) {
             em.setCopy(ir.src[i], NONE);
         } else {
             if (dst >= 0 and !em.kept) {
@@ -412,7 +413,7 @@ fn releaseFor(em: *MethodEmitter, i: u32) Error!void {
         }
     }
 
-    if (structure.conditional(op) or op == ops.OP_jump or op == ops.OP_lookupswitch) {
+    if (structure.conditional(op) or op == .jump or op == .lookupswitch) {
         return em.releaseAll(from, to);
     }
 
@@ -424,21 +425,21 @@ fn releaseFor(em: *MethodEmitter, i: u32) Error!void {
         try em.clobber(em.target, from, to);
     }
 
-    if (op == ops.OP_hasnext2) {
+    if (op == .hasnext2) {
         try em.clobber(@bitCast(ir.a[i]), from, to);
         try em.clobber(@bitCast(ir.b[i]), from, to);
-    } else if (op == ops.OP_popscope) {
+    } else if (op == .popscope) {
         try em.clobber(src, from, to);
     }
 }
 
 /// Whether op only makes its stack register a copy, which writes it only when a copy is written (writeCopy).
-fn copiesOnly(op: u16) bool {
+fn copiesOnly(op: IrOp) bool {
     return copies.pushesConstant(op) or
         copies.getsLocal(op) or
-        op == ops.OP_dup or
-        op == ops.OP_getscopeobject or
-        op == ir_.IR_Nip;
+        op == .dup or
+        op == .getscopeobject or
+        op == .ir_nip;
 }
 
 /// The first of instruction i's operands from which it reads each once, as
@@ -454,100 +455,100 @@ fn heldFrom(em: *const MethodEmitter, i: u32) i32 {
     }
 
     return switch (op) {
-        ops.OP_newarray => src,
-        ops.OP_callmethod, ir_.IR_CallInterface, ir_.IR_CallSetter, ir_.IR_CallSuper, ops.OP_callstatic, ops.OP_construct, ops.OP_constructsuper => src + 1,
-        ops.OP_call => src + 2,
+        .newarray => src,
+        .callmethod, .ir_call_interface, .ir_call_setter, .ir_call_super, .callstatic, .construct, .constructsuper => src + 1,
+        .call => src + 2,
         // The receiver and the name's run-time parts, then the arguments.
-        ops.OP_callproperty, ops.OP_callproplex, ops.OP_callpropvoid, ops.OP_constructprop => end - @as(i32, @bitCast(ir.b[i])),
+        .callproperty, .callproplex, .callpropvoid, .constructprop => end - @as(i32, @bitCast(ir.b[i])),
         else => end,
     };
 }
 
 /// Whether op reads each of its operands once, as a value (see heldFrom).
-fn readsHeld(op: u16) bool {
+fn readsHeld(op: IrOp) bool {
     return switch (op) {
-        ops.OP_add,
-        ops.OP_subtract,
-        ops.OP_multiply,
-        ops.OP_divide,
-        ops.OP_modulo,
-        ops.OP_add_i,
-        ops.OP_subtract_i,
-        ops.OP_multiply_i,
-        ops.OP_bitand,
-        ops.OP_bitor,
-        ops.OP_bitxor,
-        ops.OP_lshift,
-        ops.OP_rshift,
-        ops.OP_urshift,
-        ops.OP_bitnot,
-        ops.OP_negate,
-        ops.OP_negate_i,
-        ops.OP_increment,
-        ops.OP_decrement,
-        ops.OP_increment_i,
-        ops.OP_decrement_i,
-        ops.OP_not,
-        ops.OP_typeof,
-        ops.OP_equals,
-        ops.OP_strictequals,
-        ops.OP_lessthan,
-        ops.OP_lessequals,
-        ops.OP_greaterthan,
-        ops.OP_greaterequals,
-        ops.OP_convert_i,
-        ops.OP_coerce_i,
-        ops.OP_convert_u,
-        ops.OP_coerce_u,
-        ops.OP_convert_d,
-        ops.OP_coerce_d,
-        ops.OP_convert_b,
-        ops.OP_coerce_b,
-        ops.OP_convert_s,
-        ops.OP_coerce_s,
-        ops.OP_coerce_a,
-        ops.OP_coerce_o,
-        ops.OP_coerce,
-        ops.OP_convert_o,
-        ir_.IR_Coerce,
-        ops.OP_setlocal,
-        ops.OP_setlocal0,
-        ops.OP_setlocal0 + 1,
-        ops.OP_setlocal0 + 2,
-        ops.OP_setlocal0 + 3,
-        ops.OP_iftrue,
-        ops.OP_iffalse,
-        ops.OP_ifeq,
-        ops.OP_ifne,
-        ops.OP_ifstricteq,
-        ops.OP_ifstrictne,
-        ops.OP_iflt,
-        ops.OP_ifle,
-        ops.OP_ifgt,
-        ops.OP_ifge,
-        ops.OP_ifnlt,
-        ops.OP_ifnle,
-        ops.OP_ifngt,
-        ops.OP_ifnge,
-        ops.OP_lookupswitch,
-        ops.OP_returnvalue,
-        ops.OP_throw,
-        ops.OP_pop,
-        ops.OP_li8,
-        ops.OP_li16,
-        ops.OP_li32,
-        ops.OP_lf32,
-        ops.OP_lf64,
-        ops.OP_si8,
-        ops.OP_si16,
-        ops.OP_si32,
-        ops.OP_sf32,
-        ops.OP_sf64,
-        ops.OP_sxi1,
-        ops.OP_sxi8,
-        ops.OP_sxi16,
-        ops.OP_setslot,
-        ops.OP_setglobalslot,
+        .add,
+        .subtract,
+        .multiply,
+        .divide,
+        .modulo,
+        .add_i,
+        .subtract_i,
+        .multiply_i,
+        .bitand,
+        .bitor,
+        .bitxor,
+        .lshift,
+        .rshift,
+        .urshift,
+        .bitnot,
+        .negate,
+        .negate_i,
+        .increment,
+        .decrement,
+        .increment_i,
+        .decrement_i,
+        .not,
+        .typeof,
+        .equals,
+        .strictequals,
+        .lessthan,
+        .lessequals,
+        .greaterthan,
+        .greaterequals,
+        .convert_i,
+        .coerce_i,
+        .convert_u,
+        .coerce_u,
+        .convert_d,
+        .coerce_d,
+        .convert_b,
+        .coerce_b,
+        .convert_s,
+        .coerce_s,
+        .coerce_a,
+        .coerce_o,
+        .coerce,
+        .convert_o,
+        .ir_coerce,
+        .setlocal,
+        .setlocal0,
+        .setlocal1,
+        .setlocal2,
+        .setlocal3,
+        .iftrue,
+        .iffalse,
+        .ifeq,
+        .ifne,
+        .ifstricteq,
+        .ifstrictne,
+        .iflt,
+        .ifle,
+        .ifgt,
+        .ifge,
+        .ifnlt,
+        .ifnle,
+        .ifngt,
+        .ifnge,
+        .lookupswitch,
+        .returnvalue,
+        .throw,
+        .pop,
+        .li8,
+        .li16,
+        .li32,
+        .lf32,
+        .lf64,
+        .si8,
+        .si16,
+        .si32,
+        .sf32,
+        .sf64,
+        .sxi1,
+        .sxi8,
+        .sxi16,
+        .setslot,
+        .setglobalslot,
         => true,
         else => false,
     };
@@ -561,49 +562,49 @@ fn pureValue(em: *MethodEmitter, i: u32) bool {
     const op = ir.op[i];
     const src = ir.src[i];
     return switch (op) {
-        ops.OP_add,
-        ops.OP_subtract,
-        ops.OP_multiply,
-        ops.OP_divide,
-        ops.OP_modulo,
-        ops.OP_add_i,
-        ops.OP_subtract_i,
-        ops.OP_multiply_i,
-        ops.OP_bitand,
-        ops.OP_bitor,
-        ops.OP_bitxor,
-        ops.OP_lshift,
-        ops.OP_rshift,
-        ops.OP_urshift,
-        ops.OP_equals,
-        ops.OP_strictequals,
-        ops.OP_lessthan,
-        ops.OP_lessequals,
-        ops.OP_greaterthan,
-        ops.OP_greaterequals,
+        .add,
+        .subtract,
+        .multiply,
+        .divide,
+        .modulo,
+        .add_i,
+        .subtract_i,
+        .multiply_i,
+        .bitand,
+        .bitor,
+        .bitxor,
+        .lshift,
+        .rshift,
+        .urshift,
+        .equals,
+        .strictequals,
+        .lessthan,
+        .lessequals,
+        .greaterthan,
+        .greaterequals,
         => ir.srcCount[i] == 2 and values.isNumeric(em, src) and values.isNumeric(em, src + 1),
-        ops.OP_bitnot,
-        ops.OP_negate,
-        ops.OP_negate_i,
-        ops.OP_increment,
-        ops.OP_decrement,
-        ops.OP_increment_i,
-        ops.OP_decrement_i,
-        ops.OP_sxi1,
-        ops.OP_sxi8,
-        ops.OP_sxi16,
+        .bitnot,
+        .negate,
+        .negate_i,
+        .increment,
+        .decrement,
+        .increment_i,
+        .decrement_i,
+        .sxi1,
+        .sxi8,
+        .sxi16,
         => ir.srcCount[i] == 1 and values.isNumeric(em, src),
-        ops.OP_not => ir.srcCount[i] == 1,
-        ops.OP_convert_i,
-        ops.OP_coerce_i,
-        ops.OP_convert_u,
-        ops.OP_coerce_u,
-        ops.OP_convert_d,
-        ops.OP_coerce_d,
-        ops.OP_convert_b,
-        ops.OP_coerce_b,
-        => ir.srcCount[i] == 1 and converts(em, values.conversionType(em, @truncate(op), i), src),
-        ir_.IR_Coerce => ir.srcCount[i] == 1 and converts(em, ir.c[i], src),
+        .not => ir.srcCount[i] == 1,
+        .convert_i,
+        .coerce_i,
+        .convert_u,
+        .coerce_u,
+        .convert_d,
+        .coerce_d,
+        .convert_b,
+        .coerce_b,
+        => ir.srcCount[i] == 1 and converts(em, values.conversionType(em, op, i), src),
+        .ir_coerce => ir.srcCount[i] == 1 and converts(em, ir.c[i], src),
         else => false,
     };
 }
@@ -618,8 +619,8 @@ fn converts(em: *MethodEmitter, ty: i32, r: i32) bool {
     };
 }
 
-fn debugRecord(op: u16) bool {
-    return op == ops.OP_debugfile or op == ops.OP_debugline or op == ops.OP_debug;
+fn debugRecord(op: IrOp) bool {
+    return op == .debugfile or op == .debugline or op == .debug;
 }
 
 /// Whether instruction i is a conversion in place that writes nothing, its value of type `from` being one already.
@@ -630,11 +631,11 @@ fn keptAt(em: *MethodEmitter, i: u32, from: i32) Error!bool {
         return false;
     }
 
-    if (op == ir_.IR_Coerce) {
+    if (op == .ir_coerce) {
         return values.keeps(em, ir.c[i], from);
     }
 
-    return op < 256 and try values.keeps(em, values.conversionType(em, @truncate(op), i), from);
+    return values.keeps(em, values.conversionType(em, op, i), from);
 }
 
 /// Before a branch to block t: write the copies below `limit` that t
@@ -663,8 +664,8 @@ fn copyFor(em: *MethodEmitter, t: u32, limit: i32) Error!void {
 /// Whether op takes its stack operands from the top and pushes what it
 /// gives there, as an instruction of a stack machine: all but a coercion
 /// or null check in place, and swap.
-fn stackDiscipline(op: u16) bool {
-    return op != ir_.IR_Coerce and op != ir_.IR_CheckNull and op != ops.OP_swap;
+fn stackDiscipline(op: IrOp) bool {
+    return op != .ir_coerce and op != .ir_check_null and op != .swap;
 }
 
 /// Write the scope and stack registers below `limit` that copy register w, before w changes.
@@ -710,10 +711,10 @@ fn unchecks(em: *MethodEmitter, i: u32) void {
         em.checked[u(em.target)] = 0;
     }
 
-    if (op == ops.OP_hasnext2) {
+    if (op == .hasnext2) {
         em.checked[ir.a[i]] = 0;
         em.checked[ir.b[i]] = 0;
-    } else if (op == ops.OP_swap) {
+    } else if (op == .swap) {
         em.checked[u(ir.src[i])] = 0;
         em.checked[u(ir.src[i] + 1)] = 0;
     }

@@ -524,9 +524,9 @@ pub const MethodEmitter = struct {
             const end = if (k + 1 < ir.blockCount) ir.blockFirst[k + 1] else ir.count;
             var i = ir.blockFirst[k];
             while (i < end) : (i += 1) {
-                if (ir.op[i] == ops.OP_debugfile) {
+                if (ir.op[i] == .debugfile) {
                     file = @bitCast(ir.a[i]);
-                } else if (ir.op[i] == ops.OP_debugline) {
+                } else if (ir.op[i] == .debugline) {
                     line = ir.a[i];
                 }
             }
@@ -661,7 +661,7 @@ pub const MethodEmitter = struct {
     pub fn promotes(self: *MethodEmitter, i: u32) bool {
         const ir = self.ir;
         const dst = ir.dst[i];
-        if (ir.op[i] != ir_.IR_Coerce or dst != ir.src[i]) {
+        if (ir.op[i] != .ir_coerce or dst != ir.src[i]) {
             return false;
         }
 
@@ -697,20 +697,20 @@ pub const MethodEmitter = struct {
         const i: u32 = @intCast(CONSTANT - copy);
         const a = self.ir.a[i];
         switch (self.ir.op[i]) {
-            ops.OP_pushbyte, ops.OP_pushshort => try self.literal(@floatFromInt(@as(i32, @bitCast(a))), false),
-            ops.OP_pushint => try self.literal(@floatFromInt(pool.ints[a]), false),
-            ops.OP_pushuint => try out.uint(pool.uints[a]),
-            ops.OP_pushdouble => try self.literal(pool.doubles[a], true),
-            ops.OP_pushfloat => {
+            .pushbyte, .pushshort => try self.literal(@floatFromInt(@as(i32, @bitCast(a))), false),
+            .pushint => try self.literal(@floatFromInt(pool.ints[a]), false),
+            .pushuint => try out.uint(pool.uints[a]),
+            .pushdouble => try self.literal(pool.doubles[a], true),
+            .pushfloat => {
                 try out.text("rt.float(");
                 try self.literal(pool.floats[a], true);
                 try out.text(")");
             },
-            ops.OP_pushnan => try out.text("NaN"),
-            ops.OP_pushstring => try refs.poolString(self, a),
-            ops.OP_pushtrue => try out.text("true"),
-            ops.OP_pushfalse => try out.text("false"),
-            ops.OP_pushnull => try out.text("null"),
+            .pushnan => try out.text("NaN"),
+            .pushstring => try refs.poolString(self, a),
+            .pushtrue => try out.text("true"),
+            .pushfalse => try out.text("false"),
+            .pushnull => try out.text("null"),
             else => try out.text("void 0"),
         }
     }
@@ -982,7 +982,7 @@ pub const MethodEmitter = struct {
     pub fn numberReg(self: *MethodEmitter, r: i32) Error!void {
         const copy = self.copyOf[@intCast(r)];
         const which = if (copy == NONE) r else copy;
-        if (copy <= CONSTANT and self.ir.op[@intCast(CONSTANT - copy)] == ops.OP_pushfloat) {
+        if (copy <= CONSTANT and self.ir.op[@intCast(CONSTANT - copy)] == .pushfloat) {
             try self.literal(self.abc.pool.floats[self.ir.a[@intCast(CONSTANT - copy)]], true);
         } else if (self.unboxedLocal(which) or (copy >= NONE and self.rawFloat[@intCast(which)] != 0)) {
             try self.copied(which, false);

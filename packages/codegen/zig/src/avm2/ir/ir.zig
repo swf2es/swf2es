@@ -6,36 +6,104 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ops = @import("../abc/opcodes.zig");
 
-// Instructions beyond the ABC's opcodes.
-/// dst = src coerced to type `c`.
-pub const IR_Coerce: u16 = 0x100;
-/// Throw a TypeError if src is null or undefined.
-pub const IR_CheckNull: u16 = 0x101;
-/// dst = the getter of dispatch id `a` of src's type, called on src; c the getter (domain-wide id).
-pub const IR_CallGetter: u16 = 0x102;
-/// The setter of dispatch id `a` of src's type, called on src with src + 1; c the setter.
-pub const IR_CallSetter: u16 = 0x103;
-/// dst = an interface's method, called on src with `b` arguments: `a` its
-/// dispatch id in the interface's layout, c the method (domain-wide id).
-pub const IR_CallInterface: u16 = 0x104;
-/// dst = the global object's property `a`, looked up at run time (findpropglobal).
-pub const IR_FindPropGlobal: u16 = 0x105;
-pub const IR_FindPropGlobalStrict: u16 = 0x106;
-/// dst = the method's global object, from its scope chain or its own first scope.
-pub const IR_GetGlobalScope: u16 = 0x107;
-/// dst = src + count - 1, dropping the `count - 1` values below it.
-pub const IR_Nip: u16 = 0x108;
-/// dst = a new instance of what slot `a` of src holds, constructed with the
-/// `b` arguments after src; c the slot's type.
-pub const IR_ConstructSlot: u16 = 0x109;
-/// dst = the base class's method of dispatch id `a`, called on src with
-/// the `b` arguments after it; c the method (domain-wide id).
-pub const IR_CallSuper: u16 = 0x10a;
+/// The IR's own instructions, beyond the ABC's opcodes: their names in Op
+/// and their numbers, from 0x100.
+const ir_only = [_]struct { []const u8, u16 }{
+    // dst = src coerced to type `c`.
+    .{ "ir_coerce", 0x100 },
+    // Throw a TypeError if src is null or undefined.
+    .{ "ir_check_null", 0x101 },
+    // dst = the getter of dispatch id `a` of src's type, called on src; c
+    // the getter (domain-wide id).
+    .{ "ir_call_getter", 0x102 },
+    // The setter of dispatch id `a` of src's type, called on src with
+    // src + 1; c the setter.
+    .{ "ir_call_setter", 0x103 },
+    // dst = an interface's method, called on src with `b` arguments: `a`
+    // its dispatch id in the interface's layout, c the method (domain-wide
+    // id).
+    .{ "ir_call_interface", 0x104 },
+    // dst = the global object's property `a`, looked up at run time
+    // (findpropglobal).
+    .{ "ir_find_prop_global", 0x105 },
+    .{ "ir_find_prop_global_strict", 0x106 },
+    // dst = the method's global object, from its scope chain or its own
+    // first scope.
+    .{ "ir_get_global_scope", 0x107 },
+    // dst = src + count - 1, dropping the `count - 1` values below it.
+    .{ "ir_nip", 0x108 },
+    // dst = a new instance of what slot `a` of src holds, constructed with
+    // the `b` arguments after src; c the slot's type.
+    .{ "ir_construct_slot", 0x109 },
+    // dst = the base class's method of dispatch id `a`, called on src with
+    // the `b` arguments after it; c the method (domain-wide id).
+    .{ "ir_call_super", 0x10a },
+};
+
+/// An IR instruction's op. Generated: every field of abc/opcodes.zig's Op,
+/// with the same name and value (so `.add` is the opcode add), then the
+/// IR's own instructions from `ir_only` above (`.ir_coerce` and the rest),
+/// from 0x100. Non-exhaustive, like Op; the comptime block below checks
+/// that the two agree and do not collide.
+pub const Op = blk: {
+    const abc_names = @typeInfo(ops.Op).@"enum".field_names;
+    const abc_values = @typeInfo(ops.Op).@"enum".field_values;
+    var names: [abc_names.len + ir_only.len][]const u8 = undefined;
+    var values: [names.len]u16 = undefined;
+    for (abc_names, abc_values, 0..) |name, value, i| {
+        names[i] = name;
+        values[i] = value;
+    }
+
+    for (ir_only, abc_names.len..) |op, i| {
+        names[i] = op[0];
+        values[i] = op[1];
+    }
+
+    const final_names = names;
+    const final_values = values;
+    break :blk @Enum(u16, .nonexhaustive, &final_names, &final_values);
+};
+
+comptime {
+    for (std.enums.values(ops.Op)) |op| {
+        if (@backingInt(@field(Op, @tagName(op))) != @backingInt(op)) {
+            @compileError("ir.Op." ++ @tagName(op) ++ " is not the opcode's value");
+        }
+    }
+
+    for (ir_only) |op| {
+        if (op[1] < 0x100) {
+            @compileError(op[0] ++ " collides with the opcodes");
+        }
+    }
+}
+
+/// The IR op of opcode `op`.
+pub fn of(op: ops.Op) Op {
+    return @fromBackingInt(@backingInt(op));
+}
+
+/// The opcode `op` is, or null for one of the IR's own.
+pub fn opcode(op: Op) ?ops.Op {
+    const b = @backingInt(op);
+    return if (b < 0x100) @fromBackingInt(@intCast(b)) else null;
+}
+
+/// The opcode's name as opcodes.tbl spells it, or "ir" for one of the IR's own.
+pub fn opcodeName(op: Op) []const u8 {
+    return if (opcode(op)) |o| o.name() else "ir";
+}
+
+/// Whether `op` is an opcode that `is` holds of; never one of the IR's own.
+pub fn opcodeIs(op: Op, comptime is: fn (ops.Op) bool) bool {
+    return if (opcode(op)) |o| is(o) else false;
+}
 
 pub const Ir = struct {
     gpa: Allocator,
     count: u32 = 0,
-    op: []u16 = &.{},
+    op: []Op = &.{},
     dst: []i32 = &.{},
     src: []i32 = &.{},
     /// How many consecutive registers from src the instruction reads.
@@ -112,7 +180,7 @@ pub const Ir = struct {
     }
 
     /// Append an instruction; its type is filled in once the verifier knows it.
-    pub fn add(self: *Ir, op: u16, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32, pc: u32) Allocator.Error!u32 {
+    pub fn add(self: *Ir, op: Op, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32, pc: u32) Allocator.Error!u32 {
         if (self.count == self.op.len) {
             try self.resize(@max(64, self.op.len * 2), self.count);
         }
@@ -204,6 +272,6 @@ pub const Ir = struct {
 
     /// Whether instruction i is a lookupswitch, whose targets are in `cases`.
     pub fn isSwitch(self: *const Ir, i: u32) bool {
-        return self.op[i] == ops.OP_lookupswitch;
+        return self.op[i] == .lookupswitch;
     }
 };

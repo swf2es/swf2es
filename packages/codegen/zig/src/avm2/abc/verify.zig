@@ -12,39 +12,41 @@ const C = @import("constants.zig");
 const ops = @import("opcodes.zig");
 const ConstantPool = @import("pool.zig").ConstantPool;
 const typing = @import("typing.zig");
+const Op = @import("opcodes.zig").Op;
+const ir_ = @import("../ir/ir.zig");
 
 /// The IR of an instruction that wrote none of its own: its opcode reading
 /// the values it popped, or the register it names, and writing what it
 /// pushed; branches name their target blocks.
-fn emitGeneric(bd: *BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32, stackBefore: u32, scopeBefore: u32, pops: u32) Error!void {
+fn emitGeneric(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, stackBefore: u32, scopeBefore: u32, pops: u32) Error!void {
     const base = bd.stackBase();
     var src: i32 = @bitCast(base +% stackBefore -% pops);
     var count = pops;
     var dst: i32 = if (bd.stack > stackBefore -% pops) @bitCast(base + bd.stack - 1) else -1;
     var ra = a;
     switch (opcode) {
-        ops.OP_label, ops.OP_nop, ops.OP_bkpt, ops.OP_bkptline, ops.OP_timestamp => return,
-        ops.OP_getlocal => {
+        .label, .nop, .bkpt, .bkptline, .timestamp => return,
+        .getlocal => {
             src = @bitCast(a);
             count = 1;
         },
-        ops.OP_setlocal => dst = @bitCast(a),
-        ops.OP_pushscope, ops.OP_pushwith => dst = @bitCast(bd.localCount + scopeBefore),
-        ops.OP_popscope => {
+        .setlocal => dst = @bitCast(a),
+        .pushscope, .pushwith => dst = @bitCast(bd.localCount + scopeBefore),
+        .popscope => {
             src = @bitCast(bd.localCount + scopeBefore -% 1);
             count = 1;
         },
-        ops.OP_getscopeobject => {
+        .getscopeobject => {
             ra = bd.byteAt(pc + 1);
             src = @bitCast(bd.localCount + ra);
             count = 1;
         },
         // Slots count from 0 in the IR, as early bound ones do.
-        ops.OP_getslot, ops.OP_setslot, ops.OP_getglobalslot, ops.OP_setglobalslot => ra = a -% 1,
-        ops.OP_jump, ops.OP_iftrue, ops.OP_iffalse, ops.OP_ifeq, ops.OP_ifne, ops.OP_iflt, ops.OP_ifle, ops.OP_ifgt, ops.OP_ifge, ops.OP_ifstricteq, ops.OP_ifstrictne, ops.OP_ifnlt, ops.OP_ifnle, ops.OP_ifngt, ops.OP_ifnge => {
+        .getslot, .setslot, .getglobalslot, .setglobalslot => ra = a -% 1,
+        .jump, .iftrue, .iffalse, .ifeq, .ifne, .iflt, .ifle, .ifgt, .ifge, .ifstricteq, .ifstrictne, .ifnlt, .ifnle, .ifngt, .ifnge => {
             ra = bd.blockOf[bd.slotNext[pc] +% @as(u32, @bitCast(bd.slotA[pc]))];
         },
-        ops.OP_lookupswitch => {
+        .lookupswitch => {
             const ir = &bd.ir;
             const first = bd.slotC[pc];
             const cases = ir.caseCount;
@@ -53,44 +55,45 @@ fn emitGeneric(bd: *BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32, stackBefor
                 try ir.addCase(bd.blockOf[pc +% @as(u32, @bitCast(bd.code.cases[i]))]);
             }
 
-            try bd.emit(opcode, -1, src, count, bd.blockOf[pc +% @as(u32, @bitCast(bd.slotA[pc]))], cases, @bitCast(b), pc);
+            try bd.emit(ir_.of(opcode), -1, src, count, bd.blockOf[pc +% @as(u32, @bitCast(bd.slotA[pc]))], cases, @bitCast(b), pc);
             return;
         },
         else => {},
     }
 
-    if (opcode >= ops.OP_getlocal0 and opcode < ops.OP_getlocal0 + 4) {
-        src = opcode - ops.OP_getlocal0;
+    if (opcode.getLocalN()) |local| {
+        src = @intCast(local);
         count = 1;
-    } else if (opcode >= ops.OP_setlocal0 and opcode < ops.OP_setlocal0 + 4) {
-        dst = opcode - ops.OP_setlocal0;
+    } else if (opcode.setLocalN()) |local| {
+        dst = @intCast(local);
     }
 
-    try bd.emit(opcode, dst, src, count, ra, b, bd.rowC, pc);
+    try bd.emit(ir_.of(opcode), dst, src, count, ra, b, bd.rowC, pc);
 }
 
 /// The checks of the instruction at `pc` in Verifier::verifyBlock, in the
 /// verifier's order, and its effect on the stack and scope depths and, when
 /// typed, on the values; false after recording the error.
-pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: u8) Error!bool {
+pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: Op) Error!bool {
     const pool = &bd.abc.pool;
     const a: u32 = @bitCast(bd.slotA[pc]);
     const b = bd.slotB[pc];
-    const stack = ops.opcodeStack[opcode];
-    var pops: u64 = ops.opcodePops[opcode];
-    const pushes: u64 = ops.opcodePushes[opcode];
-    const checkPushes: u64 = if (stack & ops.STACK_CheckPushOne != 0) 1 else pushes;
+    const info = opcode.info();
+    const stack = info.stack;
+    var pops: u64 = info.pops;
+    const pushes: u64 = info.pushes;
+    const checkPushes: u64 = if (stack.check_push_one) 1 else pushes;
 
     // A name looked up in the scope chain needs a scope to look in.
     if (bd.typed and
-        (opcode == ops.OP_getlex or opcode == ops.OP_findpropstrict or opcode == ops.OP_findproperty) and
+        (opcode == .getlex or opcode == .findpropstrict or opcode == .findproperty) and
         bd.scope + bd.outer.size == 0)
     {
         return bd.fail(C.kFindVarWithNoScopeError);
     }
 
     // Operands that index the pool or the method tables, checked before the stack.
-    if (stack & ops.STACK_Multiname != 0) {
+    if (stack.multiname) {
         if (a == 0 or a >= pool.multinameCount()) {
             return bd.fail(C.kCpoolIndexRangeError);
         }
@@ -98,39 +101,39 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: u8) Error!bool {
         pops += runtimeParts(pool, a);
     }
 
-    if (stack & ops.STACK_ArgcA != 0) {
+    if (stack.argc_a) {
         pops += a;
-    } else if (stack & ops.STACK_ArgcB != 0) {
+    } else if (stack.argc_b) {
         pops += b;
     }
 
     switch (opcode) {
-        ops.OP_newobject => pops = @as(u64, a) * 2,
-        ops.OP_newarray => pops = a,
-        ops.OP_callstatic => {
+        .newobject => pops = @as(u64, a) * 2,
+        .newarray => pops = a,
+        .callstatic => {
             if (a >= bd.abc.methodCount() or !callable(bd, a)) {
                 return bd.fail(C.kCorruptABCError);
             }
         },
-        ops.OP_dxns => {
+        .dxns => {
             if (!bd.methodFlags.sets_dxns) {
                 return bd.fail(C.kIllegalSetDxns);
             }
 
             if (bd.emitPass) {
-                try bd.emit(opcode, -1, -1, 0, a, 0, 0, pc);
+                try bd.emit(ir_.of(opcode), -1, -1, 0, a, 0, 0, pc);
             }
 
             return bd.checkString(a);
         },
-        ops.OP_debugfile => {
+        .debugfile => {
             if (bd.emitPass) {
-                try bd.emit(opcode, -1, -1, 0, a, 0, 0, pc);
+                try bd.emit(ir_.of(opcode), -1, -1, 0, a, 0, 0, pc);
             }
 
             return bd.checkString(a);
         },
-        ops.OP_kill => {
+        .kill => {
             if (!bd.checkLocal(a)) {
                 return false;
             }
@@ -140,18 +143,18 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: u8) Error!bool {
             }
 
             if (bd.emitPass) {
-                try bd.emit(opcode, @bitCast(a), -1, 0, a, 0, 0, pc);
+                try bd.emit(ir_.of(opcode), @bitCast(a), -1, 0, a, 0, 0, pc);
             }
 
             return true;
         },
-        ops.OP_inclocal, ops.OP_declocal, ops.OP_inclocal_i, ops.OP_declocal_i => {
+        .inclocal, .declocal, .inclocal_i, .declocal_i => {
             if (!bd.checkLocal(a)) {
                 return false;
             }
 
             if (bd.typed) {
-                const integer = opcode == ops.OP_inclocal_i or opcode == ops.OP_declocal_i;
+                const integer = opcode == .inclocal_i or opcode == .declocal_i;
                 const numeric = typing.numericType(bd, bd.typeOf(a));
                 if (!integer and bd.abc.hasFloatSupport() and numeric != bd.domain.numberType) {
                     bd.retype(a, numeric);
@@ -161,24 +164,24 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: u8) Error!bool {
             }
 
             if (bd.emitPass) {
-                try bd.emit(opcode, @bitCast(a), @bitCast(a), 1, a, 0, 0, pc);
+                try bd.emit(ir_.of(opcode), @bitCast(a), @bitCast(a), 1, a, 0, 0, pc);
             }
 
             return true;
         },
-        ops.OP_popscope => {
+        .popscope => {
             if (bd.scope == 0) {
                 return bd.fail(C.kScopeStackUnderflowError);
             }
 
             bd.scope -= 1;
             if (bd.emitPass) {
-                try bd.emit(opcode, -1, @bitCast(bd.localCount + bd.scope), 1, 0, 0, 0, pc);
+                try bd.emit(ir_.of(opcode), -1, @bitCast(bd.localCount + bd.scope), 1, 0, 0, 0, pc);
             }
 
             return true;
         },
-        ops.OP_setglobalslot => {
+        .setglobalslot => {
             if (bd.typed and bd.scope == 0 and bd.outer.size == 0) {
                 return bd.fail(C.kNoGlobalScopeError);
             }
@@ -216,43 +219,39 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: u8) Error!bool {
 }
 
 /// The checks after the stack check that only some opcodes have.
-fn verifySpecial(bd: *BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32) bool {
+fn verifySpecial(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32) bool {
     const abc = bd.abc;
     const pool = &abc.pool;
-    if (opcode >= ops.OP_getlocal0 and opcode < ops.OP_getlocal0 + 4) {
-        return bd.checkLocal(opcode - ops.OP_getlocal0);
-    }
-
-    if (opcode >= ops.OP_setlocal0 and opcode < ops.OP_setlocal0 + 4) {
-        return bd.checkLocal(opcode - ops.OP_setlocal0);
+    if (opcode.getLocalN() orelse opcode.setLocalN()) |local| {
+        return bd.checkLocal(local);
     }
 
     return switch (opcode) {
-        ops.OP_getlocal, ops.OP_setlocal => bd.checkLocal(a),
-        ops.OP_hasnext2 => {
+        .getlocal, .setlocal => bd.checkLocal(a),
+        .hasnext2 => {
             if (!bd.checkLocal(a) or !bd.checkLocal(b)) {
                 return false;
             }
 
             return if (a == b) bd.fail(C.kInvalidHasNextError) else true;
         },
-        ops.OP_pushstring => bd.checkString(a),
-        ops.OP_pushint => if (a == 0 or a >= pool.ints.len) bd.fail(C.kCpoolIndexRangeError) else true,
-        ops.OP_pushuint => if (a == 0 or a >= pool.uints.len) bd.fail(C.kCpoolIndexRangeError) else true,
-        ops.OP_pushfloat => if (a == 0 or a >= pool.floats.len) bd.fail(C.kCpoolIndexRangeError) else true,
-        ops.OP_pushdouble => if (a == 0 or a >= pool.doubles.len) bd.fail(C.kCpoolIndexRangeError) else true,
-        ops.OP_pushnamespace => if (a == 0 or a >= pool.nsCount()) bd.fail(C.kCpoolIndexRangeError) else true,
-        ops.OP_dxnslate => if (bd.methodFlags.sets_dxns) true else bd.fail(C.kIllegalSetDxns),
-        ops.OP_getlex => if (runtimeParts(pool, a) != 0) bd.fail(C.kIllegalOpMultinameError) else true,
-        ops.OP_finddef => if (code_.isBinding(pool, a)) true else bd.fail(C.kIllegalOpMultinameError),
-        ops.OP_callproperty, ops.OP_callproplex, ops.OP_callpropvoid, ops.OP_constructprop, ops.OP_callsuper, ops.OP_callsupervoid, ops.OP_getsuper, ops.OP_setsuper => {
+        .pushstring => bd.checkString(a),
+        .pushint => if (a == 0 or a >= pool.ints.len) bd.fail(C.kCpoolIndexRangeError) else true,
+        .pushuint => if (a == 0 or a >= pool.uints.len) bd.fail(C.kCpoolIndexRangeError) else true,
+        .pushfloat => if (a == 0 or a >= pool.floats.len) bd.fail(C.kCpoolIndexRangeError) else true,
+        .pushdouble => if (a == 0 or a >= pool.doubles.len) bd.fail(C.kCpoolIndexRangeError) else true,
+        .pushnamespace => if (a == 0 or a >= pool.nsCount()) bd.fail(C.kCpoolIndexRangeError) else true,
+        .dxnslate => if (bd.methodFlags.sets_dxns) true else bd.fail(C.kIllegalSetDxns),
+        .getlex => if (runtimeParts(pool, a) != 0) bd.fail(C.kIllegalOpMultinameError) else true,
+        .finddef => if (code_.isBinding(pool, a)) true else bd.fail(C.kIllegalOpMultinameError),
+        .callproperty, .callproplex, .callpropvoid, .constructprop, .callsuper, .callsupervoid, .getsuper, .setsuper => {
             return if (isAttribute(pool, a)) bd.fail(C.kIllegalOpMultinameError) else true;
         },
-        ops.OP_newfunction => if (a >= abc.methodCount()) bd.fail(C.kMethodInfoExceedsCountError) else true,
-        ops.OP_newclass => if (a >= abc.classCount()) bd.fail(C.kClassInfoExceedsCountError) else true,
-        ops.OP_newactivation => if (bd.methodFlags.need_activation) true else bd.fail(C.kInvalidNewActivationError),
-        ops.OP_newcatch => if (a >= bd.handlerCount) bd.fail(C.kInvalidNewActivationError) else true,
-        ops.OP_pushscope, ops.OP_pushwith => {
+        .newfunction => if (a >= abc.methodCount()) bd.fail(C.kMethodInfoExceedsCountError) else true,
+        .newclass => if (a >= abc.classCount()) bd.fail(C.kClassInfoExceedsCountError) else true,
+        .newactivation => if (bd.methodFlags.need_activation) true else bd.fail(C.kInvalidNewActivationError),
+        .newcatch => if (a >= bd.handlerCount) bd.fail(C.kInvalidNewActivationError) else true,
+        .pushscope, .pushwith => {
             if (bd.scope + 1 > bd.maxScope) {
                 return bd.fail(C.kScopeStackOverflowError);
             }
@@ -261,7 +260,7 @@ fn verifySpecial(bd: *BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32) bool {
             return true;
         },
         // The verifier reads the index as the operand's first byte.
-        ops.OP_getscopeobject => if (bd.byteAt(pc + 1) >= bd.scope) bd.failWith(C.kGetScopeObjectBoundsError, bd.byteAt(pc + 1)) else true,
+        .getscopeobject => if (bd.byteAt(pc + 1) >= bd.scope) bd.failWith(C.kGetScopeObjectBoundsError, bd.byteAt(pc + 1)) else true,
         else => true,
     };
 }

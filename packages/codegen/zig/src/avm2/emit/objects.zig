@@ -21,6 +21,7 @@ const MethodEmitter = method_.MethodEmitter;
 const hasBoundEntry = method_.hasBoundEntry;
 const refs = @import("refs.zig");
 const values = @import("values.zig");
+const IrOp = @import("../ir/ir.zig").Op;
 const CONVERTS = values.CONVERTS;
 
 fn u(r: i32) usize {
@@ -39,34 +40,34 @@ fn mayBeXml(em: *const MethodEmitter, r: i32) bool {
 
 /// Note whether instruction i, `op` on register `src`, can see the default
 /// XML namespace (objects.ts tells which can).
-fn notesDxns(em: *MethodEmitter, op: u16, src: i32) void {
+fn notesDxns(em: *MethodEmitter, op: IrOp, src: i32) void {
     switch (op) {
-        ops.OP_getproperty, ops.OP_setproperty, ops.OP_initproperty, ops.OP_deleteproperty, ops.OP_getdescendants => {
+        .getproperty, .setproperty, .initproperty, .deleteproperty, .getdescendants => {
             if (mayBeXml(em, src)) {
                 em.seesDxns = true;
             }
         },
-        ops.OP_in => {
+        .in => {
             if (mayBeXml(em, src + 1)) {
                 em.seesDxns = true;
             }
         },
-        ops.OP_call => {
+        .call => {
             if (mayBeXml(em, src) or em.regType[u(src)] == em.domain.classType) {
                 em.seesDxns = true;
             }
         },
-        ops.OP_callproperty,
-        ops.OP_callproplex,
-        ops.OP_callpropvoid,
-        ops.OP_constructprop,
-        ir_.IR_ConstructSlot,
-        ops.OP_construct,
-        ops.OP_newfunction,
-        ops.OP_newclass,
-        ops.OP_pushwith,
-        ops.OP_dxns,
-        ops.OP_dxnslate,
+        .callproperty,
+        .callproplex,
+        .callpropvoid,
+        .constructprop,
+        .ir_construct_slot,
+        .construct,
+        .newfunction,
+        .newclass,
+        .pushwith,
+        .dxns,
+        .dxnslate,
         => em.seesDxns = true,
         else => {},
     }
@@ -75,7 +76,7 @@ fn notesDxns(em: *MethodEmitter, op: u16, src: i32) void {
 /// The instructions of the object model: scopes, names, properties, calls,
 /// and creating objects, functions and classes; false for one it does not
 /// know, which then calls rt.unsupported.
-pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
+pub fn object(em: *MethodEmitter, i: u32, op: IrOp) Error!bool {
     const out = &em.out;
     const ir = em.ir;
     const a = ir.a[i];
@@ -85,8 +86,8 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
     }
 
     switch (op) {
-        ops.OP_pushscope, ops.OP_pushwith => {
-            em.scopeWith[em.scopeDepth] = if (op == ops.OP_pushwith) 1 else 0;
+        .pushscope, .pushwith => {
+            em.scopeWith[em.scopeDepth] = if (op == .pushwith) 1 else 0;
             em.scopeDepth += 1;
             if (em.copies_(i, src)) {
                 return true;
@@ -95,11 +96,11 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try em.assign(i, false);
             try em.reg(src);
         },
-        ops.OP_popscope => {
+        .popscope => {
             em.scopeDepth -%= 1;
             try em.reset(src);
         },
-        ops.OP_getscopeobject => {
+        .getscopeobject => {
             if (em.copies_(i, src)) {
                 return true;
             }
@@ -107,14 +108,14 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try em.assign(i, false);
             try em.reg(src);
         },
-        ops.OP_getouterscope => {
+        .getouterscope => {
             try em.assign(i, false);
             try out.text("scope[");
             em.usesScope = true;
             try out.uint(a);
             try out.text("]");
         },
-        ops.OP_getglobalscope, ir_.IR_GetGlobalScope => {
+        .getglobalscope, .ir_get_global_scope => {
             if (ir.outerSize == 0 and em.copies_(i, @intCast(ir.localCount))) {
                 return true;
             }
@@ -122,7 +123,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try em.assign(i, false);
             try globalScope(em);
         },
-        ops.OP_finddef => {
+        .finddef => {
             // The name keeps its script's global object once found, so a static
             // read in a loop costs a load and no call.
             try em.assign(i, false);
@@ -132,8 +133,8 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try out.uint(a);
             try out.text("])");
         },
-        ir_.IR_FindPropGlobal, ir_.IR_FindPropGlobalStrict => {
-            const strict = op == ir_.IR_FindPropGlobalStrict;
+        .ir_find_prop_global, .ir_find_prop_global_strict => {
+            const strict = op == .ir_find_prop_global_strict;
             try em.assign(i, false);
             if (ir.c[i] > 0) {
                 // The local scopes from c - 1 first, by what each is at run time.
@@ -166,38 +167,38 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try globalScope(em);
             try out.text(")");
         },
-        ops.OP_findproperty, ops.OP_findpropstrict => {
+        .findproperty, .findpropstrict => {
             try em.assign(i, false);
-            try out.text(if (op == ops.OP_findpropstrict) "rt.findPropertyStrict(" else "rt.findProperty(");
+            try out.text(if (op == .findpropstrict) "rt.findPropertyStrict(" else "rt.findProperty(");
             try name(em, a, src);
             try out.text(", scope, ");
             em.usesScope = true;
             try localScopes(em);
             try out.text(")");
         },
-        ops.OP_getslot => {
+        .getslot => {
             try em.assign(i, false);
             try em.member(src);
             try refs.slotMember(out, a);
         },
-        ops.OP_setslot => {
+        .setslot => {
             try em.member(src);
             try refs.slotMember(out, a);
             try out.text(" = ");
             try em.reg(src + 1);
         },
-        ops.OP_getglobalslot => {
+        .getglobalslot => {
             try em.assign(i, false);
             try globalScope(em);
             try refs.slotMember(out, a);
         },
-        ops.OP_setglobalslot => {
+        .setglobalslot => {
             try globalScope(em);
             try refs.slotMember(out, a);
             try out.text(" = ");
             try em.reg(src);
         },
-        ir_.IR_CallGetter => {
+        .ir_call_getter => {
             try em.assign(i, false);
             if (try vectorLength(em, src, ir.c[i])) {
                 try receiver(em, src);
@@ -213,15 +214,15 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
 
             try virtual(em, a, src, 0, -1);
         },
-        ir_.IR_CallSetter => try virtual(em, a, src, 1, ir.c[i]),
-        ops.OP_callmethod => {
+        .ir_call_setter => try virtual(em, a, src, 1, ir.c[i]),
+        .callmethod => {
             if (ir.dst[i] >= 0) {
                 try em.assign(i, false);
             }
 
             try virtual(em, a, src, ir.b[i], ir.c[i]);
         },
-        ir_.IR_CallInterface => {
+        .ir_call_interface => {
             if (ir.dst[i] >= 0) {
                 try em.assign(i, false);
             }
@@ -242,7 +243,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try args(em, src + 1, ir.b[i]);
             try out.text(")");
         },
-        ir_.IR_Nip => {
+        .ir_nip => {
             const top = src + @as(i32, @intCast(ir.srcCount[i])) - 1;
             if (em.copies_(i, top)) {
                 return true;
@@ -251,9 +252,9 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try em.assign(i, false);
             try em.reg(top);
         },
-        ops.OP_getproperty => try getProperty(em, i, a, src),
-        ops.OP_setproperty => try setProperty(em, i, a, src),
-        ops.OP_initproperty => {
+        .getproperty => try getProperty(em, i, a, src),
+        .setproperty => try setProperty(em, i, a, src),
+        .initproperty => {
             try out.text("rt.initProperty(");
             try em.reg(src);
             try out.text(", ");
@@ -262,7 +263,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try em.reg(src + @as(i32, @intCast(ir.srcCount[i])) - 1);
             try out.text(")");
         },
-        ops.OP_deleteproperty => {
+        .deleteproperty => {
             try em.assign(i, false);
             try out.text("rt.deleteProperty(");
             try em.reg(src);
@@ -270,12 +271,12 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try name(em, a, src + 1);
             try out.text(")");
         },
-        ops.OP_in => {
+        .in => {
             try em.assign(i, false);
             // `name in object`.
             try values.call2(em, "rt.in(", i);
         },
-        ops.OP_callproperty, ops.OP_callproplex, ops.OP_callpropvoid, ops.OP_constructprop => {
+        .callproperty, .callproplex, .callpropvoid, .constructprop => {
             const argc = ir.b[i];
             const parts = ir.srcCount[i] - 1 - argc;
             if (ir.dst[i] >= 0) {
@@ -283,8 +284,8 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             }
 
             try out.text(switch (op) {
-                ops.OP_constructprop => "rt.constructProperty(",
-                ops.OP_callproplex => "rt.callPropLex(",
+                .constructprop => "rt.constructProperty(",
+                .callproplex => "rt.callPropLex(",
                 else => "rt.callProperty(",
             });
             try em.reg(src);
@@ -293,10 +294,10 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try args(em, src + 1 + @as(i32, @intCast(parts)), argc);
             try out.text(")");
         },
-        ops.OP_callsuper, ops.OP_callsupervoid, ops.OP_getsuper, ops.OP_setsuper => {
+        .callsuper, .callsupervoid, .getsuper, .setsuper => {
             const argc: u32 = switch (op) {
-                ops.OP_getsuper => 0,
-                ops.OP_setsuper => 1,
+                .getsuper => 0,
+                .setsuper => 1,
                 else => ir.b[i],
             };
             const parts = ir.srcCount[i] - 1 - argc;
@@ -305,8 +306,8 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             }
 
             try out.text(switch (op) {
-                ops.OP_getsuper => "rt.getSuper(sup, ",
-                ops.OP_setsuper => "rt.setSuper(sup, ",
+                .getsuper => "rt.getSuper(sup, ",
+                .setsuper => "rt.setSuper(sup, ",
                 else => "rt.callSuper(sup, ",
             });
             em.usesSup = true;
@@ -316,7 +317,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try args(em, src + 1 + @as(i32, @intCast(parts)), argc);
             try out.text(")");
         },
-        ir_.IR_CallSuper => {
+        .ir_call_super => {
             if (ir.dst[i] >= 0) {
                 try em.assign(i, false);
             }
@@ -332,7 +333,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try args(em, src + 1, ir.b[i]);
             try out.text(")");
         },
-        ops.OP_constructsuper => {
+        .constructsuper => {
             // As rt.constructSuper, without an array of the arguments to apply;
             // the verifier coerced them to the base's constructor, so they may
             // go to its entry for bound calls.
@@ -342,18 +343,18 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try args(em, src + 1, a);
             try out.text(")");
         },
-        ops.OP_construct => {
+        .construct => {
             try em.assign(i, false);
             try out.text("rt.construct(");
             try em.reg(src);
             try args(em, src + 1, a);
             try out.text(")");
         },
-        ir_.IR_ConstructSlot => {
+        .ir_construct_slot => {
             try em.assign(i, false);
             try constructSlot(em, src, a, ir.b[i], ir.c[i]);
         },
-        ops.OP_call => {
+        .call => {
             try em.assign(i, false);
             try out.text("rt.call(");
             try em.reg(src);
@@ -362,7 +363,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try args(em, src + 2, a);
             try out.text(")");
         },
-        ops.OP_callstatic => {
+        .callstatic => {
             if (ir.dst[i] >= 0) {
                 try em.assign(i, false);
             }
@@ -375,7 +376,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try args(em, src + 1, ir.b[i]);
             try out.text(")");
         },
-        ops.OP_newfunction => {
+        .newfunction => {
             try em.assign(i, false);
             try out.text("rt.newFunction(F[");
             try out.uint(a);
@@ -386,7 +387,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try out.uint(a);
             try out.text(")");
         },
-        ops.OP_newclass => {
+        .newclass => {
             try em.assign(i, false);
             try out.text("rt.newClass(A.classes[");
             try out.uint(a);
@@ -396,13 +397,13 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try scopeHere(em);
             try out.text(")");
         },
-        ops.OP_newactivation => {
+        .newactivation => {
             try em.assign(i, false);
             try out.text("rt.newActivation(A.activations[");
             try out.int(em.body);
             try out.text("])");
         },
-        ops.OP_newcatch => {
+        .newcatch => {
             const abc = em.abc;
             const h = abc.bodyExceptionStart[@intCast(em.body)] + a;
             try em.assign(i, false);
@@ -410,13 +411,13 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try out.uint(abc.exceptionName[h]);
             try out.text("])");
         },
-        ops.OP_newobject, ops.OP_newarray => {
+        .newobject, .newarray => {
             try em.assign(i, false);
-            try out.text(if (op == ops.OP_newobject) "rt.newObject([" else "rt.newArray([");
+            try out.text(if (op == .newobject) "rt.newObject([" else "rt.newArray([");
             try list(em, src, ir.srcCount[i]);
             try out.text("])");
         },
-        ops.OP_applytype => {
+        .applytype => {
             try em.assign(i, false);
             try out.text("rt.applyType(");
             try em.reg(src);
@@ -424,7 +425,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try list(em, src + 1, a);
             try out.text("])");
         },
-        ops.OP_hasnext2 => {
+        .hasnext2 => {
             // hasnext2 updates its two locals, which the runtime leaves in two
             // fields; taking them apart from an array would cost more than the step.
             const b = ir.b[i];
@@ -439,20 +440,20 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try em.regName(@bitCast(b));
             try out.text(" = rt.enumIndex");
         },
-        ops.OP_hasnext, ops.OP_nextname, ops.OP_nextvalue, ops.OP_instanceof, ops.OP_istypelate, ops.OP_astypelate => {
+        .hasnext, .nextname, .nextvalue, .instanceof, .istypelate, .astypelate => {
             try em.assign(i, false);
             try values.call2(em, switch (op) {
-                ops.OP_hasnext => "rt.hasNext(",
-                ops.OP_nextname => "rt.nextName(",
-                ops.OP_nextvalue => "rt.nextValue(",
-                ops.OP_instanceof => "rt.instanceOf(",
-                ops.OP_istypelate => "rt.isTypeLate(",
+                .hasnext => "rt.hasNext(",
+                .nextname => "rt.nextName(",
+                .nextvalue => "rt.nextValue(",
+                .instanceof => "rt.instanceOf(",
+                .istypelate => "rt.isTypeLate(",
                 else => "rt.asTypeLate(",
             }, i);
         },
-        ops.OP_istype, ops.OP_astype => {
+        .istype, .astype => {
             try em.assign(i, false);
-            try out.text(if (op == ops.OP_istype) "rt.isType(" else "rt.asType(");
+            try out.text(if (op == .istype) "rt.isType(" else "rt.asType(");
             try em.reg(src);
             try out.text(", M[");
             try out.uint(a);
@@ -460,7 +461,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
         },
         // Domain memory: in place at an int or uint address, else through
         // the runtime (objects.ts tells why); sign extensions in plain JavaScript.
-        ops.OP_li8, ops.OP_li16, ops.OP_li32, ops.OP_lf32, ops.OP_lf64 => {
+        .li8, .li16, .li32, .lf32, .lf64 => {
             try em.assign(i, false);
             if (memory.isAddress(em, src)) {
                 em.inPlaceMemory = true;
@@ -468,17 +469,17 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
                 try out.text(memory.viewMethod(op));
                 try out.text("(");
                 try em.reg(src);
-                try out.text(if (op == ops.OP_li8) ")" else ", true)");
+                try out.text(if (op == .li8) ")" else ", true)");
                 return true;
             }
 
             try out.text("rt.");
-            try out.text(ops.opcodeNames[op]);
+            try out.text(ir_.opcodeName(op));
             try out.text("(");
             try em.reg(src);
             try out.text(")");
         },
-        ops.OP_si8, ops.OP_si16, ops.OP_si32, ops.OP_sf32, ops.OP_sf64 => {
+        .si8, .si16, .si32, .sf32, .sf64 => {
             // The value's conversion is DataView's own for a number or Boolean,
             // which has no effect to come before the range check.
             if (memory.isAddress(em, src + 1) and values.isNumeric(em, src)) {
@@ -489,29 +490,29 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
                 try em.reg(src + 1);
                 try out.text(", ");
                 try em.reg(src);
-                try out.text(if (op == ops.OP_si8) ")" else ", true)");
+                try out.text(if (op == .si8) ")" else ", true)");
                 return true;
             }
 
             try out.text("rt.");
-            try out.text(ops.opcodeNames[op]);
+            try out.text(ir_.opcodeName(op));
             try out.text("(");
             try em.reg(src);
             try out.text(", ");
             try em.reg(src + 1);
             try out.text(")");
         },
-        ops.OP_sxi1, ops.OP_sxi8, ops.OP_sxi16 => {
+        .sxi1, .sxi8, .sxi16 => {
             try em.assign(i, false);
             try out.text("(");
             try em.reg(src);
             try out.text(switch (op) {
-                ops.OP_sxi1 => " << 31) >> 31",
-                ops.OP_sxi8 => " << 24) >> 24",
+                .sxi1 => " << 31) >> 31",
+                .sxi8 => " << 24) >> 24",
                 else => " << 16) >> 16",
             });
         },
-        ops.OP_getdescendants => {
+        .getdescendants => {
             try em.assign(i, false);
             try out.text("rt.getDescendants(");
             try em.reg(src);
@@ -519,19 +520,19 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
             try name(em, a, src + 1);
             try out.text(")");
         },
-        ops.OP_dxns => {
+        .dxns => {
             try out.text("rt.setDefaultXmlNamespace(");
             try refs.poolString(em, a);
             try out.text(")");
         },
-        ops.OP_dxnslate, ops.OP_checkfilter => {
-            try out.text(if (op == ops.OP_dxnslate) "rt.setDefaultXmlNamespace(" else "rt.checkFilter(");
+        .dxnslate, .checkfilter => {
+            try out.text(if (op == .dxnslate) "rt.setDefaultXmlNamespace(" else "rt.checkFilter(");
             try em.reg(src);
             try out.text(")");
         },
-        ops.OP_esc_xelem, ops.OP_esc_xattr => {
+        .esc_xelem, .esc_xattr => {
             try em.assign(i, false);
-            try out.text(if (op == ops.OP_esc_xelem) "rt.escapeElement(" else "rt.escapeAttribute(");
+            try out.text(if (op == .esc_xelem) "rt.escapeElement(" else "rt.escapeAttribute(");
             try em.reg(src);
             try out.text(")");
         },
@@ -810,7 +811,7 @@ fn name(em: *MethodEmitter, a: u32, from: i32) Error!void {
     if ((kind == .multiname_l or kind == .multiname_la) and
         from != em.pendingNull and
         copy <= CONSTANT and
-        em.ir.op[u(CONSTANT - copy)] == ops.OP_pushstring)
+        em.ir.op[u(CONSTANT - copy)] == .pushstring)
     {
         try out.text("T[");
         try out.uint(try em.literalSlot(a, em.ir.a[u(CONSTANT - copy)]));

@@ -4,415 +4,500 @@
 // core/opcodes.tbl.
 const std = @import("std");
 
-pub const OPERANDS_None: u8 = 0;
-pub const OPERANDS_U30: u8 = 1;
-pub const OPERANDS_U30U30: u8 = 2;
-pub const OPERANDS_Branch: u8 = 3;
-pub const OPERANDS_Byte: u8 = 4;
-pub const OPERANDS_Short: u8 = 5;
-pub const OPERANDS_Debug: u8 = 6;
-pub const OPERANDS_Switch: u8 = 7;
-pub const OPERANDS_Illegal: u8 = 0xff;
-pub const FLAG_Throws: u8 = 1;
-pub const FLAG_Terminal: u8 = 2;
-pub const STACK_Multiname: u8 = 1;
-pub const STACK_ArgcA: u8 = 2;
-pub const STACK_ArgcB: u8 = 4;
-pub const STACK_CheckPushOne: u8 = 8;
-pub const OP_bkpt: u8 = 0x01;
-pub const OP_nop: u8 = 0x02;
-pub const OP_throw: u8 = 0x03;
-pub const OP_getsuper: u8 = 0x04;
-pub const OP_setsuper: u8 = 0x05;
-pub const OP_dxns: u8 = 0x06;
-pub const OP_dxnslate: u8 = 0x07;
-pub const OP_kill: u8 = 0x08;
-pub const OP_label: u8 = 0x09;
-pub const OP_ifnlt: u8 = 0x0c;
-pub const OP_ifnle: u8 = 0x0d;
-pub const OP_ifngt: u8 = 0x0e;
-pub const OP_ifnge: u8 = 0x0f;
-pub const OP_jump: u8 = 0x10;
-pub const OP_iftrue: u8 = 0x11;
-pub const OP_iffalse: u8 = 0x12;
-pub const OP_ifeq: u8 = 0x13;
-pub const OP_ifne: u8 = 0x14;
-pub const OP_iflt: u8 = 0x15;
-pub const OP_ifle: u8 = 0x16;
-pub const OP_ifgt: u8 = 0x17;
-pub const OP_ifge: u8 = 0x18;
-pub const OP_ifstricteq: u8 = 0x19;
-pub const OP_ifstrictne: u8 = 0x1a;
-pub const OP_lookupswitch: u8 = 0x1b;
-pub const OP_pushwith: u8 = 0x1c;
-pub const OP_popscope: u8 = 0x1d;
-pub const OP_nextname: u8 = 0x1e;
-pub const OP_hasnext: u8 = 0x1f;
-pub const OP_pushnull: u8 = 0x20;
-pub const OP_pushundefined: u8 = 0x21;
-pub const OP_nextvalue: u8 = 0x23;
-pub const OP_pushbyte: u8 = 0x24;
-pub const OP_pushshort: u8 = 0x25;
-pub const OP_pushtrue: u8 = 0x26;
-pub const OP_pushfalse: u8 = 0x27;
-pub const OP_pushnan: u8 = 0x28;
-pub const OP_pop: u8 = 0x29;
-pub const OP_dup: u8 = 0x2a;
-pub const OP_swap: u8 = 0x2b;
-pub const OP_pushstring: u8 = 0x2c;
-pub const OP_pushint: u8 = 0x2d;
-pub const OP_pushuint: u8 = 0x2e;
-pub const OP_pushdouble: u8 = 0x2f;
-pub const OP_pushfloat: u8 = 0x22;
-pub const OP_convert_f: u8 = 0x79;
-pub const OP_unplus: u8 = 0x7a;
-pub const OP_pushscope: u8 = 0x30;
-pub const OP_pushnamespace: u8 = 0x31;
-pub const OP_hasnext2: u8 = 0x32;
-pub const OP_li8: u8 = 0x35;
-pub const OP_li16: u8 = 0x36;
-pub const OP_li32: u8 = 0x37;
-pub const OP_lf32: u8 = 0x38;
-pub const OP_lf64: u8 = 0x39;
-pub const OP_si8: u8 = 0x3a;
-pub const OP_si16: u8 = 0x3b;
-pub const OP_si32: u8 = 0x3c;
-pub const OP_sf32: u8 = 0x3d;
-pub const OP_sf64: u8 = 0x3e;
-pub const OP_newfunction: u8 = 0x40;
-pub const OP_call: u8 = 0x41;
-pub const OP_construct: u8 = 0x42;
-pub const OP_callmethod: u8 = 0x43;
-pub const OP_callstatic: u8 = 0x44;
-pub const OP_callsuper: u8 = 0x45;
-pub const OP_callproperty: u8 = 0x46;
-pub const OP_returnvoid: u8 = 0x47;
-pub const OP_returnvalue: u8 = 0x48;
-pub const OP_constructsuper: u8 = 0x49;
-pub const OP_constructprop: u8 = 0x4a;
-pub const OP_callproplex: u8 = 0x4c;
-pub const OP_callsupervoid: u8 = 0x4e;
-pub const OP_callpropvoid: u8 = 0x4f;
-pub const OP_sxi1: u8 = 0x50;
-pub const OP_sxi8: u8 = 0x51;
-pub const OP_sxi16: u8 = 0x52;
-pub const OP_applytype: u8 = 0x53;
-pub const OP_newobject: u8 = 0x55;
-pub const OP_newarray: u8 = 0x56;
-pub const OP_newactivation: u8 = 0x57;
-pub const OP_newclass: u8 = 0x58;
-pub const OP_getdescendants: u8 = 0x59;
-pub const OP_newcatch: u8 = 0x5a;
-pub const OP_findpropstrict: u8 = 0x5d;
-pub const OP_findproperty: u8 = 0x5e;
-pub const OP_finddef: u8 = 0x5f;
-pub const OP_getlex: u8 = 0x60;
-pub const OP_setproperty: u8 = 0x61;
-pub const OP_getlocal: u8 = 0x62;
-pub const OP_setlocal: u8 = 0x63;
-pub const OP_getglobalscope: u8 = 0x64;
-pub const OP_getscopeobject: u8 = 0x65;
-pub const OP_getproperty: u8 = 0x66;
-pub const OP_getouterscope: u8 = 0x67;
-pub const OP_initproperty: u8 = 0x68;
-pub const OP_deleteproperty: u8 = 0x6a;
-pub const OP_getslot: u8 = 0x6c;
-pub const OP_setslot: u8 = 0x6d;
-pub const OP_getglobalslot: u8 = 0x6e;
-pub const OP_setglobalslot: u8 = 0x6f;
-pub const OP_convert_s: u8 = 0x70;
-pub const OP_esc_xelem: u8 = 0x71;
-pub const OP_esc_xattr: u8 = 0x72;
-pub const OP_convert_i: u8 = 0x73;
-pub const OP_convert_u: u8 = 0x74;
-pub const OP_convert_d: u8 = 0x75;
-pub const OP_convert_b: u8 = 0x76;
-pub const OP_convert_o: u8 = 0x77;
-pub const OP_checkfilter: u8 = 0x78;
-pub const OP_coerce: u8 = 0x80;
-pub const OP_coerce_b: u8 = 0x81;
-pub const OP_coerce_a: u8 = 0x82;
-pub const OP_coerce_i: u8 = 0x83;
-pub const OP_coerce_d: u8 = 0x84;
-pub const OP_coerce_s: u8 = 0x85;
-pub const OP_astype: u8 = 0x86;
-pub const OP_astypelate: u8 = 0x87;
-pub const OP_coerce_u: u8 = 0x88;
-pub const OP_coerce_o: u8 = 0x89;
-pub const OP_negate: u8 = 0x90;
-pub const OP_increment: u8 = 0x91;
-pub const OP_inclocal: u8 = 0x92;
-pub const OP_decrement: u8 = 0x93;
-pub const OP_declocal: u8 = 0x94;
-pub const OP_typeof: u8 = 0x95;
-pub const OP_not: u8 = 0x96;
-pub const OP_bitnot: u8 = 0x97;
-pub const OP_add: u8 = 0xa0;
-pub const OP_subtract: u8 = 0xa1;
-pub const OP_multiply: u8 = 0xa2;
-pub const OP_divide: u8 = 0xa3;
-pub const OP_modulo: u8 = 0xa4;
-pub const OP_lshift: u8 = 0xa5;
-pub const OP_rshift: u8 = 0xa6;
-pub const OP_urshift: u8 = 0xa7;
-pub const OP_bitand: u8 = 0xa8;
-pub const OP_bitor: u8 = 0xa9;
-pub const OP_bitxor: u8 = 0xaa;
-pub const OP_equals: u8 = 0xab;
-pub const OP_strictequals: u8 = 0xac;
-pub const OP_lessthan: u8 = 0xad;
-pub const OP_lessequals: u8 = 0xae;
-pub const OP_greaterthan: u8 = 0xaf;
-pub const OP_greaterequals: u8 = 0xb0;
-pub const OP_instanceof: u8 = 0xb1;
-pub const OP_istype: u8 = 0xb2;
-pub const OP_istypelate: u8 = 0xb3;
-pub const OP_in: u8 = 0xb4;
-pub const OP_increment_i: u8 = 0xc0;
-pub const OP_decrement_i: u8 = 0xc1;
-pub const OP_inclocal_i: u8 = 0xc2;
-pub const OP_declocal_i: u8 = 0xc3;
-pub const OP_negate_i: u8 = 0xc4;
-pub const OP_add_i: u8 = 0xc5;
-pub const OP_subtract_i: u8 = 0xc6;
-pub const OP_multiply_i: u8 = 0xc7;
-pub const OP_getlocal0: u8 = 0xd0;
-pub const OP_getlocal1: u8 = 0xd1;
-pub const OP_getlocal2: u8 = 0xd2;
-pub const OP_getlocal3: u8 = 0xd3;
-pub const OP_setlocal0: u8 = 0xd4;
-pub const OP_setlocal1: u8 = 0xd5;
-pub const OP_setlocal2: u8 = 0xd6;
-pub const OP_setlocal3: u8 = 0xd7;
-pub const OP_debug: u8 = 0xef;
-pub const OP_debugline: u8 = 0xf0;
-pub const OP_debugfile: u8 = 0xf1;
-pub const OP_bkptline: u8 = 0xf2;
-pub const OP_timestamp: u8 = 0xf3;
+/// An AVM2 opcode: the byte the code holds. Non-exhaustive, as the code
+/// holds any byte: one no field names is illegal, and every switch must
+/// handle it. The code buffer stays bytes; an instruction's opcode is read
+/// as an Op where it is decoded.
+pub const Op = enum(u8) {
+    bkpt = 0x01,
+    nop = 0x02,
+    throw = 0x03,
+    getsuper = 0x04,
+    setsuper = 0x05,
+    dxns = 0x06,
+    dxnslate = 0x07,
+    kill = 0x08,
+    label = 0x09,
+    ifnlt = 0x0c,
+    ifnle = 0x0d,
+    ifngt = 0x0e,
+    ifnge = 0x0f,
+    jump = 0x10,
+    iftrue = 0x11,
+    iffalse = 0x12,
+    ifeq = 0x13,
+    ifne = 0x14,
+    iflt = 0x15,
+    ifle = 0x16,
+    ifgt = 0x17,
+    ifge = 0x18,
+    ifstricteq = 0x19,
+    ifstrictne = 0x1a,
+    lookupswitch = 0x1b,
+    pushwith = 0x1c,
+    popscope = 0x1d,
+    nextname = 0x1e,
+    hasnext = 0x1f,
+    pushnull = 0x20,
+    pushundefined = 0x21,
+    pushfloat = 0x22,
+    convert_f = 0x79,
+    unplus = 0x7a,
+    nextvalue = 0x23,
+    pushbyte = 0x24,
+    pushshort = 0x25,
+    pushtrue = 0x26,
+    pushfalse = 0x27,
+    pushnan = 0x28,
+    pop = 0x29,
+    dup = 0x2a,
+    swap = 0x2b,
+    pushstring = 0x2c,
+    pushint = 0x2d,
+    pushuint = 0x2e,
+    pushdouble = 0x2f,
+    pushscope = 0x30,
+    pushnamespace = 0x31,
+    hasnext2 = 0x32,
+    li8 = 0x35,
+    li16 = 0x36,
+    li32 = 0x37,
+    lf32 = 0x38,
+    lf64 = 0x39,
+    si8 = 0x3a,
+    si16 = 0x3b,
+    si32 = 0x3c,
+    sf32 = 0x3d,
+    sf64 = 0x3e,
+    newfunction = 0x40,
+    call = 0x41,
+    construct = 0x42,
+    callmethod = 0x43,
+    callstatic = 0x44,
+    callsuper = 0x45,
+    callproperty = 0x46,
+    returnvoid = 0x47,
+    returnvalue = 0x48,
+    constructsuper = 0x49,
+    constructprop = 0x4a,
+    callproplex = 0x4c,
+    callsupervoid = 0x4e,
+    callpropvoid = 0x4f,
+    sxi1 = 0x50,
+    sxi8 = 0x51,
+    sxi16 = 0x52,
+    applytype = 0x53,
+    newobject = 0x55,
+    newarray = 0x56,
+    newactivation = 0x57,
+    newclass = 0x58,
+    getdescendants = 0x59,
+    newcatch = 0x5a,
+    findpropstrict = 0x5d,
+    findproperty = 0x5e,
+    finddef = 0x5f,
+    getlex = 0x60,
+    setproperty = 0x61,
+    getlocal = 0x62,
+    setlocal = 0x63,
+    getglobalscope = 0x64,
+    getscopeobject = 0x65,
+    getproperty = 0x66,
+    getouterscope = 0x67,
+    initproperty = 0x68,
+    deleteproperty = 0x6a,
+    getslot = 0x6c,
+    setslot = 0x6d,
+    getglobalslot = 0x6e,
+    setglobalslot = 0x6f,
+    convert_s = 0x70,
+    esc_xelem = 0x71,
+    esc_xattr = 0x72,
+    convert_i = 0x73,
+    convert_u = 0x74,
+    convert_d = 0x75,
+    convert_b = 0x76,
+    convert_o = 0x77,
+    checkfilter = 0x78,
+    coerce = 0x80,
+    coerce_b = 0x81,
+    coerce_a = 0x82,
+    coerce_i = 0x83,
+    coerce_d = 0x84,
+    coerce_s = 0x85,
+    astype = 0x86,
+    astypelate = 0x87,
+    coerce_u = 0x88,
+    coerce_o = 0x89,
+    negate = 0x90,
+    increment = 0x91,
+    inclocal = 0x92,
+    decrement = 0x93,
+    declocal = 0x94,
+    typeof = 0x95,
+    not = 0x96,
+    bitnot = 0x97,
+    add = 0xa0,
+    subtract = 0xa1,
+    multiply = 0xa2,
+    divide = 0xa3,
+    modulo = 0xa4,
+    lshift = 0xa5,
+    rshift = 0xa6,
+    urshift = 0xa7,
+    bitand = 0xa8,
+    bitor = 0xa9,
+    bitxor = 0xaa,
+    equals = 0xab,
+    strictequals = 0xac,
+    lessthan = 0xad,
+    lessequals = 0xae,
+    greaterthan = 0xaf,
+    greaterequals = 0xb0,
+    instanceof = 0xb1,
+    istype = 0xb2,
+    istypelate = 0xb3,
+    in = 0xb4,
+    increment_i = 0xc0,
+    decrement_i = 0xc1,
+    inclocal_i = 0xc2,
+    declocal_i = 0xc3,
+    negate_i = 0xc4,
+    add_i = 0xc5,
+    subtract_i = 0xc6,
+    multiply_i = 0xc7,
+    getlocal0 = 0xd0,
+    getlocal1 = 0xd1,
+    getlocal2 = 0xd2,
+    getlocal3 = 0xd3,
+    setlocal0 = 0xd4,
+    setlocal1 = 0xd5,
+    setlocal2 = 0xd6,
+    setlocal3 = 0xd7,
+    debug = 0xef,
+    debugline = 0xf0,
+    debugfile = 0xf1,
+    bkptline = 0xf2,
+    timestamp = 0xf3,
+    _,
 
-/// One opcode's row of the table.
-const Row = struct { u8, []const u8, u8, u8, u8, u8, u8 };
+    /// Its operands, effects and stack use, from `rows`.
+    pub fn info(op: Op) Info {
+        return tables.info[@backingInt(op)];
+    }
+
+    /// Its name as avmplus' opcodes.tbl spells it, or its hex ("0x00") for
+    /// an opcode with none.
+    pub fn name(op: Op) []const u8 {
+        return tables.names[@backingInt(op)];
+    }
+
+    /// The local getlocal0 to getlocal3 read, or null for another opcode.
+    pub fn getLocalN(op: Op) ?u32 {
+        return inRange(op, .getlocal0, .getlocal3);
+    }
+
+    /// The local setlocal0 to setlocal3 write, or null for another opcode.
+    pub fn setLocalN(op: Op) ?u32 {
+        return inRange(op, .setlocal0, .setlocal3);
+    }
+
+    /// Whether it branches: jump, or a conditional branch.
+    pub fn isBranch(op: Op) bool {
+        return inRange(op, .ifnlt, .ifstrictne) != null;
+    }
+
+    /// Whether it branches on a condition.
+    pub fn isConditional(op: Op) bool {
+        return op.isBranch() and op != .jump;
+    }
+
+    /// Its offset from `first` where it is one of first to last, else null.
+    fn inRange(op: Op, comptime first: Op, comptime last: Op) ?u32 {
+        const b = @backingInt(op);
+        if (b < @backingInt(first) or b > @backingInt(last)) {
+            return null;
+        }
+
+        return b - @backingInt(first);
+    }
+};
+
+/// How an instruction's operands are encoded after its opcode.
+pub const Operands = enum(u8) {
+    none = 0,
+    u30 = 1,
+    u30u30 = 2,
+    /// An s24 offset from the next instruction.
+    branch = 3,
+    byte = 4,
+    short = 5,
+    /// debug's u8, u30, u8 and u30.
+    debug = 6,
+    /// lookupswitch's default offset, case count and case offsets.
+    switch_table = 7,
+    /// An opcode no row names.
+    illegal = 0xff,
+};
+
+pub const Flags = packed struct(u8) {
+    /// It may throw, so the handlers that cover it are reachable from it.
+    throws: bool = false,
+    /// Control never falls through it to the next instruction.
+    terminal: bool = false,
+    _: u6 = 0,
+};
+
+/// Stack use beyond the fixed pops and pushes, as avmplus' verifier
+/// counts it.
+pub const Stack = packed struct(u8) {
+    /// It pops the runtime parts of its multiname operand.
+    multiname: bool = false,
+    /// It pops `a` more values, an argument count.
+    argc_a: bool = false,
+    /// It pops `b` more values, an argument count.
+    argc_b: bool = false,
+    /// The verifier checks room for one push, whatever it pushes.
+    check_push_one: bool = false,
+    _: u4 = 0,
+};
+
+/// One opcode's row: its encoding, flags, and the values it pops and
+/// pushes, as avmplus' verifier checks them, before `stack`'s parts.
+pub const Info = struct {
+    operands: Operands = .illegal,
+    flags: Flags = .{},
+    pops: u8 = 0,
+    pushes: u8 = 0,
+    stack: Stack = .{},
+};
+
+const throws: Flags = .{ .throws = true };
+const terminal: Flags = .{ .terminal = true };
+const throws_terminal: Flags = .{ .throws = true, .terminal = true };
+
+const Row = struct { Op, Operands, Flags, u8, u8, Stack };
 
 const rows = [_]Row{
-    .{ 0x01, "bkpt", OPERANDS_None, 0, 0, 0, 0 },
-    .{ 0x02, "nop", OPERANDS_None, 0, 0, 0, 0 },
-    .{ 0x03, "throw", OPERANDS_None, FLAG_Throws | FLAG_Terminal, 1, 0, 0 },
-    .{ 0x04, "getsuper", OPERANDS_U30, FLAG_Throws, 1, 1, STACK_Multiname },
-    .{ 0x05, "setsuper", OPERANDS_U30, FLAG_Throws, 2, 0, STACK_Multiname },
-    .{ 0x06, "dxns", OPERANDS_U30, FLAG_Throws, 0, 0, 0 },
-    .{ 0x07, "dxnslate", OPERANDS_None, FLAG_Throws, 1, 0, 0 },
-    .{ 0x08, "kill", OPERANDS_U30, 0, 0, 0, 0 },
-    .{ 0x09, "label", OPERANDS_None, 0, 0, 0, 0 },
-    .{ 0x0c, "ifnlt", OPERANDS_Branch, FLAG_Throws, 2, 0, 0 },
-    .{ 0x0d, "ifnle", OPERANDS_Branch, FLAG_Throws, 2, 0, 0 },
-    .{ 0x0e, "ifngt", OPERANDS_Branch, FLAG_Throws, 2, 0, 0 },
-    .{ 0x0f, "ifnge", OPERANDS_Branch, FLAG_Throws, 2, 0, 0 },
-    .{ 0x10, "jump", OPERANDS_Branch, FLAG_Terminal, 0, 0, 0 },
-    .{ 0x11, "iftrue", OPERANDS_Branch, 0, 1, 0, 0 },
-    .{ 0x12, "iffalse", OPERANDS_Branch, 0, 1, 0, 0 },
-    .{ 0x13, "ifeq", OPERANDS_Branch, FLAG_Throws, 2, 0, 0 },
-    .{ 0x14, "ifne", OPERANDS_Branch, FLAG_Throws, 2, 0, 0 },
-    .{ 0x15, "iflt", OPERANDS_Branch, FLAG_Throws, 2, 0, 0 },
-    .{ 0x16, "ifle", OPERANDS_Branch, FLAG_Throws, 2, 0, 0 },
-    .{ 0x17, "ifgt", OPERANDS_Branch, FLAG_Throws, 2, 0, 0 },
-    .{ 0x18, "ifge", OPERANDS_Branch, FLAG_Throws, 2, 0, 0 },
-    .{ 0x19, "ifstricteq", OPERANDS_Branch, 0, 2, 0, 0 },
-    .{ 0x1a, "ifstrictne", OPERANDS_Branch, 0, 2, 0, 0 },
-    .{ 0x1b, "lookupswitch", OPERANDS_Switch, FLAG_Terminal, 1, 0, 0 },
-    .{ 0x1c, "pushwith", OPERANDS_None, FLAG_Throws, 1, 0, 0 },
-    .{ 0x1d, "popscope", OPERANDS_None, 0, 0, 0, 0 },
-    .{ 0x1e, "nextname", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0x1f, "hasnext", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0x20, "pushnull", OPERANDS_None, 0, 0, 1, 0 },
-    .{ 0x21, "pushundefined", OPERANDS_None, 0, 0, 1, 0 },
-    .{ 0x22, "pushfloat", OPERANDS_U30, 0, 0, 1, 0 },
-    .{ 0x79, "convert_f", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x7a, "unplus", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x23, "nextvalue", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0x24, "pushbyte", OPERANDS_Byte, 0, 0, 1, 0 },
-    .{ 0x25, "pushshort", OPERANDS_Short, 0, 0, 1, 0 },
-    .{ 0x26, "pushtrue", OPERANDS_None, 0, 0, 1, 0 },
-    .{ 0x27, "pushfalse", OPERANDS_None, 0, 0, 1, 0 },
-    .{ 0x28, "pushnan", OPERANDS_None, 0, 0, 1, 0 },
-    .{ 0x29, "pop", OPERANDS_None, 0, 1, 0, 0 },
-    .{ 0x2a, "dup", OPERANDS_None, 0, 1, 2, 0 },
-    .{ 0x2b, "swap", OPERANDS_None, 0, 2, 2, 0 },
-    .{ 0x2c, "pushstring", OPERANDS_U30, 0, 0, 1, 0 },
-    .{ 0x2d, "pushint", OPERANDS_U30, 0, 0, 1, 0 },
-    .{ 0x2e, "pushuint", OPERANDS_U30, 0, 0, 1, 0 },
-    .{ 0x2f, "pushdouble", OPERANDS_U30, 0, 0, 1, 0 },
-    .{ 0x30, "pushscope", OPERANDS_None, FLAG_Throws, 1, 0, 0 },
-    .{ 0x31, "pushnamespace", OPERANDS_U30, 0, 0, 1, 0 },
-    .{ 0x32, "hasnext2", OPERANDS_U30U30, FLAG_Throws, 0, 1, 0 },
-    .{ 0x35, "li8", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x36, "li16", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x37, "li32", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x38, "lf32", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x39, "lf64", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x3a, "si8", OPERANDS_None, FLAG_Throws, 2, 0, 0 },
-    .{ 0x3b, "si16", OPERANDS_None, FLAG_Throws, 2, 0, 0 },
-    .{ 0x3c, "si32", OPERANDS_None, FLAG_Throws, 2, 0, 0 },
-    .{ 0x3d, "sf32", OPERANDS_None, FLAG_Throws, 2, 0, 0 },
-    .{ 0x3e, "sf64", OPERANDS_None, FLAG_Throws, 2, 0, 0 },
-    .{ 0x40, "newfunction", OPERANDS_U30, FLAG_Throws, 0, 1, 0 },
-    .{ 0x41, "call", OPERANDS_U30, FLAG_Throws, 2, 1, STACK_ArgcA },
-    .{ 0x42, "construct", OPERANDS_U30, FLAG_Throws, 1, 1, STACK_ArgcA },
-    .{ 0x43, "callmethod", OPERANDS_U30U30, FLAG_Throws, 1, 1, STACK_ArgcB },
-    .{ 0x44, "callstatic", OPERANDS_U30U30, FLAG_Throws, 1, 1, STACK_ArgcB },
-    .{ 0x45, "callsuper", OPERANDS_U30U30, FLAG_Throws, 1, 1, STACK_Multiname | STACK_ArgcB },
-    .{ 0x46, "callproperty", OPERANDS_U30U30, FLAG_Throws, 1, 1, STACK_Multiname | STACK_ArgcB },
-    .{ 0x47, "returnvoid", OPERANDS_None, FLAG_Terminal, 0, 0, 0 },
-    .{ 0x48, "returnvalue", OPERANDS_None, FLAG_Throws | FLAG_Terminal, 1, 0, 0 },
-    .{ 0x49, "constructsuper", OPERANDS_U30, FLAG_Throws, 1, 0, STACK_ArgcA },
-    .{ 0x4a, "constructprop", OPERANDS_U30U30, FLAG_Throws, 1, 1, STACK_Multiname | STACK_ArgcB },
-    .{ 0x4c, "callproplex", OPERANDS_U30U30, FLAG_Throws, 1, 1, STACK_Multiname | STACK_ArgcB },
-    .{ 0x4e, "callsupervoid", OPERANDS_U30U30, FLAG_Throws, 1, 0, STACK_Multiname | STACK_ArgcB | STACK_CheckPushOne },
-    .{ 0x4f, "callpropvoid", OPERANDS_U30U30, FLAG_Throws, 1, 0, STACK_Multiname | STACK_ArgcB | STACK_CheckPushOne },
-    .{ 0x50, "sxi1", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x51, "sxi8", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x52, "sxi16", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x53, "applytype", OPERANDS_U30, FLAG_Throws, 1, 1, STACK_ArgcA },
-    .{ 0x55, "newobject", OPERANDS_U30, FLAG_Throws, 0, 1, 0 },
-    .{ 0x56, "newarray", OPERANDS_U30, FLAG_Throws, 0, 1, 0 },
-    .{ 0x57, "newactivation", OPERANDS_None, FLAG_Throws, 0, 1, 0 },
-    .{ 0x58, "newclass", OPERANDS_U30, FLAG_Throws, 1, 1, 0 },
-    .{ 0x59, "getdescendants", OPERANDS_U30, FLAG_Throws, 1, 1, STACK_Multiname },
-    .{ 0x5a, "newcatch", OPERANDS_U30, FLAG_Throws, 0, 1, 0 },
-    .{ 0x5d, "findpropstrict", OPERANDS_U30, FLAG_Throws, 0, 1, STACK_Multiname },
-    .{ 0x5e, "findproperty", OPERANDS_U30, FLAG_Throws, 0, 1, STACK_Multiname },
-    .{ 0x5f, "finddef", OPERANDS_U30, FLAG_Throws, 0, 1, STACK_Multiname },
-    .{ 0x60, "getlex", OPERANDS_U30, FLAG_Throws, 0, 1, STACK_Multiname },
-    .{ 0x61, "setproperty", OPERANDS_U30, FLAG_Throws, 2, 0, STACK_Multiname },
-    .{ 0x62, "getlocal", OPERANDS_U30, 0, 0, 1, 0 },
-    .{ 0x63, "setlocal", OPERANDS_U30, 0, 1, 0, 0 },
-    .{ 0x64, "getglobalscope", OPERANDS_None, 0, 0, 1, 0 },
-    .{ 0x65, "getscopeobject", OPERANDS_U30, 0, 0, 1, 0 },
-    .{ 0x66, "getproperty", OPERANDS_U30, FLAG_Throws, 1, 1, STACK_Multiname },
-    .{ 0x67, "getouterscope", OPERANDS_U30, 0, 0, 1, 0 },
-    .{ 0x68, "initproperty", OPERANDS_U30, FLAG_Throws, 2, 0, STACK_Multiname },
-    .{ 0x6a, "deleteproperty", OPERANDS_U30, FLAG_Throws, 1, 1, STACK_Multiname },
-    .{ 0x6c, "getslot", OPERANDS_U30, FLAG_Throws, 1, 1, 0 },
-    .{ 0x6d, "setslot", OPERANDS_U30, FLAG_Throws, 2, 0, 0 },
-    .{ 0x6e, "getglobalslot", OPERANDS_U30, 0, 0, 1, 0 },
-    .{ 0x6f, "setglobalslot", OPERANDS_U30, FLAG_Throws, 1, 0, 0 },
-    .{ 0x70, "convert_s", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x71, "esc_xelem", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x72, "esc_xattr", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x73, "convert_i", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x74, "convert_u", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x75, "convert_d", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x76, "convert_b", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x77, "convert_o", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x78, "checkfilter", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x80, "coerce", OPERANDS_U30, FLAG_Throws, 1, 1, 0 },
-    .{ 0x81, "coerce_b", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x82, "coerce_a", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x83, "coerce_i", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x84, "coerce_d", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x85, "coerce_s", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x86, "astype", OPERANDS_U30, FLAG_Throws, 1, 1, 0 },
-    .{ 0x87, "astypelate", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0x88, "coerce_u", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x89, "coerce_o", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x90, "negate", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x91, "increment", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x92, "inclocal", OPERANDS_U30, FLAG_Throws, 0, 0, 0 },
-    .{ 0x93, "decrement", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0x94, "declocal", OPERANDS_U30, FLAG_Throws, 0, 0, 0 },
-    .{ 0x95, "typeof", OPERANDS_None, 0, 1, 1, 0 },
-    .{ 0x96, "not", OPERANDS_None, 0, 1, 1, 0 },
-    .{ 0x97, "bitnot", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0xa0, "add", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xa1, "subtract", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xa2, "multiply", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xa3, "divide", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xa4, "modulo", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xa5, "lshift", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xa6, "rshift", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xa7, "urshift", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xa8, "bitand", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xa9, "bitor", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xaa, "bitxor", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xab, "equals", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xac, "strictequals", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xad, "lessthan", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xae, "lessequals", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xaf, "greaterthan", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xb0, "greaterequals", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xb1, "instanceof", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xb2, "istype", OPERANDS_U30, FLAG_Throws, 1, 1, 0 },
-    .{ 0xb3, "istypelate", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xb4, "in", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xc0, "increment_i", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0xc1, "decrement_i", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0xc2, "inclocal_i", OPERANDS_U30, FLAG_Throws, 0, 0, 0 },
-    .{ 0xc3, "declocal_i", OPERANDS_U30, FLAG_Throws, 0, 0, 0 },
-    .{ 0xc4, "negate_i", OPERANDS_None, FLAG_Throws, 1, 1, 0 },
-    .{ 0xc5, "add_i", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xc6, "subtract_i", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xc7, "multiply_i", OPERANDS_None, FLAG_Throws, 2, 1, 0 },
-    .{ 0xd0, "getlocal0", OPERANDS_None, 0, 0, 1, 0 },
-    .{ 0xd1, "getlocal1", OPERANDS_None, 0, 0, 1, 0 },
-    .{ 0xd2, "getlocal2", OPERANDS_None, 0, 0, 1, 0 },
-    .{ 0xd3, "getlocal3", OPERANDS_None, 0, 0, 1, 0 },
-    .{ 0xd4, "setlocal0", OPERANDS_None, 0, 1, 0, 0 },
-    .{ 0xd5, "setlocal1", OPERANDS_None, 0, 1, 0, 0 },
-    .{ 0xd6, "setlocal2", OPERANDS_None, 0, 1, 0, 0 },
-    .{ 0xd7, "setlocal3", OPERANDS_None, 0, 1, 0, 0 },
-    .{ 0xef, "debug", OPERANDS_Debug, FLAG_Throws, 0, 0, 0 },
-    .{ 0xf0, "debugline", OPERANDS_U30, FLAG_Throws, 0, 0, 0 },
-    .{ 0xf1, "debugfile", OPERANDS_U30, FLAG_Throws, 0, 0, 0 },
-    .{ 0xf2, "bkptline", OPERANDS_U30, 0, 0, 0, 0 },
-    .{ 0xf3, "timestamp", OPERANDS_None, 0, 0, 0, 0 },
+    .{ .bkpt, .none, .{}, 0, 0, .{} },
+    .{ .nop, .none, .{}, 0, 0, .{} },
+    .{ .throw, .none, throws_terminal, 1, 0, .{} },
+    .{ .getsuper, .u30, throws, 1, 1, .{ .multiname = true } },
+    .{ .setsuper, .u30, throws, 2, 0, .{ .multiname = true } },
+    .{ .dxns, .u30, throws, 0, 0, .{} },
+    .{ .dxnslate, .none, throws, 1, 0, .{} },
+    .{ .kill, .u30, .{}, 0, 0, .{} },
+    .{ .label, .none, .{}, 0, 0, .{} },
+    .{ .ifnlt, .branch, throws, 2, 0, .{} },
+    .{ .ifnle, .branch, throws, 2, 0, .{} },
+    .{ .ifngt, .branch, throws, 2, 0, .{} },
+    .{ .ifnge, .branch, throws, 2, 0, .{} },
+    .{ .jump, .branch, terminal, 0, 0, .{} },
+    .{ .iftrue, .branch, .{}, 1, 0, .{} },
+    .{ .iffalse, .branch, .{}, 1, 0, .{} },
+    .{ .ifeq, .branch, throws, 2, 0, .{} },
+    .{ .ifne, .branch, throws, 2, 0, .{} },
+    .{ .iflt, .branch, throws, 2, 0, .{} },
+    .{ .ifle, .branch, throws, 2, 0, .{} },
+    .{ .ifgt, .branch, throws, 2, 0, .{} },
+    .{ .ifge, .branch, throws, 2, 0, .{} },
+    .{ .ifstricteq, .branch, .{}, 2, 0, .{} },
+    .{ .ifstrictne, .branch, .{}, 2, 0, .{} },
+    .{ .lookupswitch, .switch_table, terminal, 1, 0, .{} },
+    .{ .pushwith, .none, throws, 1, 0, .{} },
+    .{ .popscope, .none, .{}, 0, 0, .{} },
+    .{ .nextname, .none, throws, 2, 1, .{} },
+    .{ .hasnext, .none, throws, 2, 1, .{} },
+    .{ .pushnull, .none, .{}, 0, 1, .{} },
+    .{ .pushundefined, .none, .{}, 0, 1, .{} },
+    .{ .pushfloat, .u30, .{}, 0, 1, .{} },
+    .{ .convert_f, .none, throws, 1, 1, .{} },
+    .{ .unplus, .none, throws, 1, 1, .{} },
+    .{ .nextvalue, .none, throws, 2, 1, .{} },
+    .{ .pushbyte, .byte, .{}, 0, 1, .{} },
+    .{ .pushshort, .short, .{}, 0, 1, .{} },
+    .{ .pushtrue, .none, .{}, 0, 1, .{} },
+    .{ .pushfalse, .none, .{}, 0, 1, .{} },
+    .{ .pushnan, .none, .{}, 0, 1, .{} },
+    .{ .pop, .none, .{}, 1, 0, .{} },
+    .{ .dup, .none, .{}, 1, 2, .{} },
+    .{ .swap, .none, .{}, 2, 2, .{} },
+    .{ .pushstring, .u30, .{}, 0, 1, .{} },
+    .{ .pushint, .u30, .{}, 0, 1, .{} },
+    .{ .pushuint, .u30, .{}, 0, 1, .{} },
+    .{ .pushdouble, .u30, .{}, 0, 1, .{} },
+    .{ .pushscope, .none, throws, 1, 0, .{} },
+    .{ .pushnamespace, .u30, .{}, 0, 1, .{} },
+    .{ .hasnext2, .u30u30, throws, 0, 1, .{} },
+    .{ .li8, .none, throws, 1, 1, .{} },
+    .{ .li16, .none, throws, 1, 1, .{} },
+    .{ .li32, .none, throws, 1, 1, .{} },
+    .{ .lf32, .none, throws, 1, 1, .{} },
+    .{ .lf64, .none, throws, 1, 1, .{} },
+    .{ .si8, .none, throws, 2, 0, .{} },
+    .{ .si16, .none, throws, 2, 0, .{} },
+    .{ .si32, .none, throws, 2, 0, .{} },
+    .{ .sf32, .none, throws, 2, 0, .{} },
+    .{ .sf64, .none, throws, 2, 0, .{} },
+    .{ .newfunction, .u30, throws, 0, 1, .{} },
+    .{ .call, .u30, throws, 2, 1, .{ .argc_a = true } },
+    .{ .construct, .u30, throws, 1, 1, .{ .argc_a = true } },
+    .{ .callmethod, .u30u30, throws, 1, 1, .{ .argc_b = true } },
+    .{ .callstatic, .u30u30, throws, 1, 1, .{ .argc_b = true } },
+    .{ .callsuper, .u30u30, throws, 1, 1, .{ .multiname = true, .argc_b = true } },
+    .{ .callproperty, .u30u30, throws, 1, 1, .{ .multiname = true, .argc_b = true } },
+    .{ .returnvoid, .none, terminal, 0, 0, .{} },
+    .{ .returnvalue, .none, throws_terminal, 1, 0, .{} },
+    .{ .constructsuper, .u30, throws, 1, 0, .{ .argc_a = true } },
+    .{ .constructprop, .u30u30, throws, 1, 1, .{ .multiname = true, .argc_b = true } },
+    .{ .callproplex, .u30u30, throws, 1, 1, .{ .multiname = true, .argc_b = true } },
+    .{ .callsupervoid, .u30u30, throws, 1, 0, .{ .multiname = true, .argc_b = true, .check_push_one = true } },
+    .{ .callpropvoid, .u30u30, throws, 1, 0, .{ .multiname = true, .argc_b = true, .check_push_one = true } },
+    .{ .sxi1, .none, throws, 1, 1, .{} },
+    .{ .sxi8, .none, throws, 1, 1, .{} },
+    .{ .sxi16, .none, throws, 1, 1, .{} },
+    .{ .applytype, .u30, throws, 1, 1, .{ .argc_a = true } },
+    .{ .newobject, .u30, throws, 0, 1, .{} },
+    .{ .newarray, .u30, throws, 0, 1, .{} },
+    .{ .newactivation, .none, throws, 0, 1, .{} },
+    .{ .newclass, .u30, throws, 1, 1, .{} },
+    .{ .getdescendants, .u30, throws, 1, 1, .{ .multiname = true } },
+    .{ .newcatch, .u30, throws, 0, 1, .{} },
+    .{ .findpropstrict, .u30, throws, 0, 1, .{ .multiname = true } },
+    .{ .findproperty, .u30, throws, 0, 1, .{ .multiname = true } },
+    .{ .finddef, .u30, throws, 0, 1, .{ .multiname = true } },
+    .{ .getlex, .u30, throws, 0, 1, .{ .multiname = true } },
+    .{ .setproperty, .u30, throws, 2, 0, .{ .multiname = true } },
+    .{ .getlocal, .u30, .{}, 0, 1, .{} },
+    .{ .setlocal, .u30, .{}, 1, 0, .{} },
+    .{ .getglobalscope, .none, .{}, 0, 1, .{} },
+    .{ .getscopeobject, .u30, .{}, 0, 1, .{} },
+    .{ .getproperty, .u30, throws, 1, 1, .{ .multiname = true } },
+    .{ .getouterscope, .u30, .{}, 0, 1, .{} },
+    .{ .initproperty, .u30, throws, 2, 0, .{ .multiname = true } },
+    .{ .deleteproperty, .u30, throws, 1, 1, .{ .multiname = true } },
+    .{ .getslot, .u30, throws, 1, 1, .{} },
+    .{ .setslot, .u30, throws, 2, 0, .{} },
+    .{ .getglobalslot, .u30, .{}, 0, 1, .{} },
+    .{ .setglobalslot, .u30, throws, 1, 0, .{} },
+    .{ .convert_s, .none, throws, 1, 1, .{} },
+    .{ .esc_xelem, .none, throws, 1, 1, .{} },
+    .{ .esc_xattr, .none, throws, 1, 1, .{} },
+    .{ .convert_i, .none, throws, 1, 1, .{} },
+    .{ .convert_u, .none, throws, 1, 1, .{} },
+    .{ .convert_d, .none, throws, 1, 1, .{} },
+    .{ .convert_b, .none, throws, 1, 1, .{} },
+    .{ .convert_o, .none, throws, 1, 1, .{} },
+    .{ .checkfilter, .none, throws, 1, 1, .{} },
+    .{ .coerce, .u30, throws, 1, 1, .{} },
+    .{ .coerce_b, .none, throws, 1, 1, .{} },
+    .{ .coerce_a, .none, throws, 1, 1, .{} },
+    .{ .coerce_i, .none, throws, 1, 1, .{} },
+    .{ .coerce_d, .none, throws, 1, 1, .{} },
+    .{ .coerce_s, .none, throws, 1, 1, .{} },
+    .{ .astype, .u30, throws, 1, 1, .{} },
+    .{ .astypelate, .none, throws, 2, 1, .{} },
+    .{ .coerce_u, .none, throws, 1, 1, .{} },
+    .{ .coerce_o, .none, throws, 1, 1, .{} },
+    .{ .negate, .none, throws, 1, 1, .{} },
+    .{ .increment, .none, throws, 1, 1, .{} },
+    .{ .inclocal, .u30, throws, 0, 0, .{} },
+    .{ .decrement, .none, throws, 1, 1, .{} },
+    .{ .declocal, .u30, throws, 0, 0, .{} },
+    .{ .typeof, .none, .{}, 1, 1, .{} },
+    .{ .not, .none, .{}, 1, 1, .{} },
+    .{ .bitnot, .none, throws, 1, 1, .{} },
+    .{ .add, .none, throws, 2, 1, .{} },
+    .{ .subtract, .none, throws, 2, 1, .{} },
+    .{ .multiply, .none, throws, 2, 1, .{} },
+    .{ .divide, .none, throws, 2, 1, .{} },
+    .{ .modulo, .none, throws, 2, 1, .{} },
+    .{ .lshift, .none, throws, 2, 1, .{} },
+    .{ .rshift, .none, throws, 2, 1, .{} },
+    .{ .urshift, .none, throws, 2, 1, .{} },
+    .{ .bitand, .none, throws, 2, 1, .{} },
+    .{ .bitor, .none, throws, 2, 1, .{} },
+    .{ .bitxor, .none, throws, 2, 1, .{} },
+    .{ .equals, .none, throws, 2, 1, .{} },
+    .{ .strictequals, .none, throws, 2, 1, .{} },
+    .{ .lessthan, .none, throws, 2, 1, .{} },
+    .{ .lessequals, .none, throws, 2, 1, .{} },
+    .{ .greaterthan, .none, throws, 2, 1, .{} },
+    .{ .greaterequals, .none, throws, 2, 1, .{} },
+    .{ .instanceof, .none, throws, 2, 1, .{} },
+    .{ .istype, .u30, throws, 1, 1, .{} },
+    .{ .istypelate, .none, throws, 2, 1, .{} },
+    .{ .in, .none, throws, 2, 1, .{} },
+    .{ .increment_i, .none, throws, 1, 1, .{} },
+    .{ .decrement_i, .none, throws, 1, 1, .{} },
+    .{ .inclocal_i, .u30, throws, 0, 0, .{} },
+    .{ .declocal_i, .u30, throws, 0, 0, .{} },
+    .{ .negate_i, .none, throws, 1, 1, .{} },
+    .{ .add_i, .none, throws, 2, 1, .{} },
+    .{ .subtract_i, .none, throws, 2, 1, .{} },
+    .{ .multiply_i, .none, throws, 2, 1, .{} },
+    .{ .getlocal0, .none, .{}, 0, 1, .{} },
+    .{ .getlocal1, .none, .{}, 0, 1, .{} },
+    .{ .getlocal2, .none, .{}, 0, 1, .{} },
+    .{ .getlocal3, .none, .{}, 0, 1, .{} },
+    .{ .setlocal0, .none, .{}, 1, 0, .{} },
+    .{ .setlocal1, .none, .{}, 1, 0, .{} },
+    .{ .setlocal2, .none, .{}, 1, 0, .{} },
+    .{ .setlocal3, .none, .{}, 1, 0, .{} },
+    .{ .debug, .debug, throws, 0, 0, .{} },
+    .{ .debugline, .u30, throws, 0, 0, .{} },
+    .{ .debugfile, .u30, throws, 0, 0, .{} },
+    .{ .bkptline, .u30, .{}, 0, 0, .{} },
+    .{ .timestamp, .none, .{}, 0, 0, .{} },
 };
 
-/// The tables by opcode, made at compile time; an opcode not in `rows` is illegal and named by its hex.
 const Tables = struct {
-    operands: [256]u8,
-    flags: [256]u8,
+    info: [256]Info,
     names: [256][]const u8,
-    pops: [256]u8,
-    pushes: [256]u8,
-    stack: [256]u8,
 };
 
+/// The rows by opcode, made at compile time; an opcode not in `rows` is
+/// illegal and named by its hex.
 const tables: Tables = blk: {
     @setEvalBranchQuota(100_000);
-    var t: Tables = .{
-        .operands = @splat(OPERANDS_Illegal),
-        .flags = @splat(0),
-        .names = undefined,
-        .pops = @splat(0),
-        .pushes = @splat(0),
-        .stack = @splat(0),
-    };
-    for (0..256) |op| {
-        t.names[op] = std.fmt.comptimePrint("0x{x:0>2}", .{op});
+    var t: Tables = .{ .info = @splat(.{}), .names = undefined };
+    for (0..256) |b| {
+        const op: Op = @fromBackingInt(b);
+        t.names[b] = std.enums.tagName(Op, op) orelse std.fmt.comptimePrint("0x{x:0>2}", .{b});
     }
 
     for (rows) |row| {
-        t.operands[row[0]] = row[2];
-        t.flags[row[0]] = row[3];
-        t.names[row[0]] = row[1];
-        t.pops[row[0]] = row[4];
-        t.pushes[row[0]] = row[5];
-        t.stack[row[0]] = row[6];
+        t.info[@backingInt(row[0])] = .{ .operands = row[1], .flags = row[2], .pops = row[3], .pushes = row[4], .stack = row[5] };
     }
 
     break :blk t;
 };
 
-pub const opcodeOperands = &tables.operands;
-pub const opcodeFlags = &tables.flags;
-pub const opcodeNames = &tables.names;
-/// Values popped and pushed, as avmplus' verifier checks them, before STACK_* parts.
-pub const opcodePops = &tables.pops;
-pub const opcodePushes = &tables.pushes;
-pub const opcodeStack = &tables.stack;
+comptime {
+    // Every named opcode has its row, and only one.
+    var seen: [256]bool = @splat(false);
+    for (rows) |row| {
+        if (seen[@backingInt(row[0])]) {
+            @compileError("two rows for " ++ @tagName(row[0]));
+        }
+
+        seen[@backingInt(row[0])] = true;
+    }
+
+    for (std.enums.values(Op)) |op| {
+        if (!seen[@backingInt(op)]) {
+            @compileError("no row for " ++ @tagName(op));
+        }
+    }
+}
 
 test "the table names and lays out the opcodes" {
-    try std.testing.expectEqualStrings("getsuper", opcodeNames[OP_getsuper]);
-    try std.testing.expectEqual(OPERANDS_Illegal, opcodeOperands[0x00]);
-    try std.testing.expectEqualStrings("0x00", opcodeNames[0x00]);
-    try std.testing.expectEqual(FLAG_Throws | FLAG_Terminal, opcodeFlags[OP_throw]);
+    try std.testing.expectEqualStrings("getsuper", Op.getsuper.name());
+    const illegal: Op = @fromBackingInt(0x00);
+    try std.testing.expectEqual(Operands.illegal, illegal.info().operands);
+    try std.testing.expectEqualStrings("0x00", illegal.name());
+    try std.testing.expectEqual(throws_terminal, Op.throw.info().flags);
+    try std.testing.expectEqual(2, Op.getlocal2.getLocalN());
+    try std.testing.expectEqual(null, Op.getlocal.getLocalN());
+    try std.testing.expectEqual(3, Op.setlocal3.setLocalN());
 }

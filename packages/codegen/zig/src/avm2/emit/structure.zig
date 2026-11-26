@@ -6,10 +6,12 @@
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
 const ops = @import("../abc/opcodes.zig");
+const ir_ = @import("../ir/ir.zig");
 const blocks = @import("blocks.zig");
 const method_ = @import("method.zig");
 const MethodEmitter = method_.MethodEmitter;
 const refs = @import("refs.zig");
+const IrOp = @import("../ir/ir.zig").Op;
 
 /// The index after block k's last instruction.
 fn blockEnd(em: *const MethodEmitter, k: u32) u32 {
@@ -26,12 +28,12 @@ pub fn terminates(em: *const MethodEmitter, k: u32) bool {
     }
 
     const op = ir.op[end - 1];
-    return op == ops.OP_jump or op == ops.OP_lookupswitch or op == ops.OP_returnvoid or op == ops.OP_returnvalue or op == ops.OP_throw;
+    return op == .jump or op == .lookupswitch or op == .returnvoid or op == .returnvalue or op == .throw;
 }
 
 /// Whether op branches on a condition.
-pub fn conditional(op: u16) bool {
-    return (op >= ops.OP_ifnlt and op <= ops.OP_ifnge) or (op >= ops.OP_iftrue and op <= ops.OP_ifstrictne);
+pub fn conditional(op: IrOp) bool {
+    return ir_.opcodeIs(op, ops.Op.isConditional);
 }
 
 /// Block k's successors: the handlers covering any of it, the table's last
@@ -73,8 +75,8 @@ fn successors(em: *MethodEmitter, k: u32) Error!void {
 
     const last = end - 1;
     switch (ir.op[last]) {
-        ops.OP_jump => try em.succ.append(gpa, ir.a[last]),
-        ops.OP_lookupswitch => {
+        .jump => try em.succ.append(gpa, ir.a[last]),
+        .lookupswitch => {
             try em.succ.append(gpa, ir.a[last]);
             var c: u32 = 0;
             while (c <= @as(u32, @bitCast(ir.c[last]))) : (c += 1) {
@@ -82,7 +84,7 @@ fn successors(em: *MethodEmitter, k: u32) Error!void {
             }
         },
         // No successor.
-        ops.OP_returnvoid, ops.OP_returnvalue, ops.OP_throw => {},
+        .returnvoid, .returnvalue, .throw => {},
         else => if (next) {
             try em.succ.append(gpa, k + 1);
         },

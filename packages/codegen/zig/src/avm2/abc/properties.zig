@@ -17,6 +17,8 @@ const NOT_NULL = code_.NOT_NULL;
 const WITH = code_.WITH;
 const C = @import("constants.zig");
 const ops = @import("opcodes.zig");
+const Op = @import("opcodes.zig").Op;
+const IrOp = @import("../ir/ir.zig").Op;
 
 fn notNullIf(bd: *BodyDecoder, ty: i32) u8 {
     return if (bd.domain.typeNotNull(ty)) NOT_NULL else 0;
@@ -187,7 +189,7 @@ pub fn globalScope(bd: *BodyDecoder) i32 {
 /// traits at run time: a subclass instance, or an object as `this`, may
 /// bind a name its type does not. So the global lookup first asks the
 /// local scopes whose type may be narrower at run time (globalSearch).
-pub fn findProperty(bd: *BodyDecoder, opcode: u8, mn: u32) Error!bool {
+pub fn findProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
     const domain = bd.domain;
     const outer = bd.outer;
     const top: i32 = @bitCast(bd.stackBase() + bd.stack);
@@ -206,7 +208,7 @@ pub fn findProperty(bd: *BodyDecoder, opcode: u8, mn: u32) Error!bool {
 
             if (b != 0) {
                 _ = bd.push(bd.typeOf(v), bd.valueFlags[v] & NOT_NULL);
-                return emitFound(bd, ops.OP_getscopeobject, top, i, v - bd.localCount, 0);
+                return emitFound(bd, .getscopeobject, top, i, v - bd.localCount, 0);
             }
 
             if (bd.valueFlags[v] & WITH != 0) {
@@ -225,7 +227,7 @@ pub fn findProperty(bd: *BodyDecoder, opcode: u8, mn: u32) Error!bool {
 
                 if (b != 0) {
                     _ = bd.push(t, NOT_NULL);
-                    return emitFound(bd, ops.OP_getouterscope, top, -1, @intCast(j), 0);
+                    return emitFound(bd, .getouterscope, top, -1, @intCast(j), 0);
                 }
 
                 if (outer.withs[@intCast(j)] != 0) {
@@ -241,12 +243,12 @@ pub fn findProperty(bd: *BodyDecoder, opcode: u8, mn: u32) Error!bool {
                     // Defined by this very script: its global object.
                     if (domain.traits.init.get(@intCast(script)) == @as(i32, @bitCast(bd.global))) {
                         return if (outer.size > 0)
-                            emitFound(bd, ops.OP_getouterscope, top, -1, 0, 0)
+                            emitFound(bd, .getouterscope, top, -1, 0, 0)
                         else
-                            emitFound(bd, ir_.IR_GetGlobalScope, top, -1, 0, 0);
+                            emitFound(bd, .ir_get_global_scope, top, -1, 0, 0);
                     }
 
-                    return emitFound(bd, ops.OP_finddef, top, -1, mn, script);
+                    return emitFound(bd, .finddef, top, -1, mn, script);
                 }
 
                 global = true;
@@ -262,13 +264,13 @@ pub fn findProperty(bd: *BodyDecoder, opcode: u8, mn: u32) Error!bool {
 
     _ = bd.popPush(n - 1, domain.objectType(), NOT_NULL);
     if (global) {
-        const op = if (opcode == ops.OP_findproperty) ir_.IR_FindPropGlobal else ir_.IR_FindPropGlobalStrict;
+        const op: IrOp = if (opcode == .findproperty) .ir_find_prop_global else .ir_find_prop_global_strict;
         return emitFound(bd, op, top, -1, mn, @bitCast(locals));
     }
 
     const at: i32 = @as(i32, @bitCast(bd.stackBase() + bd.stack)) - @as(i32, @bitCast(n - 1));
     if (bd.emitPass) {
-        try bd.emit(opcode, at, at, n - 1, mn, 0, 0, bd.pc);
+        try bd.emit(ir_.of(opcode), at, at, n - 1, mn, 0, 0, bd.pc);
         bd.emitted = true;
     }
 
@@ -302,7 +304,7 @@ fn globalSearch(bd: *BodyDecoder) u32 {
 }
 
 /// The IR of where a name was found, pushed into register `dst`.
-fn emitFound(bd: *BodyDecoder, op: u16, dst: i32, src: i32, a: u32, c: i32) Error!bool {
+fn emitFound(bd: *BodyDecoder, op: IrOp, dst: i32, src: i32, a: u32, c: i32) Error!bool {
     if (bd.emitPass) {
         try bd.emit(op, dst, src, if (src >= 0) 1 else 0, a, 0, c, bd.pc);
         bd.emitted = true;
@@ -340,7 +342,7 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
         // The builtin global's Math and Number are never null.
         const notNull = domain.traits.abc.get(@intCast(ty)) == @as(u32, @bitCast(domain.builtinAbc)) and domain.isMathOrNumber(bd.index, mn);
         _ = bd.popPush(n, propType, if (notNull) NOT_NULL else 0);
-        return bd.emitOn(ops.OP_getslot, @bitCast(obj), @bitCast(obj), 1, b >> 3, 0, 0);
+        return bd.emitOn(.getslot, @bitCast(obj), @bitCast(obj), 1, b >> 3, 0, 0);
     }
 
     if (kind == 5 or kind == 7) {
@@ -354,10 +356,10 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
         // An interface's accessor has no dispatch id of its own on the
         // receiver: its name finds the receiver's.
         if (domain.traits.isInterface.get(t) != 0) {
-            return bd.emitOn(ops.OP_getproperty, @bitCast(obj), @bitCast(obj), n, mn, 0, 0);
+            return bd.emitOn(.getproperty, @bitCast(obj), @bitCast(obj), n, mn, 0, 0);
         }
 
-        return bd.emitOn(ir_.IR_CallGetter, @bitCast(obj), @bitCast(obj), 1, b >> 3, 0, getter);
+        return bd.emitOn(.ir_call_getter, @bitCast(obj), @bitCast(obj), 1, b >> 3, 0, getter);
     }
 
     if (propType == TYPE_Any and numericIndex(bd, mn)) {
@@ -375,7 +377,7 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
     }
 
     _ = bd.popPush(n, propType, notNullIf(bd, propType));
-    return bd.emitOn(ops.OP_getproperty, @bitCast(obj), @bitCast(obj), n, mn, 0, 0);
+    return bd.emitOn(.getproperty, @bitCast(obj), @bitCast(obj), n, mn, 0, 0);
 }
 
 /// Whether multiname `mn` is a runtime name in a public namespace, not an
@@ -392,7 +394,7 @@ fn numericIndex(bd: *BodyDecoder, mn: u32) bool {
 }
 
 /// As Verifier's OP_setproperty and OP_initproperty.
-pub fn setProperty(bd: *BodyDecoder, opcode: u8, mn: u32) Error!bool {
+pub fn setProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
     const domain = bd.domain;
     const n = propertyDepth(bd, mn, 2);
     if (n == 0) {
@@ -417,10 +419,10 @@ pub fn setProperty(bd: *BodyDecoder, opcode: u8, mn: u32) Error!bool {
 
     // A var, or a const set by the initializer of the traits declaring it.
     if (kind == 2 or
-        (kind == 3 and opcode == ops.OP_initproperty and domain.initOfDeclarer(ty, bd.index, mn) == @as(i32, @bitCast(bd.global))))
+        (kind == 3 and opcode == .initproperty and domain.initOfDeclarer(ty, bd.index, mn) == @as(i32, @bitCast(bd.global))))
     {
         try bd.coerce(top, propType);
-        return bd.emitOn(ops.OP_setslot, -1, @bitCast(obj), 2, b >> 3, 0, 0);
+        return bd.emitOn(.setslot, -1, @bitCast(obj), 2, b >> 3, 0, 0);
     }
 
     if (kind == 6 or kind == 7) {
@@ -431,10 +433,10 @@ pub fn setProperty(bd: *BodyDecoder, opcode: u8, mn: u32) Error!bool {
         }
 
         if (domain.traits.isInterface.get(t) != 0) {
-            return bd.emitOn(opcode, -1, @bitCast(obj), n, mn, 0, 0);
+            return bd.emitOn(ir_.of(opcode), -1, @bitCast(obj), n, mn, 0, 0);
         }
 
-        return bd.emitOn(ir_.IR_CallSetter, -1, @bitCast(obj), 2, (b >> 3) + 1, 0, setter);
+        return bd.emitOn(.ir_call_setter, -1, @bitCast(obj), 2, (b >> 3) + 1, 0, setter);
     }
 
     if (numericIndex(bd, mn)) {
@@ -451,13 +453,13 @@ pub fn setProperty(bd: *BodyDecoder, opcode: u8, mn: u32) Error!bool {
     // initializer is written as setproperty writes it: ReferenceError 1074.
     // A global's is left to initproperty: a SWF loaded again into the one
     // domain initializes its classes on the first load's global.
-    const late = kind == 3 and opcode == ops.OP_initproperty and ty >= 0 and domain.traits.kind.get(@intCast(ty)) == traits_.TRAITS_Instance;
-    const write = if (late) ops.OP_setproperty else opcode;
-    return bd.emitOn(write, -1, @bitCast(obj), n, mn, 0, 0);
+    const late = kind == 3 and opcode == .initproperty and ty >= 0 and domain.traits.kind.get(@intCast(ty)) == traits_.TRAITS_Instance;
+    const write: Op = if (late) .setproperty else opcode;
+    return bd.emitOn(ir_.of(write), -1, @bitCast(obj), n, mn, 0, 0);
 }
 
 /// As Verifier::emitCallproperty and emitCallpropertyMethod.
-pub fn callProperty(bd: *BodyDecoder, opcode: u8, mn: u32, argc: u32) Error!bool {
+pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool {
     const domain = bd.domain;
     const traits = &domain.traits;
     const n = propertyDepth(bd, mn, argc +% 1);
@@ -480,7 +482,7 @@ pub fn callProperty(bd: *BodyDecoder, opcode: u8, mn: u32, argc: u32) Error!bool
     }
 
     try bd.checkNull(obj);
-    const voidCall = opcode == ops.OP_callpropvoid;
+    const voidCall = opcode == .callpropvoid;
     if ((b & 7) == 1) {
         b = try fasterCall(bd, ty, mn, b, argc);
         const t: u32 = @intCast(ty);
@@ -503,7 +505,7 @@ pub fn callProperty(bd: *BodyDecoder, opcode: u8, mn: u32, argc: u32) Error!bool
                 _ = bd.popPush(n, result, notNullIf(bd, result));
 
                 // An interface's method has no dispatch id of its own on the receiver.
-                const call: u16 = if (traits.isInterface.get(t) != 0) ir_.IR_CallInterface else ops.OP_callmethod;
+                const call: IrOp = if (traits.isInterface.get(t) != 0) .ir_call_interface else .callmethod;
                 return bd.emitOn(call, if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, b >> 3, argc, m);
             }
         }
@@ -528,34 +530,34 @@ pub fn callProperty(bd: *BodyDecoder, opcode: u8, mn: u32, argc: u32) Error!bool
             const flags = bd.valueFlags[top];
             const value = bd.typeOf(top);
             _ = bd.popPush(n, value, flags & NOT_NULL);
-            return bd.emitOn(ir_.IR_Nip, @bitCast(obj), @bitCast(obj), n, 0, 0, 0);
+            return bd.emitOn(.ir_nip, @bitCast(obj), @bitCast(obj), n, 0, 0, 0);
         }
     }
 
     _ = bd.popPush(n, TYPE_Any, 0);
-    return bd.emitOn(opcode, if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, mn, argc, 0);
+    return bd.emitOn(ir_.of(opcode), if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, mn, argc, 0);
 }
 
 /// The convert opcode that gives `type`, one of the builtin conversions.
-fn conversionOp(bd: *BodyDecoder, ty: i32) u16 {
+fn conversionOp(bd: *BodyDecoder, ty: i32) IrOp {
     const domain = bd.domain;
     if (ty == domain.intType) {
-        return ops.OP_convert_i;
+        return .convert_i;
     }
 
     if (ty == domain.uintType) {
-        return ops.OP_convert_u;
+        return .convert_u;
     }
 
     if (ty >= 0 and ty == domain.floatType) {
-        return ops.OP_convert_f;
+        return .convert_f;
     }
 
     if (ty == domain.numberType) {
-        return ops.OP_convert_d;
+        return .convert_d;
     }
 
-    return if (ty == domain.booleanType) ops.OP_convert_b else ops.OP_convert_s;
+    return if (ty == domain.booleanType) .convert_b else .convert_s;
 }
 
 /// As Verifier::findMathFunction and findStringFunction: Math's and
@@ -637,7 +639,7 @@ pub fn callStatic(bd: *BodyDecoder, m: u32, argc: u32) Error!bool {
 }
 
 /// As Verifier's OP_callsuper and OP_callsupervoid.
-pub fn callSuper(bd: *BodyDecoder, opcode: u8, mn: u32, argc: u32) Error!bool {
+pub fn callSuper(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool {
     const domain = bd.domain;
     const traits = &domain.traits;
     const n = propertyDepth(bd, mn, argc +% 1);
@@ -678,7 +680,7 @@ pub fn callSuper(bd: *BodyDecoder, opcode: u8, mn: u32, argc: u32) Error!bool {
     }
 
     try bd.checkNull(obj);
-    const voidCall = opcode == ops.OP_callsupervoid;
+    const voidCall = opcode == .callsupervoid;
     // As CodegenLIR's callsuper: a method of the base that takes the count,
     // its arguments coerced here and the method called directly.
     if (m >= 0 and n == argc +% 1) {
@@ -694,7 +696,7 @@ pub fn callSuper(bd: *BodyDecoder, opcode: u8, mn: u32, argc: u32) Error!bool {
                 return false;
             }
 
-            return bd.emitOn(ir_.IR_CallSuper, if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, b >> 3, argc, m);
+            return bd.emitOn(.ir_call_super, if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, b >> 3, argc, m);
         }
     }
 

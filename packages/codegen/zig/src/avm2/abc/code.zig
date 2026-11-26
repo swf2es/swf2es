@@ -30,6 +30,8 @@ const properties = @import("properties.zig");
 const Reader = @import("reader.zig").Reader;
 const targets = @import("targets.zig");
 const verify = @import("verify.zig");
+const Op = @import("opcodes.zig").Op;
+const IrOp = @import("../ir/ir.zig").Op;
 
 /// The reachable instructions of one body, ordered by offset; entries past
 /// `count` are stale. Operands: a is the first u30, the signed branch offset,
@@ -48,7 +50,7 @@ pub const Code = struct {
     offset: []u32 = &.{},
     /// Offset of the next instruction in the code.
     next: []u32 = &.{},
-    opcode: []u8 = &.{},
+    opcode: []Op = &.{},
     a: []i32 = &.{},
     b: []u32 = &.{},
     c: []u32 = &.{},
@@ -82,7 +84,7 @@ pub const Code = struct {
         const capacity = @max(count, self.offset.len * 2);
         self.offset = try self.gpa.alloc(u32, capacity);
         self.next = try self.gpa.alloc(u32, capacity);
-        self.opcode = try self.gpa.alloc(u8, capacity);
+        self.opcode = try self.gpa.alloc(Op, capacity);
         self.a = try self.gpa.alloc(i32, capacity);
         self.b = try self.gpa.alloc(u32, capacity);
         self.c = try self.gpa.alloc(u32, capacity);
@@ -277,6 +279,11 @@ pub const BodyDecoder = struct {
         return self.data[self.start + pc];
     }
 
+    /// The byte at `pc` as an opcode.
+    pub inline fn opAt(self: *const BodyDecoder, pc: u32) Op {
+        return @fromBackingInt(self.byteAt(pc));
+    }
+
     /// Decode body `body`, created in scope chain `outer` (empty by default, as
     /// for a script's initializer); the result is valid until the next call.
     pub fn decode(self: *BodyDecoder, body: u32, outer: ?*const Scope) Error!*Code {
@@ -329,7 +336,7 @@ pub const BodyDecoder = struct {
         // walk it again, so its state is kept all the same.
         self.stack = 0;
         self.scope = 0;
-        if (self.byteAt(0) == ops.OP_label) {
+        if (self.opAt(0) == .label) {
             if (!try targets.target(self, -1, 0, 0, 0)) {
                 return code;
             }
@@ -414,7 +421,7 @@ pub const BodyDecoder = struct {
     }
 
     /// Write an IR instruction, typed as its destination is now.
-    pub fn emit(self: *BodyDecoder, op: u16, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32, pc: u32) Error!void {
+    pub fn emit(self: *BodyDecoder, op: IrOp, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32, pc: u32) Error!void {
         const ir = &self.ir;
         const i = try ir.add(op, dst, src, count, a, b, c, pc);
         if (dst >= 0) {
@@ -643,16 +650,16 @@ pub const BodyDecoder = struct {
     /// What instruction `opcode` tells of a local's being neither null nor
     /// undefined, from its operands: as an ORIGIN_* encoding, for a test
     /// its result's, for a conditional branch its condition's; -1 for nothing.
-    fn nullTest(self: *BodyDecoder, opcode: u8) i32 {
+    fn nullTest(self: *BodyDecoder, opcode: Op) i32 {
         // Too few values fail the instruction's verification after this.
         const one = self.stack >= 1;
         const two = self.stack >= 2;
         var o: i32 = -1;
         switch (opcode) {
-            ops.OP_iftrue => return if (one) self.truthOf(self.peek(1)) else -1,
-            ops.OP_iffalse, ops.OP_not => o = if (one) self.truthOf(self.peek(1)) else -1,
-            ops.OP_equals, ops.OP_ifeq => return if (two) self.equalsNull() else -1,
-            ops.OP_ifne => o = if (two) self.equalsNull() else -1,
+            .iftrue => return if (one) self.truthOf(self.peek(1)) else -1,
+            .iffalse, .not => o = if (one) self.truthOf(self.peek(1)) else -1,
+            .equals, .ifeq => return if (two) self.equalsNull() else -1,
+            .ifne => o = if (two) self.equalsNull() else -1,
             else => return -1,
         }
 
@@ -766,24 +773,25 @@ pub const BodyDecoder = struct {
                 return false;
             }
 
-            const opcode = self.byteAt(pc);
-            const operands = ops.opcodeOperands[opcode];
-            if (operands == ops.OPERANDS_Illegal or
+            const opcode = self.opAt(pc);
+            const info = opcode.info();
+            const operands = info.operands;
+            if (operands == .illegal or
                 (!self.abc.hasFloatSupport() and
-                    (opcode == ops.OP_pushfloat or opcode == ops.OP_convert_f or opcode == ops.OP_unplus)))
+                    (opcode == .pushfloat or opcode == .convert_f or opcode == .unplus)))
             {
-                code.failWith(C.kIllegalOpcodeError, opcode, pc);
+                code.failWith(C.kIllegalOpcodeError, @backingInt(opcode), pc);
                 return false;
             }
 
-            if (pc != start and (opcode == ops.OP_label or self.known[pc] != 0)) {
+            if (pc != start and (opcode == .label or self.known[pc] != 0)) {
                 return targets.target(self, @as(i64, pc) - 1, pc, self.stack, self.scope);
             }
 
             // A loop header's implicit interrupt check can throw too, with the
             // state the block is entered with.
-            const flags = ops.opcodeFlags[opcode];
-            if (flags & ops.FLAG_Throws != 0 or (pc == start and self.typed and self.loopHeader[pc] != 0)) {
+            const flags = info.flags;
+            if (flags.throws or (pc == start and self.typed and self.loopHeader[pc] != 0)) {
                 if (!try targets.throwsAt(self, pc)) {
                     return false;
                 }
@@ -807,7 +815,7 @@ pub const BodyDecoder = struct {
                 return false;
             }
 
-            if (testing >= 0 and (opcode == ops.OP_equals or opcode == ops.OP_not)) {
+            if (testing >= 0 and (opcode == .equals or opcode == .not)) {
                 const i = self.peek(1);
                 self.origin[i] = testing;
                 self.originWrite[i] = self.testWrite;
@@ -817,7 +825,7 @@ pub const BodyDecoder = struct {
             const next = self.slotNext[pc];
             const now_stack = self.stack;
             const now_scope = self.scope;
-            if (operands == ops.OPERANDS_Branch) {
+            if (operands == .branch) {
                 // A test of a local goes on with it neither null nor undefined where it tells so.
                 const local: u32 = @bitCast(testing >> 2);
                 const kind = testing & 3;
@@ -834,7 +842,7 @@ pub const BodyDecoder = struct {
                         _ = self.markChecked(local);
                     }
                 }
-            } else if (opcode == ops.OP_lookupswitch) {
+            } else if (opcode == .lookupswitch) {
                 if (!try targets.target(self, pc, @as(i64, pc) + self.slotA[pc], now_stack, now_scope)) {
                     return false;
                 }
@@ -849,7 +857,7 @@ pub const BodyDecoder = struct {
                 }
             }
 
-            if (flags & ops.FLAG_Terminal != 0) {
+            if (flags.terminal) {
                 return true;
             }
 
@@ -858,7 +866,7 @@ pub const BodyDecoder = struct {
     }
 
     /// Decode the instruction at `pc` into its slots; false after recording the error.
-    fn decodeAt(self: *BodyDecoder, pc: u32, opcode: u8, operands: u8) Error!bool {
+    fn decodeAt(self: *BodyDecoder, pc: u32, opcode: Op, operands: ops.Operands) Error!bool {
         const code = &self.code;
         const r = &self.r;
         r.pos = self.start + pc + 1;
@@ -868,27 +876,27 @@ pub const BodyDecoder = struct {
         var c: u32 = 0;
         var wide: u32 = 0;
         switch (operands) {
-            ops.OPERANDS_U30 => {
+            .u30 => {
                 wide = r.u32_();
                 a = @bitCast(wide);
             },
-            ops.OPERANDS_U30U30 => {
+            .u30u30 => {
                 a = @bitCast(r.u32_());
                 b = r.u32_();
                 wide = @as(u32, @bitCast(a)) | b;
             },
-            ops.OPERANDS_Branch => a = r.s24(),
-            ops.OPERANDS_Byte => a = @as(i8, @bitCast(@as(u8, @truncate(r.u8_())))),
+            .branch => a = r.s24(),
+            .byte => a = @as(i8, @bitCast(@as(u8, @truncate(r.u8_())))),
             // The one u30 operand not range-checked: its low 16 bits are sign-extended.
-            ops.OPERANDS_Short => a = @as(i16, @bitCast(@as(u16, @truncate(r.u32_())))),
-            ops.OPERANDS_Debug => {
+            .short => a = @as(i16, @bitCast(@as(u16, @truncate(r.u32_())))),
+            .debug => {
                 a = @intCast(r.u8_());
                 b = r.u32_();
                 c = r.u8_();
                 _ = r.u32_();
                 wide = b;
             },
-            ops.OPERANDS_Switch => {
+            .switch_table => {
                 a = r.s24();
                 b = r.u32_();
                 wide = b;
@@ -907,7 +915,7 @@ pub const BodyDecoder = struct {
             return false;
         }
 
-        if (opcode == ops.OP_lookupswitch) {
+        if (opcode == .lookupswitch) {
             c = code.caseCount;
             const caseCount = @as(u64, b) + 1;
             if (@as(u64, r.pos) + caseCount * 3 > codeEnd) {
@@ -964,7 +972,7 @@ pub const BodyDecoder = struct {
         // A coercion of a value neither null nor undefined is not either.
         self.setValue(i, ty, self.valueFlags[i] & KNOWN);
         if (self.emitPass and changes and ty != TYPE_Any) {
-            try self.emit(ir_.IR_Coerce, @intCast(i), @intCast(i), 1, 0, 0, ty, self.pc);
+            try self.emit(.ir_coerce, @intCast(i), @intCast(i), 1, 0, 0, ty, self.pc);
         }
     }
 
@@ -977,7 +985,7 @@ pub const BodyDecoder = struct {
     /// local it copies, unchanged since, is checked too.
     pub fn checkNull(self: *BodyDecoder, i: u32) Error!void {
         if (self.emitPass and self.valueFlags[i] & KNOWN == 0) {
-            try self.emit(ir_.IR_CheckNull, -1, @intCast(i), 1, 0, 0, 0, self.pc);
+            try self.emit(.ir_check_null, -1, @intCast(i), 1, 0, 0, 0, self.pc);
         }
 
         self.valueFlags[i] = self.valueFlags[i] | NOT_NULL;
@@ -998,7 +1006,7 @@ pub const BodyDecoder = struct {
     }
 
     /// Write the instruction's own IR row, instead of the generic one.
-    pub fn emitOn(self: *BodyDecoder, op: u16, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32) Error!bool {
+    pub fn emitOn(self: *BodyDecoder, op: IrOp, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32) Error!bool {
         if (self.emitPass) {
             try self.emit(op, dst, src, count, a, b, c, self.pc);
             self.emitted = true;
@@ -1033,7 +1041,7 @@ pub const BodyDecoder = struct {
             if (self.cover[p] == START) {
                 code.offset[i] = p;
                 code.next[i] = self.slotNext[p];
-                code.opcode[i] = self.byteAt(p);
+                code.opcode[i] = self.opAt(p);
                 code.a[i] = self.slotA[p];
                 code.b[i] = self.slotB[p];
                 code.c[i] = self.slotC[p];
