@@ -1,5 +1,6 @@
-// The programs' builds, which the programs runner runs and tests/golden
-// digests the modules of: as3pb by ASC, LZ4 by Crossbridge's gcc.
+// The programs' builds, which the programs runner runs: as3pb by ASC,
+// whose ABC tests/golden keeps and digests the module of, and LZ4 by
+// Crossbridge's gcc, which builds it differently each time.
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";

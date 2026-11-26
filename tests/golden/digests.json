@@ -525,6 +525,5 @@
   "oracle-library/builtin": "669ef3e241b3ff7437cbbd510121e64db5ff60e0d2c28f6c1f515d8ea5cb2694",
   "oracle-library/playerglobal": "afdc6d501c66f6bda0bfcdeff482aacebeee64642707ad201a56aabcea0640d8",
   "oracle-library/shell_toplevel": "242e6551b3b49652e60a7fda0f2784ea36bfe81dacbc54c02afdb373dba972a0",
-  "program/as3pb": "03367b2a769b8b1ec97cb2f48347cf8e80b34b8177d0bf6d5ae8eef0bdac822c",
-  "program/lz4": "61e38b62be44145e622e6ba5800f083fa35e5d6c8511ff4a05a7fae2e9b20d9e"
+  "program/as3pb": "03367b2a769b8b1ec97cb2f48347cf8e80b34b8177d0bf6d5ae8eef0bdac822c"
 }

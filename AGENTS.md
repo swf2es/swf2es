@@ -202,9 +202,10 @@ node packages/codegen/zig/build.ts [--update | --verify]   # the compiler, as pn
 node packages/codegen/zig/build.ts --names   # dist-test/codegen-names.wasm, by the pinned Zig:
                               # the compiler with the name section, so that a trap's stack names
                               # its functions
-node tests/golden/run.ts [--update]   # the generated code's digests (libraries, the unit tests'
-                              # ABCs, conformance cases with and without line maps, the programs,
-                              # AVM1 blocks) against tests/golden/digests.json
+node tests/golden/run.ts [--abcs] [--update]   # the generated code's digests (libraries, the unit
+                              # tests' ABCs, conformance cases with and without line maps, as3pb, AVM1
+                              # blocks) against tests/golden/digests.json; --abcs builds the ABCs ASC
+                              # makes (kept in tests/golden/abcs/) again, as after a new case
 pnpm --filter @swf2es/native build:wasm   # rebuild packages/native's wasm (compress, mp3, and render:
                               # bitmap, tessellate, lines) with the pinned Zig, after the zig tests;
                               # pnpm build only checks their inputs' digests

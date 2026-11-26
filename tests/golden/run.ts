@@ -9,21 +9,34 @@
 //   node tests/golden/run.ts            the digests compared with digests.json
 //   node tests/golden/run.ts --update   digests.json written again
 //
-// The conformance cases (with ASC's -d too, for line maps), the programs
-// (as3pb by ASC, LZ4 by Crossbridge) and the oracle's own libraries
-// (tests/libraries') are built in the oracle's image, into this package's
-// own out/; without podman or docker their digests are left out of the
+// The conformance cases (with ASC's -d too, for line maps) and as3pb are
+// built by ASC in the oracle's image, which does not build them alike every
+// time, so their ABCs are kept in abcs/ (--abcs builds them again, as after
+// a new case). LZ4, which Crossbridge builds differently each time, is left
+// out. The oracle's own libraries (tests/libraries') are read from its
+// image; without podman or docker their digests are left out of the
 // comparison, but in CI that fails, and --update refuses.
+//
+//   node tests/golden/run.ts --abcs --update   the ABCs built again, and the digests
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AIR_API_VERSION, API_VERSION, createCodegen } from "@swf2es/codegen";
 import { airLibrary, builtinLibrary, playerglobalLibrary } from "@swf2es/player/libraries";
-import { containerEngine, libraries, runCrossbridge, runOracle } from "../../oracle/oracle.ts";
+import { containerEngine, libraries, runOracle } from "../../oracle/oracle.ts";
 import { shellToplevelLibrary } from "../../packages/cli/dist/shell-toplevel-library.js";
 import { avm1Swfs } from "../conformance/determinism-avm1.ts";
 import { structuredAbcs } from "../fuzz/bodies.ts";
-import { as3pb, lz4 } from "../programs/jobs.ts";
+import { as3pb } from "../programs/jobs.ts";
 import { linkAbcs } from "../unit/codegen/link-abc.ts";
 import { linkCases, resolveCases } from "../unit/codegen/link-cases.ts";
 import { richAbc } from "../unit/codegen/rich-abc.ts";
@@ -167,8 +180,25 @@ for (const swf of avm1Swfs(false)) {
   );
 }
 
-// What the oracle's image builds: digested where podman or docker is.
-const ORACLE = ["conformance/", "lines/", "program/", "oracle-library/"];
+// The conformance cases, compiled by ASC as the conformance runner compiles
+// them, and again with -d, as the determinism check does, so that their
+// source maps have lines; and as3pb, as the programs runner builds it. ASC
+// does not build them alike every time (with -d, a body's stack and scope
+// sizes now and then), so the ABCs are kept in abcs/, built again by
+// --abcs, and digested from there, each after avmshell's libraries.
+const cases = `${root}tests/conformance/cases/`;
+const abcs = `${here}abcs/`;
+const sources = readdirSync(cases)
+  .filter((f) => f.endsWith(".as"))
+  .map((f) => f.replace(/\.as$/, ""))
+  .sort();
+const kept = [
+  ...sources.flatMap((name) => [`conformance/${name}`, `lines/${name}`]),
+  "program/as3pb",
+];
+
+// What the oracle's image builds: the ABCs above, again with --abcs, and its
+// own libraries, digested where podman or docker is, which CI must have.
 let oracle = true;
 try {
   containerEngine();
@@ -182,50 +212,56 @@ try {
   console.log(`golden: what the oracle builds left out (${(e as Error).message})`);
 }
 
-if (oracle) {
-  // The conformance cases, compiled by ASC as the conformance runner
-  // compiles them, and again with -d, as the determinism check does, so
-  // that their source maps have lines; each after avmshell's libraries.
-  const cases = `${root}tests/conformance/cases/`;
-  const sources = readdirSync(cases)
-    .filter((f) => f.endsWith(".as"))
-    .sort();
+if (process.argv.includes("--abcs")) {
+  if (!oracle) {
+    console.log("golden: --abcs needs the oracle");
+    process.exit(1);
+  }
+
   const results = runOracle(
     [
-      ...sources.map((f) => ({ source: `${cases}${f}`, ascArgs: ["-md"] })),
-      ...sources.map((f) => ({
-        source: `${cases}${f}`,
-        name: `lines/${f.replace(/\.as$/, "")}`,
+      ...sources.map((name) => ({ source: `${cases}${name}.as`, ascArgs: ["-md"] })),
+      ...sources.map((name) => ({
+        source: `${cases}${name}.as`,
+        name: `lines/${name}`,
         ascArgs: ["-md", "-d"],
       })),
+      as3pb(),
     ],
     `${here}out`,
     { run: false },
   );
+  rmSync(abcs, { recursive: true, force: true });
   for (const result of results) {
-    const name = result.file.replace(/^.*\//, "").replace(/\.as$/, "");
     if (!result.compiled) {
-      throw new Error(`conformance case ${result.name} did not compile:\n${result.compileLog}`);
+      throw new Error(`${result.name} did not compile:\n${result.compileLog}`);
     }
 
-    const key = result.name.startsWith("lines/") ? `lines/${name}` : `conformance/${name}`;
-    user(key, SHELL, new Uint8Array(readFileSync(`${here}out/${result.name}.abc`)));
+    const name = result.name.replace(/^.*\//, "");
+    const key = result.name.startsWith("lines/")
+      ? `lines/${name}`
+      : result.name.startsWith("as3pb/")
+        ? "program/as3pb"
+        : `conformance/${name}`;
+    mkdirSync(dirname(`${abcs}${key}.abc`), { recursive: true });
+    copyFileSync(`${here}out/${result.name}.abc`, `${abcs}${key}.abc`);
   }
+}
 
-  // The programs, as the programs runner builds them.
-  const [pb] = runOracle([as3pb()], `${here}out`, { run: false });
-  if (!pb.compiled) {
-    throw new Error(`as3pb did not compile:\n${pb.compileLog}`);
-  }
+const missing = kept.filter((key) => !existsSync(`${abcs}${key}.abc`));
+if (missing.length > 0) {
+  console.log(
+    `golden: ${missing.length} ABCs not in tests/golden/abcs/ (${missing.slice(0, 3).join(", ")}): ` +
+      "run node tests/golden/run.ts --abcs --update",
+  );
+  process.exit(1);
+}
 
-  user("program/as3pb", SHELL, new Uint8Array(readFileSync(`${here}out/${pb.name}.abc`)));
-  const [lz] = runCrossbridge([lz4()], `${here}out`);
-  if (!lz.abc) {
-    throw new Error(`lz4 did not build:\n${lz.compileLog}`);
-  }
+for (const key of kept) {
+  user(key, SHELL, new Uint8Array(readFileSync(`${abcs}${key}.abc`)));
+}
 
-  user("program/lz4", SHELL, lz.abc);
-
+if (oracle) {
   // The oracle's libraries, as tests/libraries reads them: avmshell's, and
   // Flash Player's and AIR's from its image, each after builtin.
   const [builtin, ...others] = libraries(
@@ -254,7 +290,7 @@ if (oracle) {
 const sorted = Object.fromEntries(Object.entries(digests).sort(([a], [b]) => (a < b ? -1 : 1)));
 if (update) {
   if (!oracle) {
-    console.log("golden: --update needs the oracle, for the conformance cases");
+    console.log("golden: --update needs the oracle, for its libraries");
     process.exit(1);
   }
 
@@ -264,7 +300,7 @@ if (update) {
 }
 
 const recorded: Record<string, string> = JSON.parse(readFileSync(digestsFile, "utf8"));
-const compared = (key: string) => oracle || !ORACLE.some((prefix) => key.startsWith(prefix));
+const compared = (key: string) => oracle || !key.startsWith("oracle-library/");
 const moved: string[] = [];
 for (const key of Object.keys({ ...recorded, ...sorted })
   .filter(compared)

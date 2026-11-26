@@ -527,9 +527,13 @@ Zig, and the parity job went with `assembly/`. From then on output is held
 by determinism, conformance, Tamarin and the corpus, as before, and by
 golden digests (`tests/golden/`, question 8 below): what the compiler makes
 of the libraries (the player's and the oracle's), the unit tests' ABCs,
-the conformance cases (with and without line maps), the programs and
-AVM1 blocks, generated from the binary the last parity run held to
+the conformance cases (with and without line maps), as3pb and AVM1
+blocks, generated from the binary the last parity run held to
 AssemblyScript's, and moved only by a change that means to move them.
+ASC does not build every ABC alike each time (with `-d`, a body's stack
+and scope sizes now and then), so the ABCs it builds are kept in
+`tests/golden/abcs/`, built again by `--abcs` when the cases change; LZ4,
+which Crossbridge builds differently each time, is not digested.
 
 What is no longer byte-compared on every pull request: Tamarin's ABCs,
 Ruffle's corpus (AVM1 and AS3), API versions other than the ones the
