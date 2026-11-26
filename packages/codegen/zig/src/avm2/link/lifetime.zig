@@ -70,7 +70,7 @@ fn leave(dom: *Domain, domain: u32, state: DomainState) void {
     var d = domain + 1;
     while (d < count) : (d += 1) {
         const parent = dom.domainState.get(@intCast(dom.domainParent.get(d)));
-        if (parent != .live and @backingInt(dom.domainState.get(d)) < @backingInt(parent)) {
+        if (parent != .live and dom.domainState.get(d).nearerLive(parent)) {
             if (dom.domainState.get(d) == .live) {
                 dom.domainEvicted.set(d, dom.generation);
             }
@@ -667,6 +667,17 @@ const Words = struct {
         return value;
     }
 
+    /// A kind or a state, a byte saved as a word: one above 0xff, which a
+    /// save never writes, is refused, not read as its low byte.
+    fn kind(self: *Words, comptime T: type) T {
+        const word = self.next();
+        if (word > 0xff) {
+            self.failed = true;
+        }
+
+        return T.fromWord(word);
+    }
+
     /// A count of things of `size` words each, refused if more than the words left could hold.
     fn count(self: *Words, size: u64) u32 {
         const n = self.next();
@@ -709,7 +720,7 @@ pub fn loadDomain(loaded: *Loaded, words: []const u8) Allocator.Error!bool {
     for (0..domains) |_| {
         try dom.domainParent.push(gpa, @bitCast(reader.next()));
         try dom.domainDepth.push(gpa, reader.next());
-        try dom.domainState.push(gpa, @fromBackingInt(@as(u8, @truncate(reader.next()))));
+        try dom.domainState.push(gpa, reader.kind(DomainState));
         try dom.domainEvicted.push(gpa, reader.next());
     }
 
@@ -726,7 +737,7 @@ pub fn loadDomain(loaded: *Loaded, words: []const u8) Allocator.Error!bool {
 
     const entries = reader.count(5);
     for (0..entries) |_| {
-        try dom.logKind.push(gpa, @fromBackingInt(@as(u8, @truncate(reader.next()))));
+        try dom.logKind.push(gpa, reader.kind(domain_.LogKind));
         try dom.logAt.push(gpa, reader.next());
         try dom.logAbc.push(gpa, reader.next());
         try dom.logA.push(gpa, reader.next());
@@ -736,7 +747,7 @@ pub fn loadDomain(loaded: *Loaded, words: []const u8) Allocator.Error!bool {
     const found = reader.count(6);
     for (0..found) |_| {
         try dom.foundDomain.push(gpa, reader.next());
-        try dom.foundKind.push(gpa, @fromBackingInt(@as(u8, @truncate(reader.next()))));
+        try dom.foundKind.push(gpa, reader.kind(domain_.NsType));
         try dom.foundAbc.push(gpa, reader.next());
         try dom.foundAsType.push(gpa, @truncate(reader.next()));
         try dom.foundUri.push(gpa, try reader.text(gpa));

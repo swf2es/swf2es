@@ -46,6 +46,12 @@ pub const NsType = enum(u8) {
     static_protected = 4,
     private = 5,
     _,
+
+    /// The one reading of a word, a save's or an export's: its low byte.
+    /// A save's word above 0xff is refused before (lifetime.zig's Words.kind).
+    pub fn fromWord(word: u32) @This() {
+        return @fromBackingInt(@as(u8, @truncate(word)));
+    }
 };
 
 /// avmplus' ApiVersion values that swf2es needs; see core/api-versions.h.
@@ -67,12 +73,26 @@ pub const DomainState = enum(u8) {
     dropped = 2,
     _,
 
+    /// The one reading of a word, a save's or an export's: its low byte.
+    /// A save's word above 0xff is refused before (lifetime.zig's Words.kind).
+    pub fn fromWord(word: u32) @This() {
+        return @fromBackingInt(@as(u8, @truncate(word)));
+    }
+
     /// Whether it is one of the named states, not a corrupt number.
     pub fn isNamed(state: DomainState) bool {
         return switch (state) {
             .live, .evicted, .dropped => true,
             _ => false,
         };
+    }
+
+    /// Whether it is nearer live than `other`. The order live, evicted,
+    /// dropped is the tags' and is meant: a domain only moves away from
+    /// live, but by revival, and a child is never nearer live than its
+    /// parent.
+    pub fn nearerLive(state: DomainState, other: DomainState) bool {
+        return @backingInt(state) < @backingInt(other);
     }
 
     /// Of two states, the one further from live: dropped, then evicted.
@@ -85,8 +105,11 @@ pub const DomainState = enum(u8) {
 pub const ABC_Weight: u64 = 3;
 
 /// The kinds of the log's entries (see Domain.logKind). Saved and
-/// journaled, so their values are fixed; non-exhaustive, and an entry of
-/// another kind is skipped or refused where it is replayed, as before.
+/// journaled, so their values are fixed. Non-exhaustive: a loaded save's
+/// entry of another kind, or a word above 0xff, is refused at load
+/// (lifetime.zig's Words.kind and consistent); journal text's is refused
+/// by replayEntry, which takes no kind past verify, and by replayed, which
+/// does only verify, sign and resolve.
 pub const LogKind = enum(u8) {
     /// An entry undone in place (a verification left before its end).
     none = 0,
@@ -99,6 +122,12 @@ pub const LogKind = enum(u8) {
     /// An ABC verified for the first time, or finding scopes for the first time.
     verify = 4,
     _,
+
+    /// The one reading of a word, a save's or an export's: its low byte.
+    /// A save's word above 0xff is refused before (lifetime.zig's Words.kind).
+    pub fn fromWord(word: u32) @This() {
+        return @fromBackingInt(@as(u8, @truncate(word)));
+    }
 
     /// Whether it is one of the named kinds, not a corrupt number.
     pub fn isNamed(kind: LogKind) bool {
