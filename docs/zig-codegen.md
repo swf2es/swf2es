@@ -986,7 +986,7 @@ MAX_NESTING and past it. What stage 5 changed of the plan:
 
 - A module written a part at a time lasts past the call that started
   it, and so does a kept one, for its source map and entries: both are
-  in an arena of their own (`compile.zig`), given back when the next
+  in an arena of their own (`compile/modules.zig`), given back when the next
   module starts or the domain changes under it. The method emitter's
   scratch is the call's arena, handed to it again as each part starts
   (`ModuleEmitter.prepare`), as AssemblyScript's collector frees it

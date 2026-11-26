@@ -1,6 +1,8 @@
-// The AVM2 compiler's modules (stage 5; assembly/compile.ts): the module
-// written last, kept for its source map and entries, or being written a
-// part at a time, and the bodies the JIT compiles alone.
+// The AVM2 compiler's modules (stage 5; assembly/compile.ts), and the
+// bodies the JIT compiles alone. The module written last, kept for its
+// source map and entries, or being written a part at a time, lasts past
+// the call that wrote it: in an arena of its own, given back when the
+// next one starts, or the domain changes under it.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("../memory.zig");
