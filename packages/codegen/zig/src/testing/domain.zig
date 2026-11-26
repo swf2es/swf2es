@@ -549,6 +549,7 @@ fn writeType(w: *std.Io.Writer, dom: *const Domain, ty: i32, notNull: u8) std.Io
         const kind = traits.kind.get(u);
         const isVector = traits.param.get(u) != -1 or
             (kind == .instance and traits.first.get(u) == traits.end.get(u) and
+                // No base reads as *, as an absent Vector.<*> does.
                 traits.base.get(u).orAny() == dom.vectorObjectType and t != dom.vectorObjectType);
         if (!isVector) {
             break;

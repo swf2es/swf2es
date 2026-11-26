@@ -668,6 +668,7 @@ fn captureClass(bd: *BodyDecoder, i: u32) Error!bool {
     }
 
     const innermost = bd.typeOf(bd.localCount + bd.scope - 1);
+    // No base reads as *, as instanceTraitsOf answers for a type not a class.
     if (innermost == TYPE_Any or domain.instanceTraitsOf(innermost) != traits.base.get(@intCast(itraits)).orAny()) {
         return bd.fail(C.kCorruptABCError);
     }
