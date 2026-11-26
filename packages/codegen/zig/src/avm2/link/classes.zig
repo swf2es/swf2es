@@ -61,7 +61,7 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
         const last = abc.instanceInterfaceStart[i + 1];
         var j = abc.instanceInterfaceStart[i];
         while (j < last) : (j += 1) {
-            const t = typenames.resolveType(dom, index, abc.interfaces.get(j));
+            const t = typenames.resolveType(dom, index, abc.interfaces[j]);
             if (t < 0) {
                 dom.traits.interfaceList.truncate(interfaces);
                 return abc.fail(-t);
@@ -186,9 +186,9 @@ fn layoutActivations(dom: *Domain, index: u32) Allocator.Error!bool {
     const bodies = try memory.allocZeroed(gpa, i32, abc.bodyCount());
     for (0..abc.bodyCount()) |b_| {
         const b: u32 = @intCast(b_);
-        const first = abc.bodyTraitStart.get(b);
-        const end = abc.bodyTraitStart.get(b + 1);
-        const flags = abc.methodFlags[abc.bodyMethod.get(b)];
+        const first = abc.bodyTraitStart[b];
+        const end = abc.bodyTraitStart[b + 1];
+        const flags = abc.methodFlags[abc.bodyMethod[b]];
         bodies[b] = -1;
         if (flags & C.METHOD_NeedActivation != 0 or end > first) {
             const t = try dom.traits.create(gpa, traits_.TRAITS_Activation, index, b, -1, -1, first, end);
@@ -216,11 +216,11 @@ fn bindMethods(dom: *Domain, t: u32, init: i32, final: bool) Allocator.Error!voi
     const methods = dom.methodStart.get(index);
     var i = traits.first.get(t);
     while (i < traits.end.get(t)) : (i += 1) {
-        const tag = abc.traitTag.get(i);
+        const tag = abc.traitTag[i];
         const kind = tag & 0x0f;
         if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
             // A method of this ABC's, whose rows its link added.
-            const m = methods + abc.traitIndex.get(i);
+            const m = methods + abc.traitIndex[i];
             traits.methodTraits.set(m, @intCast(t));
             traits.methodVirtual.set(m, 1);
             traits.methodFinal.set(m, if (tag & C.ATTR_Final != 0 or final) 1 else 0);

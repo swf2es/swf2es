@@ -204,7 +204,7 @@ pub fn domainVerifyAll(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 
         }
 
         if (result > 0) {
-            try out.print(gpa, "body {d} method {d} error {d}\n", .{ b, abc.bodyMethod.get(@intCast(b)), result });
+            try out.print(gpa, "body {d} method {d} error {d}\n", .{ b, abc.bodyMethod[@intCast(b)], result });
         }
     }
 
@@ -235,7 +235,7 @@ pub fn domainEmit(dom: *Domain, gpa: Allocator, body: u32) Allocator.Error![]con
     }
 
     var decoder: BodyDecoder = try .init(gpa, abc, dom.abcBuffer.get(index), dom, index);
-    const method = abc.bodyMethod.get(body);
+    const method = abc.bodyMethod[body];
     const global = dom.methodStart.get(index) + method;
     const result = try decoder.decode(body, dom.traits.scopeOf(global));
     if (result.@"error" != 0) {
@@ -266,7 +266,7 @@ pub fn domainIr(dom: *Domain, gpa: Allocator, body: u32) Allocator.Error![]const
     }
 
     var decoder: BodyDecoder = try .init(gpa, abc, dom.abcBuffer.get(index), dom, index);
-    const m = dom.methodStart.get(index) + abc.bodyMethod.get(body);
+    const m = dom.methodStart.get(index) + abc.bodyMethod[body];
     const result = try decoder.decode(body, dom.traits.scopeOf(m));
     if (result.@"error" != 0) {
         return std.fmt.allocPrint(gpa, "error {d}", .{result.@"error"});
@@ -338,7 +338,7 @@ pub fn domainCheckIr(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
             continue;
         }
 
-        const m = dom.methodStart.get(index) + abc.bodyMethod.get(body);
+        const m = dom.methodStart.get(index) + abc.bodyMethod[body];
         _ = try decoder.decode(body, dom.traits.scopeOf(m));
         const ir = &decoder.ir;
         bodies += 1;
@@ -348,7 +348,7 @@ pub fn domainCheckIr(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
             const k: u32 = @intCast(k_);
             const first = ir.blockFirst[k];
             const last = if (k + 1 < ir.blockCount) ir.blockFirst[k + 1] else ir.count;
-            const end = if (k + 1 < ir.blockCount) ir.blockPc[k + 1] else abc.bodyCodeLength.get(body);
+            const end = if (k + 1 < ir.blockCount) ir.blockPc[k + 1] else abc.bodyCodeLength[body];
             if (last == first and k + 1 == ir.blockCount) {
                 return std.fmt.allocPrint(gpa, "body {d} B{d}: empty last block", .{ body, k });
             }
@@ -427,7 +427,7 @@ pub fn domainIrAll(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
                 continue;
             }
 
-            const m = dom.methodStart.get(index) + abc.bodyMethod.get(body);
+            const m = dom.methodStart.get(index) + abc.bodyMethod[body];
             _ = try decoder.decode(body, dom.traits.scopeOf(m));
             const ir = &decoder.ir;
             if (!first) w.writeByte('\n') catch break :write;

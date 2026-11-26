@@ -249,6 +249,24 @@ Then:
   replaces in the domain's arena (an `IdTable` grown or rehashed, a
   `Rows` directory outgrown) stay there unweighed until the next
   rebuild, so the weights undercount the dead.
+- **For the optimisation phase.** A hostile `method_count` (or any
+  count of a table the ABC writes first) costs about 21 times the ABC's
+  size before its read fails: the fixed tables are allocated from the
+  count, bounded only by the bytes left, and wasm memory never shrinks.
+
+**How an ABC's tables are laid out** (since the idiomatic pass, P1). The
+parse reads what follows the constant pool twice. The first pass counts
+the rows of the tables that grow across entries (each method's
+parameters and optional values, metadata items, interfaces, method
+bodies and their exceptions, every owner's traits), whose sizes the ABC
+does not write up front; the second fills them, each allocated exact in
+the domain's arena from its count, so the arena holds no more than they
+take. Tables whose size the ABC writes first (`method_count` and the
+like) are allocated by the first pass and filled again by the second; an
+ABC the first pass rejects is not read again. `Rows`, which never move,
+remain where a `Change` needs tables that keep their place: the
+`Domain`'s and the traits' tables, and AVM1's decoded actions, held by
+address.
 
 What still grows: the root. A SWF loaded into the main SWF's own
 application domain adds its ABC there for good, as Flash keeps its

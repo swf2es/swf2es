@@ -185,7 +185,7 @@ pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!bool {
     for (0..bd.handlerCount) |i_| {
         const i: u32 = @intCast(i_);
         const h = bd.handlerFirst + i;
-        if (pc < abc.exceptionFrom.get(h) or pc >= abc.exceptionTo.get(h)) {
+        if (pc < abc.exceptionFrom[h] or pc >= abc.exceptionTo[h]) {
             continue;
         }
 
@@ -194,7 +194,7 @@ pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!bool {
             return false;
         }
 
-        const to = abc.exceptionTarget.get(h);
+        const to = abc.exceptionTarget[h];
         if (!bd.typed) {
             if (!try handlerEdge(bd, pc, to)) {
                 return false;

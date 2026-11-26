@@ -585,8 +585,8 @@ pub const ModuleEmitter = struct {
         // The trait that binds the method names it.
         var i = table.first.get(tu);
         while (i < table.end.get(tu)) : (i += 1) {
-            const tk = abc.traitTag.get(i) & 0x0f;
-            if ((tk == C.TRAIT_Method or tk == C.TRAIT_Getter or tk == C.TRAIT_Setter) and abc.traitIndex.get(i) == local) {
+            const tk = abc.traitTag[i] & 0x0f;
+            if ((tk == C.TRAIT_Method or tk == C.TRAIT_Getter or tk == C.TRAIT_Setter) and abc.traitIndex[i] == local) {
                 switch (tk) {
                     C.TRAIT_Getter => try text.appendSlice(gpa, &[_]u16{ 'g', 'e', 't', ':' }),
                     C.TRAIT_Setter => try text.appendSlice(gpa, &[_]u16{ 's', 'e', 't', ':' }),
@@ -625,7 +625,7 @@ pub const ModuleEmitter = struct {
         const base = table.base.get(t);
         var i = table.first.get(t);
         while (i < table.end.get(t)) : (i += 1) {
-            const kind = abc.traitTag.get(i) & 0x0f;
+            const kind = abc.traitTag[i] & 0x0f;
             if (kind != C.TRAIT_Slot and kind != C.TRAIT_Const and kind != C.TRAIT_Class) {
                 continue;
             }
@@ -641,7 +641,7 @@ pub const ModuleEmitter = struct {
             if (kind == C.TRAIT_Class) {
                 try o.text("null");
             } else {
-                try refs.constant(&self.methods, abc.traitValue.get(i), abc.traitValueKind.get(i), ty);
+                try refs.constant(&self.methods, abc.traitValue[i], abc.traitValueKind[i], ty);
             }
 
             try o.text(", ");
@@ -741,7 +741,7 @@ pub const ModuleEmitter = struct {
             const abc = domain.abcs.get(index);
             var i = table.first.get(v);
             while (i < table.end.get(v)) : (i += 1) {
-                const kind = abc.traitTag.get(i) & 0x0f;
+                const kind = abc.traitTag[i] & 0x0f;
                 if (kind != C.TRAIT_Slot and kind != C.TRAIT_Const and kind != C.TRAIT_Class) {
                     continue;
                 }
@@ -803,9 +803,9 @@ pub const ModuleEmitter = struct {
         const table = &domain.traits;
         const abc = domain.abcs.get(@intCast(index));
         const i = self.fillTrait.items[s];
-        const kind = abc.traitTag.get(i) & 0x0f;
-        const value = abc.traitValue.get(i);
-        const valueKind = abc.traitValueKind.get(i);
+        const kind = abc.traitTag[i] & 0x0f;
+        const value = abc.traitValue[i];
+        const valueKind = abc.traitValueKind[i];
         if (kind == C.TRAIT_Class) {
             try o.text("null");
         } else if (value == 0 or (@as(u32, @intCast(index)) == self.index and literal(valueKind))) {
@@ -852,11 +852,11 @@ pub const ModuleEmitter = struct {
         var count: u32 = 0;
         var i = table.first.get(t);
         while (i < table.end.get(t)) : (i += 1) {
-            if (abc.traitMetadataStart.get(i) == abc.traitMetadataStart.get(i + 1)) {
+            if (abc.traitMetadataStart[i] == abc.traitMetadataStart[i + 1]) {
                 continue;
             }
 
-            const kind = abc.traitTag.get(i) & 0x0f;
+            const kind = abc.traitTag[i] & 0x0f;
             table.readName(self.domain, self.index, i);
             const b = table.own(t, table.nameNs, table.nameId, table.nameVersion);
             try o.text(if (count != 0) ", [" else ", meta: [[");
@@ -884,9 +884,9 @@ pub const ModuleEmitter = struct {
         const strings = domain.abcString.get(self.index);
         try o.text("[");
         var count: u32 = 0;
-        var j = abc.traitMetadataStart.get(i);
-        while (j < abc.traitMetadataStart.get(i + 1)) : (j += 1) {
-            const md = abc.traitMetadata.get(j);
+        var j = abc.traitMetadataStart[i];
+        while (j < abc.traitMetadataStart[i + 1]) : (j += 1) {
+            const md = abc.traitMetadata[j];
             const name = strings[abc.metadataName[md]];
             if (abc.builtin and (name == domain.versionName or name == domain.nativeName or name == domain.apiName)) {
                 continue;
@@ -899,9 +899,9 @@ pub const ModuleEmitter = struct {
             var k = abc.metadataItemStart[md];
             while (k < abc.metadataItemStart[md + 1]) : (k += 1) {
                 try o.text(if (k > abc.metadataItemStart[md]) ", " else "");
-                try self.poolString(abc.metadataKey.get(k));
+                try self.poolString(abc.metadataKey[k]);
                 try o.text(", ");
-                try self.poolString(abc.metadataValue.get(k));
+                try self.poolString(abc.metadataValue[k]);
             }
 
             try o.text("]]");
@@ -952,7 +952,7 @@ pub const ModuleEmitter = struct {
                     try o.text(", ");
                 }
 
-                try o.uint(abc.interfaces.get(j));
+                try o.uint(abc.interfaces[j]);
             }
 
             const flags = abc.instanceFlags[i];
@@ -986,7 +986,7 @@ pub const ModuleEmitter = struct {
             }
 
             const trait = self.classTrait(i);
-            if (trait >= 0 and abc.traitMetadataStart.get(@intCast(trait)) != abc.traitMetadataStart.get(@as(u32, @intCast(trait)) + 1)) {
+            if (trait >= 0 and abc.traitMetadataStart[@intCast(trait)] != abc.traitMetadataStart[@as(u32, @intCast(trait)) + 1]) {
                 try o.text(", meta: ");
                 try self.metadataOf(@intCast(trait));
             }
@@ -1081,7 +1081,7 @@ pub const ModuleEmitter = struct {
             const t = scripts_[s];
             var k = table.first.get(t);
             while (k < table.end.get(t)) : (k += 1) {
-                if ((abc.traitTag.get(k) & 0x0f) == C.TRAIT_Class and abc.traitIndex.get(k) == i) {
+                if ((abc.traitTag[k] & 0x0f) == C.TRAIT_Class and abc.traitIndex[k] == i) {
                     return @intCast(k);
                 }
             }

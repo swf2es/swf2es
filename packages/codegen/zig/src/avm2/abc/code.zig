@@ -289,10 +289,10 @@ pub const BodyDecoder = struct {
         self.captured.clearRetainingCapacity();
         self.claims.clearRetainingCapacity();
 
-        self.start = abc.bodyCodeStart.get(body);
-        self.length = abc.bodyCodeLength.get(body);
-        self.handlerFirst = abc.bodyExceptionStart.get(body);
-        self.handlerCount = abc.bodyExceptionStart.get(body + 1) - self.handlerFirst;
+        self.start = abc.bodyCodeStart[body];
+        self.length = abc.bodyCodeLength[body];
+        self.handlerFirst = abc.bodyExceptionStart[body];
+        self.handlerCount = abc.bodyExceptionStart[body + 1] - self.handlerFirst;
         if (self.handlerMerged.len < self.handlerCount) {
             self.handlerMerged = try self.gpa.alloc(u64, self.handlerCount);
         }
@@ -305,10 +305,10 @@ pub const BodyDecoder = struct {
         self.entryUsed = 0;
         self.overlap = false;
         self.r.failed = false;
-        self.method = abc.bodyMethod.get(body);
+        self.method = abc.bodyMethod[body];
         self.methodFlags = abc.methodFlags[self.method];
-        self.maxStack = abc.bodyMaxStack.get(body);
-        self.localCount = abc.bodyLocalCount.get(body);
+        self.maxStack = abc.bodyMaxStack[body];
+        self.localCount = abc.bodyLocalCount[body];
         self.outer = outer orelse &empty_scope;
         try self.reset();
 
@@ -388,12 +388,12 @@ pub const BodyDecoder = struct {
         const abc = self.abc;
         for (0..self.handlerCount) |i| {
             const h = self.handlerFirst + @as(u32, @intCast(i));
-            const to = abc.exceptionTarget.get(h);
+            const to = abc.exceptionTarget[h];
             if (self.known[to] == 0) {
                 continue;
             }
 
-            try ir.addHandler(abc.exceptionFrom.get(h), abc.exceptionTo.get(h), self.blockOf[to], self.handlerType.items[i], self.handlerScope.items[i]);
+            try ir.addHandler(abc.exceptionFrom[h], abc.exceptionTo[h], self.blockOf[to], self.handlerType.items[i], self.handlerScope.items[i]);
         }
 
         var ok = true;
@@ -456,7 +456,7 @@ pub const BodyDecoder = struct {
     /// As Verifier::checkFrameDefinition: a scope size that is a u30, and a frame that fits.
     fn checkFrame(self: *BodyDecoder, body: u32) bool {
         const abc = self.abc;
-        const scope = @as(i64, abc.bodyMaxScopeDepth.get(body)) - abc.bodyInitScopeDepth.get(body);
+        const scope = @as(i64, abc.bodyMaxScopeDepth[body]) - abc.bodyInitScopeDepth[body];
         const frame = @as(i64, self.localCount) + scope + self.maxStack;
         if (scope < 0 or frame > 0x7fffffff / 8) {
             self.code.fail(C.kCorruptABCError);
@@ -504,13 +504,13 @@ pub const BodyDecoder = struct {
         for (0..self.handlerCount) |i_| {
             const i: u32 = @intCast(i_);
             const h = self.handlerFirst + i;
-            const from = abc.exceptionFrom.get(h);
-            const to = abc.exceptionTo.get(h);
-            const target = abc.exceptionTarget.get(h);
-            const name = abc.exceptionName.get(h);
+            const from = abc.exceptionFrom[h];
+            const to = abc.exceptionTo[h];
+            const target = abc.exceptionTarget[h];
+            const name = abc.exceptionName[h];
             var ty = TYPE_Any;
-            if (typed and abc.exceptionType.get(h) != 0) {
-                ty = try properties.typeName(self, abc.exceptionType.get(h));
+            if (typed and abc.exceptionType[h] != 0) {
+                ty = try properties.typeName(self, abc.exceptionType[h]);
                 if (ty < TYPE_Any) {
                     return false;
                 }
@@ -1156,7 +1156,7 @@ pub const Verifier = struct {
 
                 const b: u32 = @intCast(body);
                 self.results[b] = (try decoder.decode(b, scope)).@"error";
-                self.spent += @max(@as(u64, abc.bodyCodeLength.get(b)), BODY_COST);
+                self.spent += @max(@as(u64, abc.bodyCodeLength[b]), BODY_COST);
                 try self.queue.appendSlice(self.gpa, decoder.captured.items);
             }
 

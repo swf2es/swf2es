@@ -1,7 +1,9 @@
 // The ABC block parsed (assembly/avm2/abc/parse.ts).
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Abc = @import("abc.zig").Abc;
+const abc_ = @import("abc.zig");
+const Abc = abc_.Abc;
+const Lists = abc_.Lists;
 const readMethodBodies = @import("bodies.zig").readMethodBodies;
 const classes = @import("classes.zig");
 const C = @import("constants.zig");
@@ -37,24 +39,41 @@ pub fn readAbc(gpa: Allocator, scratch: Allocator, data: []const u8, length: u32
         return abc;
     }
 
-    if (!try methods.readMethods(gpa, abc, &r) or
-        !try methods.readMetadata(gpa, abc, &r) or
-        !try classes.readInstances(gpa, abc, &r) or
-        !try classes.readClasses(gpa, abc, &r) or
-        !try classes.readScripts(gpa, abc, &r) or
-        !try readMethodBodies(gpa, abc, &r))
-    {
+    // What follows the pool twice: once counting the growing tables' rows,
+    // then, for an ABC the first pass accepts, filling them, allocated exact
+    // from the counts (Lists).
+    var counter: Lists = .counter;
+    var again = r;
+    try tables(gpa, abc, &counter, &again);
+    if (abc.@"error" != 0) {
         return abc;
+    }
+
+    var lists: Lists = try .filler(gpa, abc, &counter);
+    try tables(gpa, abc, &lists, &r);
+    std.debug.assert(abc.@"error" == 0 and lists.full());
+    return abc;
+}
+
+/// The tables after the pool, the growing ones in `lists`; `abc.error` says where it stopped.
+fn tables(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocator.Error!void {
+    if (!try methods.readMethods(gpa, abc, lists, r) or
+        !try methods.readMetadata(gpa, abc, lists, r) or
+        !try classes.readInstances(gpa, abc, lists, r) or
+        !try classes.readClasses(gpa, abc, lists, r) or
+        !try classes.readScripts(gpa, abc, lists, r) or
+        !try readMethodBodies(gpa, abc, lists, r))
+    {
+        return;
     }
 
     // A read past the end returns 0, which can look like an empty table.
     if (r.failed) {
         _ = abc.fail(C.kCorruptABCError);
-        return abc;
+        return;
     }
 
-    _ = try abc.traitMetadataStart.append(gpa, abc.traitMetadata.len);
-    return abc;
+    lists.push("traitMetadataStart", lists.len("traitMetadata"));
 }
 
 /// The versions avmplus' AbcParser::canParse accepts in Flash Player builds,

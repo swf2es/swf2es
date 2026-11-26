@@ -3,32 +3,34 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
-const Abc = @import("abc.zig").Abc;
+const abc_ = @import("abc.zig");
+const Abc = abc_.Abc;
+const Lists = abc_.Lists;
 const C = @import("constants.zig");
 const Reader = @import("reader.zig").Reader;
 
-pub fn readMethods(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool {
+pub fn readMethods(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocator.Error!bool {
     const count = r.u30_();
     if (@max(count, 1) > r.end - r.pos) {
         return abc.fail(C.kCorruptABCError);
     }
 
-    abc.methodReturnType = try memory.allocZeroed(gpa, u32, count);
-    abc.methodName = try memory.allocZeroed(gpa, u32, count);
-    abc.methodFlags = try memory.allocZeroed(gpa, u8, count);
-    abc.methodParamStart = try memory.allocZeroed(gpa, u32, count + 1);
-    abc.methodOptionalStart = try memory.allocZeroed(gpa, u32, count + 1);
-    abc.methodOwner = try memory.allocZeroed(gpa, i32, count);
+    abc.methodReturnType = try lists.zeroed(u32, gpa, abc.methodReturnType, count);
+    abc.methodName = try lists.zeroed(u32, gpa, abc.methodName, count);
+    abc.methodFlags = try lists.zeroed(u8, gpa, abc.methodFlags, count);
+    abc.methodParamStart = try lists.zeroed(u32, gpa, abc.methodParamStart, count + 1);
+    abc.methodOptionalStart = try lists.zeroed(u32, gpa, abc.methodOptionalStart, count + 1);
+    abc.methodOwner = try lists.zeroed(i32, gpa, abc.methodOwner, count);
 
     for (0..count) |i| {
         abc.methodOwner[i] = -1;
 
         const paramCount = r.u30_();
         abc.methodReturnType[i] = r.u30_();
-        abc.methodParamStart[i] = abc.paramTypes.len;
+        abc.methodParamStart[i] = lists.len("paramTypes");
         var j: u32 = 0;
         while (j < paramCount and !r.failed) : (j += 1) {
-            _ = try abc.paramTypes.append(gpa, r.u30_());
+            lists.push("paramTypes", r.u30_());
         }
 
         abc.methodName[i] = r.u30_();
@@ -42,13 +44,13 @@ pub fn readMethods(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool {
         }
 
         abc.methodFlags[i] = flags;
-        abc.methodOptionalStart[i] = abc.optionalValue.len;
+        abc.methodOptionalStart[i] = lists.len("optionalValue");
         if (flags & C.METHOD_HasOptional != 0) {
             const optionalCount = r.u30_();
             j = 0;
             while (j < optionalCount and !r.failed) : (j += 1) {
-                _ = try abc.optionalValue.append(gpa, r.u30_());
-                _ = try abc.optionalKind.append(gpa, @truncate(r.u8_()));
+                lists.push("optionalValue", r.u30_());
+                lists.push("optionalKind", @truncate(r.u8_()));
             }
 
             if (optionalCount == 0 or optionalCount > paramCount) {
@@ -69,19 +71,19 @@ pub fn readMethods(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool {
         }
     }
 
-    abc.methodParamStart[count] = abc.paramTypes.len;
-    abc.methodOptionalStart[count] = abc.optionalValue.len;
+    abc.methodParamStart[count] = lists.len("paramTypes");
+    abc.methodOptionalStart[count] = lists.len("optionalValue");
     return true;
 }
 
-pub fn readMetadata(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool {
+pub fn readMetadata(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocator.Error!bool {
     const count = r.u30_();
     if (count > r.end - r.pos) {
         return abc.fail(C.kCorruptABCError);
     }
 
-    abc.metadataName = try memory.allocZeroed(gpa, u32, count);
-    abc.metadataItemStart = try memory.allocZeroed(gpa, u32, count + 1);
+    abc.metadataName = try lists.zeroed(u32, gpa, abc.metadataName, count);
+    abc.metadataItemStart = try lists.zeroed(u32, gpa, abc.metadataItemStart, count + 1);
 
     for (0..count) |i| {
         const name = r.u30_();
@@ -94,7 +96,7 @@ pub fn readMetadata(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool 
         }
 
         abc.metadataName[i] = name;
-        abc.metadataItemStart[i] = abc.metadataKey.len;
+        abc.metadataItemStart[i] = lists.len("metadataKey");
 
         // Keys and values are string indices that avmplus does not check: all
         // the keys, then all the values, as avmplus' describeMetadataInfo reads
@@ -102,12 +104,12 @@ pub fn readMetadata(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool 
         const itemCount = r.u30_();
         var j: u32 = 0;
         while (j < itemCount and !r.failed) : (j += 1) {
-            _ = try abc.metadataKey.append(gpa, r.u30_());
+            lists.push("metadataKey", r.u30_());
         }
 
         j = 0;
         while (j < itemCount and !r.failed) : (j += 1) {
-            _ = try abc.metadataValue.append(gpa, r.u30_());
+            lists.push("metadataValue", r.u30_());
         }
 
         if (r.failed) {
@@ -115,6 +117,6 @@ pub fn readMetadata(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool 
         }
     }
 
-    abc.metadataItemStart[count] = abc.metadataKey.len;
+    abc.metadataItemStart[count] = lists.len("metadataKey");
     return true;
 }

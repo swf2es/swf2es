@@ -2,14 +2,114 @@
 // ABC's own arrays (assembly/avm2/abc/abc.ts). Variable-length parts live in
 // shared tables: entry i of a table owns items [start[i], start[i + 1]).
 // Fixed tables are exact slices, zero where nothing was read, as
-// AssemblyScript's StaticArrays are; growing ones are Rows, whose rows
-// never move. A table the parse did not reach is empty, but those
-// AssemblyScript starts with one entry (the start tables), which `init`
-// gives each ABC of its own.
+// AssemblyScript's StaticArrays are; the growing ones are counted, then
+// allocated exact and filled (Lists). A table the parse did not reach is
+// empty, but those AssemblyScript starts with one entry (the start
+// tables), which `init` gives each ABC of its own.
 const std = @import("std");
 const memory = @import("../../memory.zig");
-const Rows = memory.Rows;
 const ConstantPool = @import("pool.zig").ConstantPool;
+
+/// The ABC's tables that its parse grows across entries, whose sizes it
+/// does not write up front (each method's parameters, each owner's traits).
+const growing = [_][]const u8{
+    "paramTypes",
+    "optionalValue",
+    "optionalKind",
+    "metadataKey",
+    "metadataValue",
+    "interfaces",
+    "bodyMethod",
+    "bodyMaxStack",
+    "bodyLocalCount",
+    "bodyInitScopeDepth",
+    "bodyMaxScopeDepth",
+    "bodyCodeStart",
+    "bodyCodeLength",
+    "bodyExceptionStart",
+    "exceptionFrom",
+    "exceptionTo",
+    "exceptionTarget",
+    "exceptionType",
+    "exceptionName",
+    "bodyTraitStart",
+    "traitName",
+    "traitTag",
+    "traitId",
+    "traitIndex",
+    "traitValue",
+    "traitValueKind",
+    "traitMetadataStart",
+    "traitMetadata",
+};
+
+/// The growing tables, written by a parse that reads what follows the pool
+/// twice: the first pass only counts their rows, and the second fills
+/// them, each allocated exact in the ABC's arena from its count, so that
+/// the arena holds no more than they take. The tables of a size the ABC
+/// writes first are allocated by the first pass and filled again, alike,
+/// by the second (zeroed). A rejected ABC is not read a second time.
+pub const Lists = struct {
+    /// The ABC filled, null while the first pass counts.
+    filling: ?*Abc,
+    lens: [growing.len]u32 = @splat(0),
+
+    pub const counter: Lists = .{ .filling = null };
+
+    /// Lists for the second pass, the growing tables of `abc` allocated in
+    /// `gpa` as long as the first pass, `counted`, counted them.
+    pub fn filler(gpa: std.mem.Allocator, abc: *Abc, counted: *const Lists) std.mem.Allocator.Error!Lists {
+        inline for (growing, 0..) |name, k| {
+            @field(abc, name) = try gpa.alloc(@typeInfo(@FieldType(Abc, name)).pointer.child, counted.lens[k]);
+        }
+
+        return .{ .filling = abc };
+    }
+
+    fn index(comptime name: []const u8) usize {
+        inline for (growing, 0..) |g, k| {
+            if (comptime std.mem.eql(u8, g, name)) return k;
+        }
+
+        @compileError("not a growing table: " ++ name);
+    }
+
+    /// A table of `rows` rows the ABC gives the count of first, zero: made by
+    /// the first pass, and `made`, which it made, zeroed again for the second.
+    pub fn zeroed(self: *const Lists, comptime T: type, gpa: std.mem.Allocator, made: []T, rows: u32) std.mem.Allocator.Error![]T {
+        if (self.filling == null) {
+            return memory.allocZeroed(gpa, T, rows);
+        }
+
+        std.debug.assert(made.len == rows);
+        @memset(made, 0);
+        return made;
+    }
+
+    /// Row `value` at the end of growing table `name`.
+    pub inline fn push(self: *Lists, comptime name: []const u8, value: @typeInfo(@FieldType(Abc, name)).pointer.child) void {
+        const k = comptime index(name);
+        if (self.filling) |abc| {
+            @field(abc, name)[self.lens[k]] = value;
+        }
+
+        self.lens[k] += 1;
+    }
+
+    pub inline fn len(self: *const Lists, comptime name: []const u8) u32 {
+        return self.lens[comptime index(name)];
+    }
+
+    /// Whether the second pass filled each growing table to the length the first counted.
+    pub fn full(self: *const Lists) bool {
+        const abc = self.filling orelse return false;
+        inline for (growing, 0..) |name, k| {
+            if (@field(abc, name).len != self.lens[k]) return false;
+        }
+
+        return true;
+    }
+};
 
 pub const Abc = struct {
     /// 0, or the VerifyError number avmplus would throw; then the tables are incomplete.
@@ -33,18 +133,18 @@ pub const Abc = struct {
     methodName: []u32 = &.{},
     methodFlags: []u8 = &.{},
     methodParamStart: []u32 = &.{},
-    paramTypes: Rows(u32) = .{},
+    paramTypes: []u32 = &.{},
     methodOptionalStart: []u32 = &.{},
-    optionalValue: Rows(u32) = .{},
-    optionalKind: Rows(u8) = .{},
+    optionalValue: []u32 = &.{},
+    optionalKind: []u8 = &.{},
     /// The owner (see instanceOwner .. activationOwner) a method is bound to, or -1.
     methodOwner: []i32 = &.{},
 
     // metadata_info
     metadataName: []u32 = &.{},
     metadataItemStart: []u32 = &.{},
-    metadataKey: Rows(u32) = .{},
-    metadataValue: Rows(u32) = .{},
+    metadataKey: []u32 = &.{},
+    metadataValue: []u32 = &.{},
 
     // instance_info and class_info. Base classes and interfaces are checked
     // when classes are linked, since they may come from another ABC.
@@ -55,7 +155,7 @@ pub const Abc = struct {
     /// Namespace index; 0 if the class has no protected namespace.
     instanceProtectedNs: []u32 = &.{},
     instanceInterfaceStart: []u32 = &.{},
-    interfaces: Rows(u32) = .{},
+    interfaces: []u32 = &.{},
     instanceInit: []u32 = &.{},
     classInit: []u32 = &.{},
 
@@ -65,38 +165,38 @@ pub const Abc = struct {
     // method_body_info, in ABC order.
     /// Index of each method's body, or -1 if it has none.
     methodBody: []i32 = &.{},
-    bodyMethod: Rows(u32) = .{},
-    bodyMaxStack: Rows(u32) = .{},
-    bodyLocalCount: Rows(u32) = .{},
-    bodyInitScopeDepth: Rows(u32) = .{},
-    bodyMaxScopeDepth: Rows(u32) = .{},
+    bodyMethod: []u32 = &.{},
+    bodyMaxStack: []u32 = &.{},
+    bodyLocalCount: []u32 = &.{},
+    bodyInitScopeDepth: []u32 = &.{},
+    bodyMaxScopeDepth: []u32 = &.{},
     /// Offset of the bytecode from the start of the ABC.
-    bodyCodeStart: Rows(u32) = .{},
-    bodyCodeLength: Rows(u32) = .{},
-    bodyExceptionStart: Rows(u32) = .{},
-    exceptionFrom: Rows(u32) = .{},
-    exceptionTo: Rows(u32) = .{},
-    exceptionTarget: Rows(u32) = .{},
+    bodyCodeStart: []u32 = &.{},
+    bodyCodeLength: []u32 = &.{},
+    bodyExceptionStart: []u32 = &.{},
+    exceptionFrom: []u32 = &.{},
+    exceptionTo: []u32 = &.{},
+    exceptionTarget: []u32 = &.{},
     /// Multiname of the caught type; 0 catches everything.
-    exceptionType: Rows(u32) = .{},
+    exceptionType: []u32 = &.{},
     /// Multiname of the catch variable; 0 if it has none.
-    exceptionName: Rows(u32) = .{},
+    exceptionName: []u32 = &.{},
     /// Body b's activation traits are traits [start[b] .. start[b + 1]].
-    bodyTraitStart: Rows(u32) = .{},
+    bodyTraitStart: []u32 = &.{},
 
     // traits_info of every instance, class, script and method activation, in that order.
-    traitName: Rows(u32) = .{},
+    traitName: []u32 = &.{},
     /// Kind in the low 4 bits, attributes in the high 4.
-    traitTag: Rows(u8) = .{},
+    traitTag: []u8 = &.{},
     /// Slot id, or disp id for methods.
-    traitId: Rows(u32) = .{},
+    traitId: []u32 = &.{},
     /// Type multiname (slots), class index or method index.
-    traitIndex: Rows(u32) = .{},
+    traitIndex: []u32 = &.{},
     /// Constant pool index of a slot's default value; 0 if none.
-    traitValue: Rows(u32) = .{},
-    traitValueKind: Rows(u8) = .{},
-    traitMetadataStart: Rows(u32) = .{},
-    traitMetadata: Rows(u32) = .{},
+    traitValue: []u32 = &.{},
+    traitValueKind: []u8 = &.{},
+    traitMetadataStart: []u32 = &.{},
+    traitMetadata: []u32 = &.{},
     instanceTraitStart: []u32 = &.{},
     classTraitStart: []u32 = &.{},
     scriptTraitStart: []u32 = &.{},
@@ -157,7 +257,7 @@ pub const Abc = struct {
     }
 
     pub inline fn bodyCount(self: *const Abc) u32 {
-        return self.bodyMethod.len;
+        return @intCast(self.bodyMethod.len);
     }
 
     /// Record the first error, as avmplus stops at the first throw; returns false.

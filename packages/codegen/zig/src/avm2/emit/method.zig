@@ -619,7 +619,7 @@ pub const MethodEmitter = struct {
                 try out.text("rt.toNumber(");
             }
 
-            try refs.constant(self, abc.optionalValue.get(o), abc.optionalKind.get(o), ty);
+            try refs.constant(self, abc.optionalValue[o], abc.optionalKind[o], ty);
             if (self.unboxed[p] != 0) {
                 try out.text(")");
             }

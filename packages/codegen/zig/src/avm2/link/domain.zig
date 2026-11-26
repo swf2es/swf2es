@@ -765,9 +765,9 @@ pub const Domain = struct {
 
         var i = traits.first.get(t);
         while (i < traits.end.get(t)) : (i += 1) {
-            const kind = abc.traitTag.get(i) & 0x0f;
+            const kind = abc.traitTag[i] & 0x0f;
             if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
-                try out.append(gpa, methods + abc.traitIndex.get(i));
+                try out.append(gpa, methods + abc.traitIndex[i]);
             }
         }
     }
@@ -1303,7 +1303,7 @@ pub const Domain = struct {
             const end = abc.scriptTraitStart[script + 1];
             var t = abc.scriptTraitStart[script];
             while (t < end) : (t += 1) {
-                var mn = abc.traitName.get(t);
+                var mn = abc.traitName[t];
                 if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
                     mn = pool.mnA[mn];
                 }

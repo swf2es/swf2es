@@ -404,10 +404,10 @@ pub fn object(em: *MethodEmitter, i: u32, op: u16) Error!bool {
         },
         ops.OP_newcatch => {
             const abc = em.abc;
-            const h = abc.bodyExceptionStart.get(@intCast(em.body)) + a;
+            const h = abc.bodyExceptionStart[@intCast(em.body)] + a;
             try em.assign(i, false);
             try out.text("rt.newCatch(M[");
-            try out.uint(abc.exceptionName.get(h));
+            try out.uint(abc.exceptionName[h]);
             try out.text("])");
         },
         ops.OP_newobject, ops.OP_newarray => {

@@ -153,7 +153,7 @@ pub fn abcDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const u
     for (0..abc.methodCount()) |i| {
         try lines.next();
         try w.print("method {d} ret={d} params=", .{ i, abc.methodReturnType[i] });
-        try join(w, &abc.paramTypes, abc.methodParamStart[i], abc.methodParamStart[i + 1]);
+        try join(w, abc.paramTypes, abc.methodParamStart[i], abc.methodParamStart[i + 1]);
         try w.print(" name={d} flags=", .{abc.methodName[i]});
         try writeHex(w, abc.methodFlags[i]);
         const start = abc.methodOptionalStart[i];
@@ -166,8 +166,8 @@ pub fn abcDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const u
                     try w.writeByte(',');
                 }
 
-                try w.print("{d}:", .{abc.optionalValue.at(j).*});
-                try writeHex(w, abc.optionalKind.at(j).*);
+                try w.print("{d}:", .{abc.optionalValue[j]});
+                try writeHex(w, abc.optionalKind[j]);
             }
         }
     }
@@ -181,7 +181,7 @@ pub fn abcDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const u
                 try w.writeByte(',');
             }
 
-            try w.print("{d}:{d}", .{ abc.metadataKey.at(j).*, abc.metadataValue.at(j).* });
+            try w.print("{d}:{d}", .{ abc.metadataKey[j], abc.metadataValue[j] });
         }
     }
 
@@ -190,7 +190,7 @@ pub fn abcDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const u
         try w.print("instance {d} name={d} super={d} flags=", .{ i, abc.instanceName[i], abc.instanceSuper[i] });
         try writeHex(w, abc.instanceFlags[i]);
         try w.print(" protectedNs={d} interfaces=", .{abc.instanceProtectedNs[i]});
-        try join(w, &abc.interfaces, abc.instanceInterfaceStart[i], abc.instanceInterfaceStart[i + 1]);
+        try join(w, abc.interfaces, abc.instanceInterfaceStart[i], abc.instanceInterfaceStart[i + 1]);
         try w.print(" init={d}", .{abc.instanceInit[i]});
         try dumpTraits(&lines, abc, "instance", @intCast(i), abc.instanceTraitStart[i], abc.instanceTraitStart[i + 1]);
     }
@@ -209,13 +209,13 @@ pub fn abcDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const u
 
     for (0..abc.bodyCount()) |index| {
         const b: u32 = @intCast(index);
-        const method = abc.bodyMethod.at(b).*;
+        const method = abc.bodyMethod[b];
         try lines.next();
-        try w.print("body {d} method={d} stack={d} locals={d}", .{ b, method, abc.bodyMaxStack.at(b).*, abc.bodyLocalCount.at(b).* });
-        try w.print(" scope={d}..{d}", .{ abc.bodyInitScopeDepth.at(b).*, abc.bodyMaxScopeDepth.at(b).* });
-        try w.print(" code={d}+{d}", .{ abc.bodyCodeStart.at(b).*, abc.bodyCodeLength.at(b).* });
-        const start = abc.bodyExceptionStart.at(b).*;
-        const end = abc.bodyExceptionStart.at(b + 1).*;
+        try w.print("body {d} method={d} stack={d} locals={d}", .{ b, method, abc.bodyMaxStack[b], abc.bodyLocalCount[b] });
+        try w.print(" scope={d}..{d}", .{ abc.bodyInitScopeDepth[b], abc.bodyMaxScopeDepth[b] });
+        try w.print(" code={d}+{d}", .{ abc.bodyCodeStart[b], abc.bodyCodeLength[b] });
+        const start = abc.bodyExceptionStart[b];
+        const end = abc.bodyExceptionStart[b + 1];
         if (end > start) {
             try w.writeAll(" exceptions=");
             var e = start;
@@ -224,11 +224,11 @@ pub fn abcDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const u
                     try w.writeByte(',');
                 }
 
-                try w.print("{d}-{d}>{d}:{d}:{d}", .{ abc.exceptionFrom.at(e).*, abc.exceptionTo.at(e).*, abc.exceptionTarget.at(e).*, abc.exceptionType.at(e).*, abc.exceptionName.at(e).* });
+                try w.print("{d}-{d}>{d}:{d}:{d}", .{ abc.exceptionFrom[e], abc.exceptionTo[e], abc.exceptionTarget[e], abc.exceptionType[e], abc.exceptionName[e] });
             }
         }
 
-        try dumpTraits(&lines, abc, "activation", method, abc.bodyTraitStart.at(b).*, abc.bodyTraitStart.at(b + 1).*);
+        try dumpTraits(&lines, abc, "activation", method, abc.bodyTraitStart[b], abc.bodyTraitStart[b + 1]);
     }
 
     for (0..abc.methodCount()) |i| {
@@ -261,21 +261,21 @@ fn dumpTraits(lines: *Lines, abc: *const Abc, owner: []const u8, index: u32, sta
     const w = lines.w;
     var t = start;
     while (t < end) : (t += 1) {
-        const tag = abc.traitTag.at(t).*;
+        const tag = abc.traitTag[t];
         try lines.next();
-        try w.print("  trait {s} {d} name={d} kind={d} attr=", .{ owner, index, abc.traitName.at(t).*, tag & 0x0f });
+        try w.print("  trait {s} {d} name={d} kind={d} attr=", .{ owner, index, abc.traitName[t], tag & 0x0f });
         try writeHex(w, tag & 0xf0);
-        try w.print(" id={d} index={d}", .{ abc.traitId.at(t).*, abc.traitIndex.at(t).* });
-        if (abc.traitValue.at(t).* != 0) {
-            try w.print(" value={d}:", .{abc.traitValue.at(t).*});
-            try writeHex(w, abc.traitValueKind.at(t).*);
+        try w.print(" id={d} index={d}", .{ abc.traitId[t], abc.traitIndex[t] });
+        if (abc.traitValue[t] != 0) {
+            try w.print(" value={d}:", .{abc.traitValue[t]});
+            try writeHex(w, abc.traitValueKind[t]);
         }
 
-        const metadataStart = abc.traitMetadataStart.at(t).*;
-        const metadataEnd = abc.traitMetadataStart.at(t + 1).*;
+        const metadataStart = abc.traitMetadataStart[t];
+        const metadataEnd = abc.traitMetadataStart[t + 1];
         if (metadataEnd > metadataStart) {
             try w.writeAll(" metadata=");
-            try join(w, &abc.traitMetadata, metadataStart, metadataEnd);
+            try join(w, abc.traitMetadata, metadataStart, metadataEnd);
         }
     }
 }
@@ -298,14 +298,14 @@ fn writeOwner(w: *Writer, abc: *const Abc, owner: i32) Writer.Error!void {
     try w.print("activation {d}", .{owner - 2 * classes - scripts});
 }
 
-fn join(w: *Writer, items: anytype, start: u32, end: u32) Writer.Error!void {
+fn join(w: *Writer, items: []const u32, start: u32, end: u32) Writer.Error!void {
     var i = start;
     while (i < end) : (i += 1) {
         if (i > start) {
             try w.writeByte(',');
         }
 
-        try w.print("{d}", .{items.at(i).*});
+        try w.print("{d}", .{items[i]});
     }
 }
 
@@ -329,7 +329,7 @@ pub fn codeDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const 
     for (0..abc.bodyCount()) |b| {
         const body: u32 = @intCast(b);
         try lines.next();
-        try w.print("body {d} method {d}", .{ body, abc.bodyMethod.get(body) });
+        try w.print("body {d} method {d}", .{ body, abc.bodyMethod[body] });
         const code = try decoder.decode(body, null);
         if (code.@"error" != 0) {
             try lines.next();
@@ -360,7 +360,7 @@ pub fn codeDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const 
         }
 
         try lines.next();
-        try w.print("  unreachable {d}", .{abc.bodyCodeLength.get(body) - decoded});
+        try w.print("  unreachable {d}", .{abc.bodyCodeLength[body] - decoded});
     }
 
     return out.written();
