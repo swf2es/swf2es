@@ -24,6 +24,9 @@ const table = @import("table.zig");
 const IdTable = table.IdTable;
 const hashPair = table.hashPair;
 const typenames = @import("typenames.zig");
+const errors = @import("../abc/errors.zig");
+const Diagnostics = errors.Diagnostics;
+const Error = errors.Error;
 
 /// What a traits describes. The log's resolve entries carry it, so its
 /// values are fixed, and an entry's is checked against the owned kinds
@@ -61,10 +64,9 @@ pub const TraitsKind = enum(u8) {
     }
 };
 
-/// A type: a traits id, or * (any). The lookups that can fail
-/// (Domain.checkTypeName, readBinding, typeName and the rest) answer
-/// `failed`, below *, and their callers compare it directly. The same i32
-/// as before.
+/// A type: a traits id, or * (any). The verifier's lookups that can fail
+/// (readBinding, typeName and the rest) answer `failed`, below *, and their
+/// callers compare it directly. The same i32 as before.
 pub const TypeId = enum(i32) {
     any = -1,
     _,
@@ -680,15 +682,14 @@ pub const TraitsTable = struct {
 
     /// As Traits::resolveSignatures: resolve t's supertypes, then t's slot
     /// types and initial values, its methods' signatures, and check its
-    /// overrides and interfaces; 0, or the VerifyError. AssemblyScript
-    /// recurses into the base and then each interface; this keeps their
-    /// frames on a stack of its own in the call's arena, so that a chain
-    /// as deep as the input makes it resolves in the same order, the first
-    /// error ending every frame.
-    pub fn resolve(self: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
+    /// overrides and interfaces. AssemblyScript recurses into the base and
+    /// then each interface; this keeps their frames on a stack of its own in
+    /// the call's arena, so that a chain as deep as the input makes it
+    /// resolves in the same order, the first error ending every frame.
+    pub fn resolve(self: *TraitsTable, dom: *Domain, t: u32, diag: *Diagnostics) Error!void {
         dom.changing();
         if (self.resolved.get(t) != 0) {
-            return 0;
+            return;
         }
 
         const Frame = struct {
@@ -728,48 +729,42 @@ pub const TraitsTable = struct {
                     }
 
                     const done = stack.pop().?;
-                    const err = try self.resolveOwn(dom, done.t, done.interfaces);
-                    if (err != 0) {
-                        return err;
-                    }
+                    try self.resolveOwn(dom, done.t, done.interfaces, diag);
                 },
             }
         }
+    }
 
-        return 0;
+    /// Whether t resolves, for a caller with no use for the VerifyError.
+    /// Out of line: inlined into the module's walks, it cost 461 bytes and
+    /// no time those walks would notice.
+    pub noinline fn resolves(self: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!bool {
+        var diag: Diagnostics = .{};
+        self.resolve(dom, t, &diag) catch |err| return switch (err) {
+            error.Verify => false,
+            error.OutOfMemory => error.OutOfMemory,
+        };
+        return true;
     }
 
     /// resolve for traits whose supertypes have resolved: what t itself resolves.
-    fn resolveOwn(self: *TraitsTable, dom: *Domain, t: u32, interfaces: []const u32) Allocator.Error!i32 {
+    fn resolveOwn(self: *TraitsTable, dom: *Domain, t: u32, interfaces: []const u32, diag: *Diagnostics) Error!void {
         const base = self.base.get(t);
-        const err = try signatures.resolveSlotsAndMethods(self, dom, t);
-        if (err != 0) {
-            return err;
-        }
-
-        const initError = signatures.checkInitialValues(self, dom, t);
-        if (initError != 0) {
-            return initError;
-        }
+        try signatures.resolveSlotsAndMethods(self, dom, t, diag);
+        try signatures.checkInitialValues(self, dom, t, diag);
 
         // Every method's signature, then the initializer's.
         const dispatch = self.dispatchStart.get(t);
         for (0..self.methodCount.get(t)) |d| {
             const m = self.dispatch.get(dispatch + @as(u32, @intCast(d)));
             if (m >= 0) {
-                const signError = try self.sign(dom, @intCast(m));
-                if (signError != 0) {
-                    return signError;
-                }
+                try self.sign(dom, @intCast(m), diag);
             }
         }
 
         const initializer = self.init.get(t);
         if (initializer >= 0) {
-            const signError = try self.sign(dom, @intCast(initializer));
-            if (signError != 0) {
-                return signError;
-            }
+            try self.sign(dom, @intCast(initializer), diag);
         }
 
         var legal = true;
@@ -789,40 +784,35 @@ pub const TraitsTable = struct {
         }
 
         if (!legal) {
-            return C.kIllegalOverrideError;
+            return diag.fail(C.kIllegalOverrideError);
         }
 
         try dom.put(self.resolved.at(t), 1);
         try dom.loggedResolve(t);
-        return 0;
     }
 
     /// As MethodInfo::resolveSignature: resolve method m's return type (void
     /// allowed), parameter types (not), receiver, and check its optional
     /// parameters' default values.
-    pub fn sign(self: *TraitsTable, dom: *Domain, m: u32) Allocator.Error!i32 {
+    pub fn sign(self: *TraitsTable, dom: *Domain, m: u32, diag: *Diagnostics) Error!void {
         dom.changing();
         if (self.signed.get(m) != 0) {
-            return 0;
+            return;
         }
 
         const index = dom.methodAbc(m);
         const abc = dom.abcs.get(index);
         const local = m - dom.methodStart.get(index);
-        const returnType = try typenames.resolveTypeId(dom, index, abc.methodReturnType[local], true);
-        if (returnType == TypeId.failed) {
-            return dom.typeError;
-        }
+        const returnType = try typenames.resolveTypeId(dom, index, abc.methodReturnType[local], true, diag);
 
         const first = abc.methodParamStart[local];
         const count = abc.methodParamStart[local + 1] - first;
         const start = self.paramType.len;
         for (0..count) |p| {
-            const ty = try typenames.resolveTypeId(dom, index, abc.paramTypes[first + @as(u32, @intCast(p))], false);
-            if (ty == TypeId.failed) {
+            const ty = typenames.resolveTypeId(dom, index, abc.paramTypes[first + @as(u32, @intCast(p))], false, diag) catch |err| {
                 self.paramType.truncate(start);
-                return dom.typeError;
-            }
+                return err;
+            };
 
             try self.paramType.push(dom.gpa, ty);
         }
@@ -832,11 +822,10 @@ pub const TraitsTable = struct {
         for (0..optional) |j_| {
             const j: u32 = @intCast(j_);
             const ty = self.paramType.get(start + count - optional + j);
-            const err = dom.checkDefault(index, abc.optionalValue[optionalFirst + j], abc.optionalKind[optionalFirst + j], ty);
-            if (err != 0) {
+            dom.checkDefault(index, abc.optionalValue[optionalFirst + j], abc.optionalKind[optionalFirst + j], ty, diag) catch |err| {
                 self.paramType.truncate(start);
                 return err;
-            }
+            };
         }
 
         // As avmplus' unchecked-function hack: a function with only untyped
@@ -866,7 +855,16 @@ pub const TraitsTable = struct {
         try dom.put(self.optionalCount.at(m), optionalCount);
         try dom.put(self.signed.at(m), 1);
         try dom.logged(.sign, index, 0, local);
-        return 0;
+    }
+
+    /// Whether method m signs, for a caller with no use for the VerifyError.
+    pub fn signs(self: *TraitsTable, dom: *Domain, m: u32) Allocator.Error!bool {
+        var diag: Diagnostics = .{};
+        self.sign(dom, m, &diag) catch |err| return switch (err) {
+            error.Verify => false,
+            error.OutOfMemory => error.OutOfMemory,
+        };
+        return true;
     }
 };
 

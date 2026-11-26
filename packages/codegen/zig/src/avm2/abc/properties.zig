@@ -5,6 +5,7 @@
 // and properties.
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
+const Diagnostics = @import("errors.zig").Diagnostics;
 const ir_ = @import("../ir/ir.zig");
 const traits_ = @import("../link/traits.zig");
 const Binding = traits_.Binding;
@@ -65,11 +66,11 @@ pub fn readBinding(bd: *BodyDecoder, ty: TypeId, b: Binding) Error!TypeId {
     }
 
     const domain = bd.domain;
-    const err = try domain.traits.resolve(domain, ty.index());
-    if (err != 0) {
-        _ = bd.fail(err);
+    var diag: Diagnostics = .{};
+    domain.traits.resolve(domain, ty.index(), &diag) catch |err| {
+        _ = try bd.linkFailed(err, &diag);
         return TypeId.failed;
-    }
+    };
 
     return types.bindingType(domain, ty, b);
 }
@@ -82,13 +83,11 @@ pub fn typeName(bd: *BodyDecoder, mn: u32) Error!TypeId {
         return TypeId.failed;
     }
 
-    const domain = bd.domain;
-    const t = try domain.checkTypeName(bd.index, mn);
-    if (t == TypeId.failed) {
-        _ = bd.fail(domain.typeError);
-    }
-
-    return t;
+    var diag: Diagnostics = .{};
+    return bd.domain.checkTypeName(bd.index, mn, &diag) catch |err| {
+        _ = try bd.linkFailed(err, &diag);
+        return TypeId.failed;
+    };
 }
 
 /// As Verifier::emitCoerceArgs: method m must take `argc` arguments, which
@@ -96,10 +95,8 @@ pub fn typeName(bd: *BodyDecoder, mn: u32) Error!TypeId {
 pub fn coerceArgs(bd: *BodyDecoder, m: u32, argc: u32) Error!bool {
     const domain = bd.domain;
     const traits = &domain.traits;
-    const err = try traits.sign(domain, m);
-    if (err != 0) {
-        return bd.fail(err);
-    }
+    var diag: Diagnostics = .{};
+    traits.sign(domain, m, &diag) catch |err| return bd.linkFailed(err, &diag);
 
     const count = traits.paramCount.get(m);
     const required = count - traits.optionalCount.get(m);
@@ -143,11 +140,11 @@ pub fn slot(bd: *BodyDecoder, ty: TypeId, at: u32) Error!TypeId {
     }
 
     const t = ty.index();
-    const err = try traits.resolve(domain, t);
-    if (err != 0) {
-        _ = bd.fail(err);
+    var diag: Diagnostics = .{};
+    traits.resolve(domain, t, &diag) catch |err| {
+        _ = try bd.linkFailed(err, &diag);
         return TypeId.failed;
-    }
+    };
 
     if (at >= traits.slotCount.get(t)) {
         _ = bd.fail(C.kSlotExceedsCountError);
@@ -467,10 +464,8 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
     const obj = bd.peek(n);
     const ty = bd.typeOf(obj);
     if (ty.isTraits()) {
-        const err = try traits.resolve(domain, ty.index());
-        if (err != 0) {
-            return bd.fail(err);
-        }
+        var diag: Diagnostics = .{};
+        traits.resolve(domain, ty.index(), &diag) catch |err| return bd.linkFailed(err, &diag);
     }
 
     var b = try binding(bd, ty, mn);
@@ -486,10 +481,8 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
         const m = traits.dispatch.get(traits.dispatchStart.get(t) + b.index());
         if (m >= 0) {
             const mu: u32 = @intCast(m);
-            const signError = try traits.sign(domain, mu);
-            if (signError != 0) {
-                return bd.fail(signError);
-            }
+            var diag: Diagnostics = .{};
+            traits.sign(domain, mu, &diag) catch |err| return bd.linkFailed(err, &diag);
 
             const count = traits.paramCount.get(mu);
             const required = count - traits.optionalCount.get(mu);
@@ -509,9 +502,8 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
     } else if ((b.kind == .variable or b.kind == .constant) and argc == 1) {
         // Calling a class slot with one argument converts or coerces to the class.
         const slotType = types.bindingType(domain, ty, b);
-        const converted = domain.conversionOf(slotType);
         const top = bd.peek(1);
-        if (converted != TypeId.failed) {
+        if (domain.conversionOf(slotType)) |converted| {
             if (converted.isTraits() and domain.isConversion(slotType)) {
                 bd.setValue(top, converted, .{ .not_null = true });
                 _ = try bd.emitOn(conversionOp(bd, converted), @bitCast(top), @bitCast(top), 1, 0, 0, 0);
@@ -574,7 +566,7 @@ fn fasterCall(bd: *BodyDecoder, ty: TypeId, mn: u32, b: Binding, argc: u32) Erro
     }
 
     const m = traits.dispatch.get(traits.dispatchStart.get(ty.index()) + faster.index());
-    if (m < 0 or try traits.sign(domain, @intCast(m)) != 0) {
+    if (m < 0 or !try traits.signs(domain, @intCast(m))) {
         return b;
     }
 
@@ -616,10 +608,8 @@ pub fn callStatic(bd: *BodyDecoder, m: u32, argc: u32) Error!bool {
     const domain = bd.domain;
     const traits = &domain.traits;
     const global = domain.methodStart.get(bd.index) + m;
-    const err = try traits.sign(domain, global);
-    if (err != 0) {
-        return bd.fail(err);
-    }
+    var diag: Diagnostics = .{};
+    traits.sign(domain, global, &diag) catch |err| return bd.linkFailed(err, &diag);
 
     if (traits.receiverType.get(global) == .any) {
         return bd.fail(C.kDanglingFunctionError);
@@ -658,20 +648,14 @@ pub fn callSuper(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool {
     var result: TypeId = .any;
     var m: i32 = -1;
     if (b.kind == .method) {
-        const err = try traits.resolve(domain, base.index());
-        if (err != 0) {
-            return bd.fail(err);
-        }
-
+        var diag: Diagnostics = .{};
+        traits.resolve(domain, base.index(), &diag) catch |err| return bd.linkFailed(err, &diag);
         m = traits.dispatch.get(traits.dispatchStart.get(base.index()) + b.index());
         if (m < 0) {
             return bd.fail(C.kCorruptABCError);
         }
 
-        const signError = try traits.sign(domain, @intCast(m));
-        if (signError != 0) {
-            return bd.fail(signError);
-        }
+        traits.sign(domain, @intCast(m), &diag) catch |err| return bd.linkFailed(err, &diag);
 
         result = traits.returnType.get(@intCast(m));
     }

@@ -5,6 +5,7 @@
 // is properties.zig's.
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
+const Diagnostics = @import("errors.zig").Diagnostics;
 const traits_ = @import("../link/traits.zig");
 const Binding = traits_.Binding;
 const Scope = traits_.Scope;
@@ -237,7 +238,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
                 // arguments to; one that does not resolve fails no method here.
                 const init = if (itraits.isTraits()) domain.traits.init.get(itraits.index()) else -1;
                 if (init >= 0) {
-                    _ = try domain.traits.sign(domain, @intCast(init));
+                    _ = try domain.traits.signs(domain, @intCast(init));
                 }
 
                 return bd.emitOn(.ir_construct_slot, @bitCast(obj), @bitCast(obj), n, found.index(), b, ir_.typeColumn(ctraits));
@@ -302,9 +303,9 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         },
         .newactivation => {
             const t = domain.bodyTraits.get(bd.index)[@intCast(bd.abc.methodBody[bd.method])];
-            const err = if (t != .none) try domain.traits.resolve(domain, t.index()) else 0;
-            if (err != 0) {
-                return bd.fail(err);
+            if (t != .none) {
+                var diag: Diagnostics = .{};
+                domain.traits.resolve(domain, t.index(), &diag) catch |err| return bd.linkFailed(err, &diag);
             }
 
             // A body without activation traits pushes *.
@@ -636,10 +637,8 @@ fn captureFunction(bd: *BodyDecoder, m: u32) Error!bool {
     }
 
     try domain.put(traits.methodFunction.at(global), 1);
-    const err = try traits.sign(domain, global);
-    if (err != 0) {
-        return bd.fail(err);
-    }
+    var diag: Diagnostics = .{};
+    traits.sign(domain, global, &diag) catch |err| return bd.linkFailed(err, &diag);
 
     const keep = try kept(bd, scope);
     try domain.put(traits.functionScope.at(global), keep);
@@ -675,14 +674,9 @@ fn captureClass(bd: *BodyDecoder, i: u32) Error!bool {
 
     const cscope = try scopeHere(bd, null, ctraits);
     const iscope = try scopeHere(bd, ctraits, itraits);
-    var err = try traits.resolve(domain, ctraits.index());
-    if (err == 0) {
-        err = try traits.resolve(domain, itraits.index());
-    }
-
-    if (err != 0) {
-        return bd.fail(err);
-    }
+    var diag: Diagnostics = .{};
+    traits.resolve(domain, ctraits.index(), &diag) catch |err| return bd.linkFailed(err, &diag);
+    traits.resolve(domain, itraits.index(), &diag) catch |err| return bd.linkFailed(err, &diag);
 
     const current = traits.scope.get(ctraits.index());
     if (current) |cur| {

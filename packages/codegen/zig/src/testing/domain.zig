@@ -13,6 +13,7 @@ const ops = @import("../avm2/abc/opcodes.zig");
 const ir_ = @import("../avm2/ir/ir.zig");
 const Ir = ir_.Ir;
 const traits_ = @import("../avm2/link/traits.zig");
+const Diagnostics = @import("../avm2/abc/errors.zig").Diagnostics;
 const MethodEmitter = @import("../avm2/emit/method.zig").MethodEmitter;
 const ModuleEmitter = @import("../avm2/emit/module.zig").ModuleEmitter;
 const stack_names = @import("../avm2/emit/stack-names.zig");
@@ -134,10 +135,11 @@ pub fn domainResolve(dom: *Domain, first: i32) Allocator.Error!i32 {
     const count: i32 = @intCast(dom.traits.kind.len);
     var t: i32 = @max(first, 0);
     while (t < count) : (t += 1) {
-        const err = try dom.traits.resolve(dom, @bitCast(t));
-        if (err != 0) {
-            return err;
-        }
+        var diag: Diagnostics = .{};
+        dom.traits.resolve(dom, @bitCast(t), &diag) catch |err| return switch (err) {
+            error.Verify => diag.code,
+            error.OutOfMemory => error.OutOfMemory,
+        };
     }
 
     return 0;
@@ -163,7 +165,7 @@ pub fn domainSlotTypes(dom: *Domain, gpa: Allocator, index: i32, cls: i32) Alloc
 
     const traits = &dom.traits;
     const t = dom.classTraits.get(dom.classStart.get(@intCast(index)) + @as(u32, @intCast(cls)));
-    if (t == .none or try traits.resolve(dom, t.index()) != 0) {
+    if (t == .none or !try traits.resolves(dom, t.index())) {
         return "unresolved";
     }
 

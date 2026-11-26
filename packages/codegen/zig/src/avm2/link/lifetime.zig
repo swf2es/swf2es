@@ -532,10 +532,10 @@ fn replay(dom: *Domain, from: *const Domain, e: u32) Allocator.Error!bool {
             else => info.classCount(),
         };
         const t = if (b < owners) traitsOf(dom, abc, owned, b) else .none;
-        return t != .none and try dom.traits.resolve(dom, t.index()) == 0;
+        return t != .none and try dom.traits.resolves(dom, t.index());
     }
 
-    return kind == .sign and b < info.methodCount() and try dom.traits.sign(dom, dom.methodStart.get(abc) + b) == 0;
+    return kind == .sign and b < info.methodCount() and try dom.traits.signs(dom, dom.methodStart.get(abc) + b);
 }
 
 /// Keep entry `e` of `from`'s log, not done, for when its domain is revived.

@@ -17,6 +17,7 @@ const code = @import("../abc/code.zig");
 const BodyDecoder = code.BodyDecoder;
 const Verifier = code.Verifier;
 const C = @import("../abc/constants.zig");
+const Diagnostics = @import("../abc/errors.zig").Diagnostics;
 const ir_ = @import("../ir/ir.zig");
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
@@ -486,7 +487,7 @@ pub const ModuleEmitter = struct {
         const table = &self.domain.traits;
         // Its signature, as avmplus resolves it before the first call; one that
         // fails to resolve fails when called, as the runtime has it.
-        if (try table.sign(self.domain, m) != 0) {
+        if (!try table.signs(self.domain, m)) {
             return;
         }
 
@@ -611,13 +612,16 @@ pub const ModuleEmitter = struct {
         const domain = self.domain;
         const table = &domain.traits;
         const abc = domain.abcs.get(self.index);
-        const err = try table.resolve(domain, t);
-        if (err != 0) {
-            try o.text("{ error: ");
-            try o.uint(@as(u32, @bitCast(err)));
-            try o.text(", slots: 0, defaults: [], bindings: [], methods: [] }");
-            return;
-        }
+        var diag: Diagnostics = .{};
+        table.resolve(domain, t, &diag) catch |err| switch (err) {
+            error.Verify => {
+                try o.text("{ error: ");
+                try o.uint(@as(u32, @bitCast(diag.code)));
+                try o.text(", slots: 0, defaults: [], bindings: [], methods: [] }");
+                return;
+            },
+            error.OutOfMemory => return error.OutOfMemory,
+        };
 
         try o.text("{ slots: ");
         try o.uint(table.slotCount.get(t));
@@ -825,7 +829,7 @@ pub const ModuleEmitter = struct {
     fn signature(self: *ModuleEmitter, m: u32, returns: bool) Error!void {
         const o = self.out();
         const table = &self.domain.traits;
-        if (try table.sign(self.domain, m) != 0) {
+        if (!try table.signs(self.domain, m)) {
             return o.text(if (returns) "null, [], 0" else "[], 0");
         }
 
@@ -981,7 +985,7 @@ pub const ModuleEmitter = struct {
             }
 
             const ctor = domain.methodStart.get(self.index) + abc.instanceInit[i];
-            if (try domain.traits.sign(domain, ctor) == 0 and domain.traits.paramCount.get(ctor) > 0) {
+            if (try domain.traits.signs(domain, ctor) and domain.traits.paramCount.get(ctor) > 0) {
                 try o.text(", ctor: [");
                 try self.signature(ctor, false);
                 try o.text("]");
@@ -1005,7 +1009,7 @@ pub const ModuleEmitter = struct {
         const gpa = self.methods.gpa;
         const domain = self.domain;
         const table = &domain.traits;
-        if (try table.resolve(domain, t) != 0) {
+        if (!try table.resolves(domain, t)) {
             return;
         }
 

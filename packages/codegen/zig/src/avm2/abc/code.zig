@@ -13,6 +13,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Error = Allocator.Error;
+const errors = @import("errors.zig");
+const Diagnostics = errors.Diagnostics;
 const memory = @import("../../memory.zig");
 const ir_ = @import("../ir/ir.zig");
 const Ir = ir_.Ir;
@@ -122,27 +124,36 @@ pub const Flags = packed struct(u8) {
 
     pub const none: Flags = .{};
 
+    const known_bits: u8 = @bitCast(Flags{ .not_null = true, .checked = true });
+    const with_bit: u8 = @bitCast(Flags{ .with = true });
+
     /// What a copy, a coercion or a conversion keeps: not null, checked.
-    pub fn known(f: Flags) Flags {
-        return .{ .not_null = f.not_null, .checked = f.checked };
+    pub inline fn known(f: Flags) Flags {
+        return @bitCast(@as(u8, @bitCast(f)) & known_bits);
     }
 
     /// Whether no null check of it needs code.
-    pub fn isKnown(f: Flags) bool {
+    pub inline fn isKnown(f: Flags) bool {
         return f.not_null or f.checked;
     }
 
     /// An entry state's flags merged with a path's: not null and checked
     /// only if both are; with as the entry has it (mergeRange rejects a
     /// path that differs).
-    pub fn merge(entry: Flags, value: Flags) Flags {
-        return .{
-            .not_null = entry.not_null and value.not_null,
-            .with = entry.with,
-            .checked = entry.checked and value.checked,
-        };
+    pub inline fn merge(entry: Flags, value: Flags) Flags {
+        return @bitCast(@as(u8, @bitCast(entry)) & (@as(u8, @bitCast(value)) | with_bit));
     }
 };
+
+comptime {
+    // The IR's entry flags are the first two bits (Ir.addBlock's `& 3`,
+    // the emitters' scopeWith), and the constants were 1, 2 and 4.
+    std.debug.assert(@as(u8, @bitCast(Flags{ .not_null = true })) == 1);
+    std.debug.assert(@as(u8, @bitCast(Flags{ .with = true })) == 2);
+    std.debug.assert(@as(u8, @bitCast(Flags{ .checked = true })) == 4);
+    std.debug.assert(@as(u8, @bitCast(NameParts{ .attr = true, .rtns = true, .rtname = true, .qname = true })) == 15);
+    std.debug.assert(@as(u8, @bitCast(NameParts{ .rtname = true })) == 4);
+}
 
 /// What a stack value tells of a local: that it is a copy of the local, or
 /// that the local is neither null nor undefined when the value is true, or
@@ -158,30 +169,30 @@ pub const Origin = enum(i32) {
     /// Non-exhaustive: negated flips the two tests' bits, which a copy never is.
     pub const Kind = enum(u2) { copy = 0, if_true = 1, if_false = 2, _ };
 
-    pub fn of(local_: u32, kind_: Kind) Origin {
+    pub inline fn of(local_: u32, kind_: Kind) Origin {
         return @fromBackingInt(@bitCast((local_ << 2) | @backingInt(kind_)));
     }
 
     /// Whether it tells of a local: neither none nor nullish.
-    pub fn isLocal(o: Origin) bool {
+    pub inline fn isLocal(o: Origin) bool {
         return @backingInt(o) >= 0;
     }
 
-    pub fn local(o: Origin) u32 {
+    pub inline fn local(o: Origin) u32 {
         return @intCast(@backingInt(o) >> 2);
     }
 
-    pub fn kind(o: Origin) Kind {
+    pub inline fn kind(o: Origin) Kind {
         return @fromBackingInt(@as(u2, @truncate(@as(u32, @bitCast(@backingInt(o))))));
     }
 
     /// A copy's origin as the test `k`: what its truth tells.
-    pub fn asTest(o: Origin, k: Kind) Origin {
+    pub inline fn asTest(o: Origin, k: Kind) Origin {
         return @fromBackingInt(@backingInt(o) | @backingInt(k));
     }
 
     /// The other test: what the value's falsehood tells.
-    pub fn negated(o: Origin) Origin {
+    pub inline fn negated(o: Origin) Origin {
         return @fromBackingInt(@backingInt(o) ^ 3);
     }
 };
@@ -209,7 +220,7 @@ pub const BodyDecoder = struct {
 
     // Scratch for the body being decoded, sized to the longest body so far.
     capacity: u32 = 0,
-    /// Whether each byte starts an instruction, lies inside one, or is unseen (0).
+    /// Whether each byte starts an instruction, lies inside one, or is .unseen.
     cover: []Cover = &.{},
     /// Offsets with a known frame state: branch and handler targets.
     known: []u8 = &.{},
@@ -645,10 +656,8 @@ pub const BodyDecoder = struct {
         const traits = &domain.traits;
         self.global = domain.methodStart.get(self.index) + self.method;
         self.declarer = traits.methodTraits.get(self.global);
-        const err = try traits.sign(domain, self.global);
-        if (err != 0) {
-            return self.fail(err);
-        }
+        var diag: Diagnostics = .{};
+        traits.sign(domain, self.global, &diag) catch |err| return self.linkFailed(err, &diag);
 
         if (self.valueType.len < self.frameSize) {
             const gpa = self.gpa;
@@ -1117,6 +1126,15 @@ pub const BodyDecoder = struct {
     pub fn fail(self: *BodyDecoder, err: i32) bool {
         self.code.fail(err);
         return false;
+    }
+
+    /// fail with the VerifyError linking rejected with, `err` from a call
+    /// given `diag`; running out of memory goes on up.
+    pub fn linkFailed(self: *BodyDecoder, err: errors.Error, diag: *const Diagnostics) Error!bool {
+        return switch (err) {
+            error.Verify => self.fail(diag.code),
+            error.OutOfMemory => error.OutOfMemory,
+        };
     }
 
     /// fail, with the number its message names.

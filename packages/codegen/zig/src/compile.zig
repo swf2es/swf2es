@@ -1129,7 +1129,7 @@ fn replayed(dom: *Domain, kind: domain_.LogKind, abc: u32, a: u32, b: u32) Alloc
     }
 
     if (kind == .sign) {
-        return b < info.methodCount() and try dom.traits.sign(dom, dom.methodStart.get(abc) + b) == 0;
+        return b < info.methodCount() and try dom.traits.signs(dom, dom.methodStart.get(abc) + b);
     }
 
     if (kind != .resolve) {
@@ -1143,7 +1143,7 @@ fn replayed(dom: *Domain, kind: domain_.LogKind, abc: u32, a: u32, b: u32) Alloc
         else => info.classCount(),
     };
     const t = if (b < owners) lifetime.traitsOf(dom, abc, owned, b) else .none;
-    return t != .none and try dom.traits.resolve(dom, t.index()) == 0;
+    return t != .none and try dom.traits.resolves(dom, t.index());
 }
 
 // The rebuild, saving and loading (compile.ts tells each export's why).
