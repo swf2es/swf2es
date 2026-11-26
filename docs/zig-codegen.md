@@ -1304,3 +1304,12 @@ For the user to decide:
     AssemblyScript's time) and size (106 to 134 KB). Proposed: at the
     end, file by file, each held to parity and to the size and time
     measured before it.
+    Within it, labeled-switch dispatch and tail calls were considered for
+    the verifier and left out (P5d). An instruction passes through
+    `block`'s loop, then `verifyAt`'s checks, `typeAt`'s switch and
+    `emitGeneric`'s, so there is no one loop and switch to fuse into
+    `continue :sw` without inlining some 700 lines into `block`; and in
+    wasm a labeled switch lowers to the same loop and `br_table` the
+    switches are now. Tail-called handlers would dispatch through
+    `call_indirect`, usually slower than `br_table`, and make the shipped
+    wasm need the tail-call feature.
