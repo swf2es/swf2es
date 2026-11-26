@@ -116,8 +116,10 @@ pub const TraitTag = packed struct(u8) {
 /// the way it does in avmshell; 1008 is a ReferenceError. The tags keep
 /// avmplus' names from core/ErrorConstants.h verbatim, not snake_case, on
 /// purpose: each greps one to one with avmplus and its error tables.
-/// `none`, 0, no error, is the one tag of our own. Non-exhaustive, as saved
-/// domains, journals and the exports carry the number back: never switch
+/// `none`, 0, no error, is the one tag of our own. Non-exhaustive: an
+/// Abc's is worked out again by parsing whenever a domain is restored or
+/// loaded, but a journal's raw restore or the poison build's fill can
+/// leave any number there, and the exports carry it as one. Never switch
 /// over it exhaustively.
 pub const VerifyError = enum(i32) {
     none = 0,
