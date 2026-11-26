@@ -137,7 +137,7 @@ pub fn domainResolve(dom: *Domain, first: i32) Allocator.Error!i32 {
     while (t < count) : (t += 1) {
         var diag: Diagnostics = .{};
         dom.traits.resolve(dom, @bitCast(t), &diag) catch |err| return switch (err) {
-            error.Verify => diag.code,
+            error.Verify => diag.code.number(),
             error.OutOfMemory => error.OutOfMemory,
         };
     }
@@ -241,8 +241,8 @@ pub fn domainEmit(dom: *Domain, gpa: Allocator, body: u32) Allocator.Error![]con
     const method = abc.bodyMethod[body];
     const global = dom.methodStart.get(index) + method;
     const result = try decoder.decode(body, dom.traits.scopeOf(global));
-    if (result.@"error" != 0) {
-        return std.fmt.allocPrint(gpa, "error {d}", .{result.@"error"});
+    if (result.@"error" != .none) {
+        return std.fmt.allocPrint(gpa, "error {d}", .{result.@"error".number()});
     }
 
     var emitter: MethodEmitter = try .init(gpa, gpa, dom, index);
@@ -271,8 +271,8 @@ pub fn domainIr(dom: *Domain, gpa: Allocator, body: u32) Allocator.Error![]const
     var decoder: BodyDecoder = try .init(gpa, abc, dom.abcBuffer.get(index), dom, index);
     const m = dom.methodStart.get(index) + abc.bodyMethod[body];
     const result = try decoder.decode(body, dom.traits.scopeOf(m));
-    if (result.@"error" != 0) {
-        return std.fmt.allocPrint(gpa, "error {d}", .{result.@"error"});
+    if (result.@"error" != .none) {
+        return std.fmt.allocPrint(gpa, "error {d}", .{result.@"error".number()});
     }
 
     const ir = &decoder.ir;

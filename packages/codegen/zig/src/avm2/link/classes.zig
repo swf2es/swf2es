@@ -50,11 +50,11 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
                 base == dom.classClass or
                 (base == dom.functionClass and !abc.builtin))
             {
-                return diag.fail(C.kCannotExtendFinalClass);
+                return diag.fail(.kCannotExtendFinalClass);
             }
 
             if (dom.classFlags.get(b).interface) {
-                return diag.fail(C.kCannotExtendError);
+                return diag.fail(.kCannotExtendError);
             }
 
             dom.classBase.set(id, base);
@@ -70,7 +70,7 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
             };
             if (!dom.classFlags.get(t).interface) {
                 dom.traits.interfaceList.truncate(interfaces);
-                return diag.fail(C.kCannotImplementError);
+                return diag.fail(.kCannotImplementError);
             }
 
             // As the word it is: an interface not linked yet goes in as none's.
@@ -78,7 +78,7 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
         }
 
         if (flags.interface and baseName != 0) {
-            return diag.fail(C.kCannotExtendError);
+            return diag.fail(.kCannotExtendError);
         }
 
         // As avmplus' AvmCore: the first builtin class without a base is Object.
@@ -174,7 +174,7 @@ fn layoutScripts(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
 /// A base class's or an interface's class: resolveType, void rejected.
 fn resolveClass(dom: *const Domain, index: u32, multiname: u32, diag: *Diagnostics) errors.Rejected!u32 {
     return typenames.resolveType(dom, index, multiname, diag) catch |err| switch (err) {
-        error.Void => diag.fail(C.kIllegalVoidError),
+        error.Void => diag.fail(.kIllegalVoidError),
         error.Verify => error.Verify,
     };
 }

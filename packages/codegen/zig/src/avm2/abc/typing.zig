@@ -37,7 +37,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         .pushundefined => return bd.pushNullish(domain.voidType),
         .pushtrue, .pushfalse => return bd.push(domain.booleanType, .{ .not_null = true }),
         .pushnan, .pushdouble => return bd.push(domain.numberType, .{ .not_null = true }),
-        .pushfloat => return if (domain.floatType == .any) bd.fail(C.kClassNotFoundError) else bd.push(domain.floatType, .{ .not_null = true }),
+        .pushfloat => return if (domain.floatType == .any) bd.fail(.kClassNotFoundError) else bd.push(domain.floatType, .{ .not_null = true }),
         .pushbyte, .pushshort, .pushint => return bd.push(domain.intType, .{ .not_null = true }),
         .pushuint => return bd.push(domain.uintType, .{ .not_null = true }),
         .pushstring => return bd.push(domain.stringType, .{ .not_null = true }),
@@ -75,7 +75,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             bd.rowC = ir_.typeColumn(domain.staticTraitsOf(bd.index, a));
             return;
         },
-        .finddef => p.findDef(bd, a),
+        .finddef => return p.findDef(bd, a),
         .setproperty, .initproperty => return p.setProperty(bd, opcode, a),
         .getproperty => {
             const n = try p.propertyDepth(bd, a, 1);
@@ -145,7 +145,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         },
         .convert_f => {
             if (domain.floatType == .any) {
-                return bd.fail(C.kClassNotFoundError);
+                return bd.fail(.kClassNotFoundError);
             }
 
             bd.retype(top, domain.floatType);
@@ -187,10 +187,10 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         .callmethod => {
             // Always rejected, as avmplus has done since Flash Player 9.
             if (a == 0) {
-                return bd.fail(C.kZeroDispIdError);
+                return bd.fail(.kZeroDispIdError);
             }
 
-            return bd.fail(if (bd.typeOf(bd.peek(b +% 1)) == .any) C.kCorruptABCError else C.kIllegalEarlyBindingError);
+            return bd.fail(if (bd.typeOf(bd.peek(b +% 1)) == .any) .kCorruptABCError else .kIllegalEarlyBindingError);
         },
         .callproperty, .callproplex, .callpropvoid => return p.callProperty(bd, opcode, a, b),
         .constructprop => {
@@ -260,7 +260,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             const outer = bd.outer;
             if (opcode == .pushscope and scope == 0 and outer.extra != .any) {
                 if (ty == .any or !try domain.traits.subtypeOf(domain.scratch, ty.index(), outer.extra.index())) {
-                    return bd.fail(C.kIllegalOperandTypeError);
+                    return bd.fail(.kIllegalOperandTypeError);
                 }
             }
 
@@ -286,16 +286,19 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             const outer = bd.outer;
             // avmplus names the index only where nothing was captured (Verifier.cpp).
             if (outer.size == 0) {
-                return bd.failWith(C.kGetScopeObjectBoundsError, a, 0);
+                return bd.failWith(.kGetScopeObjectBoundsError, a, 0);
             }
 
             if (a >= outer.size) {
-                return bd.fail(C.kGetScopeObjectBoundsError);
+                return bd.fail(.kGetScopeObjectBoundsError);
             }
 
             return bd.push(outer.types[a], .{ .not_null = true });
         },
-        .getglobalscope => _ = try p.globalScope(bd),
+        .getglobalscope => {
+            _ = try p.globalScope(bd);
+            return;
+        },
         .getglobalslot => {
             const global = try p.globalScope(bd);
 
@@ -436,7 +439,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         },
         .hasnext2 => {
             if (bd.typeOf(b) != domain.intType) {
-                return bd.fail(C.kIllegalOperandTypeError);
+                return bd.fail(.kIllegalOperandTypeError);
             }
 
             bd.setValue(a, .any, .none);
@@ -460,6 +463,8 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             try bd.coerce(top, domain.intType);
             return;
         },
+        // Every prong above returns; the rest are the numbered locals'
+        // instructions below, or have no types to check.
         else => {},
     }
 
@@ -580,7 +585,7 @@ fn captureFunction(bd: *BodyDecoder, m: u32) Error!void {
         var c: usize = 0;
         while (c < bd.claims.items.len) : (c += 2) {
             if (bd.claims.items[c] == global and bd.claims.items[c + 1] != @as(u32, @intCast(index))) {
-                return bd.fail(C.kCorruptABCError);
+                return bd.fail(.kCorruptABCError);
             }
         }
 
@@ -591,7 +596,7 @@ fn captureFunction(bd: *BodyDecoder, m: u32) Error!void {
     }
 
     if (traits.methodTraits.get(global) != .none) {
-        return bd.fail(C.kCorruptABCError);
+        return bd.fail(.kCorruptABCError);
     }
 
     try domain.put(traits.methodFunction.at(global), 1);
@@ -621,13 +626,13 @@ fn captureClass(bd: *BodyDecoder, i: u32) Error!void {
     const ctraits = domain.staticTraitsOf(bd.index, i);
     const itraits = domain.instanceTraitsOf(ctraits);
     if (bd.scope == 0) {
-        return bd.fail(C.kCorruptABCError);
+        return bd.fail(.kCorruptABCError);
     }
 
     const innermost = bd.typeOf(bd.localCount + bd.scope - 1);
     // No base reads as *, as instanceTraitsOf answers for a type not a class.
     if (innermost == .any or domain.instanceTraitsOf(innermost) != traits.base.get(itraits.index()).orAny()) {
-        return bd.fail(C.kCorruptABCError);
+        return bd.fail(.kCorruptABCError);
     }
 
     const cscope = try scopeHere(bd, null, ctraits);
@@ -640,7 +645,7 @@ fn captureClass(bd: *BodyDecoder, i: u32) Error!void {
     if (current) |cur| {
         const instance = traits.scope.get(itraits.index());
         if (instance == null or !cur.equals(cscope) or !instance.?.equals(iscope)) {
-            return bd.fail(C.kCorruptABCError);
+            return bd.fail(.kCorruptABCError);
         }
     } else {
         try domain.put(traits.scope.at(ctraits.index()), try kept(bd, cscope));

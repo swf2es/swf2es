@@ -778,7 +778,7 @@ pub const TraitsTable = struct {
         }
 
         if (!legal) {
-            return diag.fail(C.kIllegalOverrideError);
+            return diag.fail(.kIllegalOverrideError);
         }
 
         try dom.put(self.resolved.at(t), 1);

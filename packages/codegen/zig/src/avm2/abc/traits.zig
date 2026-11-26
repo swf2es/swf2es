@@ -17,7 +17,7 @@ const Reader = @import("reader.zig").Reader;
 pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefined: u32, diag: *Diagnostics) Rejected!void {
     const count = r.u30_();
     if (count > r.end - r.pos) {
-        return diag.fail(C.kCorruptABCError);
+        return diag.fail(.kCorruptABCError);
     }
 
     // As avmplus' makeMethodOf, a method belongs to at most one owner; a
@@ -27,11 +27,11 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
     for (0..count) |_| {
         const name = r.u30_();
         if (r.failed) {
-            return diag.fail(C.kCorruptABCError);
+            return diag.fail(.kCorruptABCError);
         }
 
         const nameError = bindingNameError(&abc.pool, name, abc.builtin);
-        if (nameError != 0) {
+        if (nameError != .none) {
             return diag.fail(nameError);
         }
 
@@ -54,7 +54,7 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
                 id = r.u30_();
                 index = r.u30_();
             },
-            _ => return diag.fail(if (r.failed) C.kCorruptABCError else C.kUnsupportedTraitsKindError),
+            _ => return diag.fail(if (r.failed) .kCorruptABCError else .kUnsupportedTraitsKindError),
         }
 
         lists.push("traitMetadataStart", lists.len("traitMetadata"));
@@ -63,7 +63,7 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
             for (0..metadataCount) |_| {
                 const metadata = r.u30_();
                 if (r.failed or metadata >= abc.metadataCount()) {
-                    return diag.fail(C.kCorruptABCError);
+                    return diag.fail(.kCorruptABCError);
                 }
 
                 lists.push("traitMetadata", metadata);
@@ -71,20 +71,20 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
         }
 
         if (r.failed) {
-            return diag.fail(C.kCorruptABCError);
+            return diag.fail(.kCorruptABCError);
         }
 
         if (kind == .class) {
             if (index >= abc.classCount()) {
-                return diag.fail(C.kClassInfoExceedsCountError);
+                return diag.fail(.kClassInfoExceedsCountError);
             }
 
             if (index >= classesDefined) {
-                return diag.fail(C.kClassInfoOrderError);
+                return diag.fail(.kClassInfoOrderError);
             }
         } else if (kind.bindsMethod()) {
             if (index >= abc.methodCount()) {
-                return diag.fail(C.kMethodInfoExceedsCountError);
+                return diag.fail(.kMethodInfoExceedsCountError);
             }
         }
 
@@ -105,22 +105,22 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
     }
 
     if (owned) {
-        return diag.fail(C.kCorruptABCError);
+        return diag.fail(.kCorruptABCError);
     }
 }
 
-/// 0 if multiname `index` can name a trait or class: a QName with a namespace
+/// none if multiname `index` can name a trait or class: a QName with a namespace
 /// and a name, or in a builtin ABC also a Multiname with a name, whose
 /// namespaces are the API versions that introduce it. A TypeName stands for
 /// its base, as avmplus parses it.
-pub fn bindingNameError(pool: *const ConstantPool, index: u32, builtin: bool) i32 {
+pub fn bindingNameError(pool: *const ConstantPool, index: u32, builtin: bool) C.VerifyError {
     if (index == 0 or index >= pool.multinameCount()) {
-        return C.kCpoolIndexRangeError;
+        return .kCpoolIndexRangeError;
     }
 
     return switch (pool.baseName(index)) {
-        .qname => |q| if (q.attribute or q.ns == 0 or q.name == 0) C.kCpoolEntryWrongTypeError else 0,
-        .multiname => |m| if (builtin and !m.attribute and m.name != 0) 0 else C.kCpoolEntryWrongTypeError,
-        else => C.kCpoolEntryWrongTypeError,
+        .qname => |q| if (q.attribute or q.ns == 0 or q.name == 0) .kCpoolEntryWrongTypeError else .none,
+        .multiname => |m| if (builtin and !m.attribute and m.name != 0) .none else .kCpoolEntryWrongTypeError,
+        else => .kCpoolEntryWrongTypeError,
     };
 }

@@ -91,7 +91,7 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32, diag: 
             // A slot defined twice would give one memory location two types.
             slot -%= 1;
             if (slot >= slotCount or traits.slotSet.get(slots + slot) != 0) {
-                return diag.fail(C.kCorruptABCError);
+                return diag.fail(.kCorruptABCError);
             }
 
             // A class not linked yet reads as *.
@@ -119,7 +119,7 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32, diag: 
                 {
                     const virt = traits.dispatch.get(traits.dispatchStart.get(base.index()) + d);
                     if (virt >= 0 and traits.methodFinal.get(@intCast(virt)) != 0) {
-                        return diag.fail(C.kIllegalOverrideError);
+                        return diag.fail(.kIllegalOverrideError);
                     }
                 }
             }

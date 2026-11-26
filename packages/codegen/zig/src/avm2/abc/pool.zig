@@ -235,13 +235,13 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
     }
 
     if (r.failed) {
-        return diag.fail(C.kCorruptABCError);
+        return diag.fail(.kCorruptABCError);
     }
 
     if (hasFloats) {
         const count = readCount(r);
         if (@as(u64, count) * 4 > @as(u64, r.end - r.pos) + 4) {
-            return diag.fail(C.kCorruptABCError);
+            return diag.fail(.kCorruptABCError);
         }
 
         pool.floats = try sized(gpa, f32, pool.floats, @max(count, 1));
@@ -251,7 +251,7 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
         }
 
         if (r.failed) {
-            return diag.fail(C.kCorruptABCError);
+            return diag.fail(.kCorruptABCError);
         }
     }
 
@@ -262,7 +262,7 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
         // UTF-8 is not validated.
         const length = r.u32_();
         if (length & 0xc0000000 != 0 or @as(u64, r.pos) + length >= r.end) {
-            return diag.fail(C.kCorruptABCError);
+            return diag.fail(.kCorruptABCError);
         }
 
         pool.strings[i] = .{ .start = @intCast(r.pos), .len = length };
@@ -275,12 +275,12 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
     for (1..nsCount) |i| {
         const kind = r.byteAs(C.Constant);
         if (!kind.isNamespace()) {
-            return diag.fail(if (r.failed) C.kCorruptABCError else C.kCpoolEntryWrongTypeError);
+            return diag.fail(if (r.failed) .kCorruptABCError else .kCpoolEntryWrongTypeError);
         }
 
         const name = r.u30_();
         if (name >= stringCount) {
-            return diag.fail(C.kCpoolIndexRangeError);
+            return diag.fail(.kCpoolIndexRangeError);
         }
 
         pool.nsKind[i] = kind;
@@ -296,11 +296,11 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
         for (0..count) |_| {
             const ns = r.u30_();
             if (ns == 0) {
-                return diag.fail(if (r.failed) C.kCorruptABCError else C.kIllegalNamespaceError);
+                return diag.fail(if (r.failed) .kCorruptABCError else .kIllegalNamespaceError);
             }
 
             if (ns >= nsCount) {
-                return diag.fail(C.kCpoolIndexRangeError);
+                return diag.fail(.kCpoolIndexRangeError);
             }
 
             try members.append(scratch, ns);
@@ -322,13 +322,13 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
                 a = r.u30_();
                 b = r.u30_();
                 if (a >= nsCount or b >= stringCount) {
-                    return diag.fail(C.kCpoolIndexRangeError);
+                    return diag.fail(.kCpoolIndexRangeError);
                 }
             },
             .rtqname, .rtqname_a => {
                 b = r.u30_();
                 if (b >= stringCount) {
-                    return diag.fail(C.kCpoolIndexRangeError);
+                    return diag.fail(.kCpoolIndexRangeError);
                 }
             },
             // No operands: both come from the stack.
@@ -336,38 +336,38 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
             .multiname, .multiname_a => {
                 b = r.u30_();
                 if (b >= stringCount) {
-                    return diag.fail(C.kCpoolIndexRangeError);
+                    return diag.fail(.kCpoolIndexRangeError);
                 }
 
                 a = r.u30_();
                 if (a == 0 or a >= nsSetCount) {
-                    return diag.fail(C.kCpoolIndexRangeError);
+                    return diag.fail(.kCpoolIndexRangeError);
                 }
             },
             .multiname_l, .multiname_la => {
                 a = r.u30_();
                 if (a == 0 or a >= nsSetCount) {
-                    return diag.fail(C.kCpoolIndexRangeError);
+                    return diag.fail(.kCpoolIndexRangeError);
                 }
             },
             .type_name => {
                 // Forward references are legal; the base kind is checked below.
                 a = r.u30_();
                 if (a == 0 or a >= mnCount) {
-                    return diag.fail(C.kCpoolIndexRangeError);
+                    return diag.fail(.kCpoolIndexRangeError);
                 }
 
                 if (r.u30_() != 1) {
-                    return diag.fail(C.kCorruptABCError);
+                    return diag.fail(.kCorruptABCError);
                 }
 
                 // Parameter 0 is Vector.<*>.
                 b = r.u30_();
                 if (b >= mnCount) {
-                    return diag.fail(C.kCpoolIndexRangeError);
+                    return diag.fail(.kCpoolIndexRangeError);
                 }
             },
-            else => return diag.fail(if (r.failed) C.kCorruptABCError else C.kCpoolEntryWrongTypeError),
+            else => return diag.fail(if (r.failed) .kCorruptABCError else .kCpoolEntryWrongTypeError),
         }
 
         pool.mnKind[i] = kind;
@@ -376,11 +376,11 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
     }
 
     if (r.failed) {
-        return diag.fail(C.kCorruptABCError);
+        return diag.fail(.kCorruptABCError);
     }
 
     if (!try typeNamesAreAcyclic(scratch, pool)) {
-        return diag.fail(C.kCorruptABCError);
+        return diag.fail(.kCorruptABCError);
     }
 }
 

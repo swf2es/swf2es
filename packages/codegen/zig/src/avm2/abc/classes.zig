@@ -19,7 +19,7 @@ const readTraits = traits.readTraits;
 pub fn readInstances(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *Diagnostics) Error!void {
     const count = r.u30_();
     if (count > r.end - r.pos) {
-        return diag.fail(C.kCorruptABCError);
+        return diag.fail(.kCorruptABCError);
     }
 
     abc.instanceName = try lists.zeroed(u32, gpa, abc.instanceName, count);
@@ -35,17 +35,17 @@ pub fn readInstances(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag:
         const i: u32 = @intCast(index);
         const name = r.u30_();
         if (r.failed) {
-            return diag.fail(C.kCorruptABCError);
+            return diag.fail(.kCorruptABCError);
         }
 
         const nameError = bindingNameError(pool, name, abc.builtin);
-        if (nameError != 0) {
+        if (nameError != .none) {
             return diag.fail(nameError);
         }
 
         const base = r.u30_();
         if (base >= pool.multinameCount()) {
-            return diag.fail(if (r.failed) C.kCorruptABCError else C.kCpoolIndexRangeError);
+            return diag.fail(if (r.failed) .kCorruptABCError else .kCpoolIndexRangeError);
         }
 
         const flags = r.byteAs(C.InstanceFlags);
@@ -53,28 +53,28 @@ pub fn readInstances(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag:
         if (flags.protected_ns) {
             protectedNs = r.u30_();
             if (protectedNs >= pool.nsCount()) {
-                return diag.fail(if (r.failed) C.kCorruptABCError else C.kCpoolIndexRangeError);
+                return diag.fail(if (r.failed) .kCorruptABCError else .kCpoolIndexRangeError);
             }
         }
 
         const interfaceCount = r.u30_();
         if (interfaceCount >= 0x10000000) {
-            return diag.fail(C.kCorruptABCError);
+            return diag.fail(.kCorruptABCError);
         }
 
         abc.instanceInterfaceStart[i] = lists.len("interfaces");
         for (0..interfaceCount) |_| {
             const @"type" = r.u30_();
             if (r.failed) {
-                return diag.fail(C.kCorruptABCError);
+                return diag.fail(.kCorruptABCError);
             }
 
             if (@"type" == 0) {
-                return diag.fail(C.kCannotImplementError);
+                return diag.fail(.kCannotImplementError);
             }
 
             if (@"type" >= pool.multinameCount()) {
-                return diag.fail(C.kCpoolIndexRangeError);
+                return diag.fail(.kCpoolIndexRangeError);
             }
 
             lists.push("interfaces", @"type");
@@ -82,11 +82,11 @@ pub fn readInstances(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag:
 
         const init = r.u30_();
         if (r.failed) {
-            return diag.fail(C.kCorruptABCError);
+            return diag.fail(.kCorruptABCError);
         }
 
         if (init >= abc.methodCount()) {
-            return diag.fail(C.kMethodInfoExceedsCountError);
+            return diag.fail(.kMethodInfoExceedsCountError);
         }
 
         abc.instanceName[i] = name;
@@ -127,7 +127,7 @@ pub fn readClasses(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *
 pub fn readScripts(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *Diagnostics) Error!void {
     const count = r.u30_();
     if (count > r.end - r.pos) {
-        return diag.fail(C.kCorruptABCError);
+        return diag.fail(.kCorruptABCError);
     }
 
     abc.scriptInit = try lists.zeroed(u32, gpa, abc.scriptInit, count);
@@ -138,7 +138,7 @@ pub fn readScripts(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *
         // Unlike instances and classes, a script checks its init before its traits.
         const method = try readMethodIndex(abc, r, diag);
         if (abc.methodOwner[method] != -1) {
-            return diag.fail(C.kAlreadyBoundError);
+            return diag.fail(.kAlreadyBoundError);
         }
 
         abc.scriptInit[i] = method;
@@ -158,11 +158,11 @@ pub fn readScripts(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *
 fn readMethodIndex(abc: *const Abc, r: *Reader, diag: *Diagnostics) Rejected!u32 {
     const method = r.u30_();
     if (r.failed) {
-        return diag.fail(C.kCorruptABCError);
+        return diag.fail(.kCorruptABCError);
     }
 
     if (method >= abc.methodCount()) {
-        return diag.fail(C.kMethodInfoExceedsCountError);
+        return diag.fail(.kMethodInfoExceedsCountError);
     }
 
     return method;
@@ -171,7 +171,7 @@ fn readMethodIndex(abc: *const Abc, r: *Reader, diag: *Diagnostics) Rejected!u32
 /// Bind an instance or class initializer to its owner.
 fn bind(abc: *Abc, method: u32, owner: i32, diag: *Diagnostics) Rejected!void {
     if (abc.methodOwner[method] != -1) {
-        return diag.fail(C.kAlreadyBoundError);
+        return diag.fail(.kAlreadyBoundError);
     }
 
     abc.methodOwner[method] = owner;
