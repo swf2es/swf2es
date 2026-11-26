@@ -13,7 +13,9 @@
 //
 // The seeds are the unit tests' hand-built ABCs, structured method bodies
 // (bodies.ts) and the conformance cases, compiled into this package's own
-// out/. A case that fails is written to
+// out/; one case in eight is instead classes whose traits share a few
+// names in every mix of kinds, which mutated bytes rarely give. A case
+// that fails is written to
 // out/failures/ as an .abc to run again. The mutations come from a seeded
 // generator, so a run repeats exactly:
 //
@@ -25,6 +27,7 @@ import { containerEngine, libraries, runOracle } from "../../oracle/oracle.ts";
 import { floatLibrary } from "../../packages/runtime/dist/avm2/float-library.js";
 import { abc, tables } from "../unit/codegen/abc-builder.ts";
 import { linkAbcs } from "../unit/codegen/link-abc.ts";
+import { classes, GETTER, METHOD, mn, OVERRIDE, SETTER, SLOT } from "../unit/codegen/link-cases.ts";
 import type { Case } from "../unit/codegen/oracle-case.ts";
 import { richAbc } from "../unit/codegen/rich-abc.ts";
 import { loadTesting, TESTED } from "../unit/codegen/testing-module.ts";
@@ -194,7 +197,7 @@ const utf8 = new TextDecoder("utf-8", { fatal: true });
 const VERSIONS = [50, 50, 50, 12, 50, 50, 50, 0];
 const started = Date.now();
 for (let k = 0; k < caseCount; k++) {
-  const abc = mutate(seeds[below(seeds.length)]);
+  const abc = below(8) === 0 ? sharedNamesAbc() : mutate(seeds[below(seeds.length)]);
   const t0 = performance.now();
   try {
     apiVersion = VERSIONS[k % VERSIONS.length];
@@ -271,6 +274,39 @@ if (failures.length) {
 }
 
 console.log(`fuzz: ${summary}, all well (${seconds} s)`);
+
+/**
+ * One to three classes, each extending Object or one before it, with a few
+ * traits of any kind named from a short list, instance and static: two
+ * names alike in any order of kinds, and alike in a base, which the layout
+ * accepts or refuses as avmplus does.
+ */
+function sharedNamesAbc(): Uint8Array {
+  const CONST = 6;
+  const kinds = [SLOT, CONST, METHOD, GETTER, SETTER];
+  const names = [mn("m"), mn("x"), mn("prototype")];
+  const types = [0, mn("int"), mn("Number"), mn("String"), mn("A")];
+  const pick = <T>(list: T[]) => list[below(list.length)];
+  const members = () =>
+    Array.from({ length: below(5) }, () => {
+      const kind = pick(kinds);
+      const name = pick(names);
+      if (kind === SLOT || kind === CONST) {
+        return { name, kind, id: below(4) === 0 ? 1 + below(3) : 0, index: pick(types) };
+      }
+
+      return { name, kind, attr: below(4) === 0 ? OVERRIDE : 0 };
+    });
+  const classNames = [mn("A"), mn("B"), mn("F")];
+  const list = Array.from({ length: 1 + below(3) }, (_, i) => ({
+    name: classNames[i],
+    base: i > 0 && below(2) ? classNames[below(i)] : mn("Object"),
+    traits: members(),
+    statics: below(2) ? members() : [],
+  }));
+
+  return classes(list, below(2) === 0);
+}
 
 /** A script that makes closures named by a pool string, an empty one, none and one past the pool. */
 function closuresSeed(): Uint8Array {
