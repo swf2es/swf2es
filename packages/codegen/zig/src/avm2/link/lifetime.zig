@@ -789,6 +789,11 @@ fn read(loaded: *Loaded, reader: *SaveReader) LoadError!void {
         try dom.foundUri.push(gpa, try reader.text(gpa));
         try dom.foundName.push(gpa, try reader.text(gpa));
     }
+
+    // Nothing after the last finding: a save ends there.
+    if (reader.at != reader.bytes.len) {
+        return error.Malformed;
+    }
 }
 
 /// Whether every ABC of a live application domain is one saveDomain named
