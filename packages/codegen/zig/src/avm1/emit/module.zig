@@ -4,7 +4,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const output = @import("../../output.zig");
 const Output = output.Output;
-const Error = output.Error;
+const Error = Allocator.Error;
 const BlockEmitter = @import("block.zig").BlockEmitter;
 const units = @import("units.zig");
 const BlockRange = units.BlockRange;
@@ -16,14 +16,17 @@ pub const Key = struct {
     unit: UnitKey,
     short: bool,
 
-    /// The key as the module names it, for "{f}".
-    pub fn format(self: Key, w: *std.Io.Writer) std.Io.Writer.Error!void {
-        const five = @intFromBool(self.unit.five);
-        if (self.short) {
-            try w.print("{d},{d}", .{ self.unit.at, five });
-        } else {
-            try w.print("{d},{d},{d},{d}", .{ self.unit.at, self.unit.end, self.unit.bound, five });
+    /// The key as the module names it.
+    pub fn write(self: Key, out: *Output) Allocator.Error!void {
+        try out.int(self.unit.at);
+        if (!self.short) {
+            try out.byte(',');
+            try out.int(self.unit.end);
+            try out.byte(',');
+            try out.int(self.unit.bound);
         }
+
+        try out.text(if (self.unit.five) ",1" else ",0");
     }
 
     fn of(unit: UnitKey, short: bool) Key {
@@ -149,7 +152,6 @@ pub const ModuleEmitter = struct {
     /// range not within the SWF is an empty block.
     pub fn module(self: *ModuleEmitter, swf: []const u8, blocks: []const BlockRange, version: i32) Error!void {
         const out = self.out;
-        const w = out.writer();
         const emitter = self.blocks;
         out.shrink(0);
         inline for (.{ &self.entries, &self.listed, &self.units, &self.codes, &self.exits, &self.calls }) |items| {
@@ -160,20 +162,20 @@ pub const ModuleEmitter = struct {
         emitter.exits.clearRetainingCapacity();
         try self.prologue("export default function (rt) {\n", version);
         const opening = out.len();
-        try w.writeAll("return [\n");
+        try out.text("return [\n");
         for (blocks) |block| {
             const start = out.len();
             try emitter.block(swf, block.offset, block.length);
             try self.entries.append(self.gpa, .{ .start = start, .end = out.len() });
-            try w.writeAll(",\n");
+            try out.text(",\n");
         }
 
         if (emitter.units.items.len == 0) {
-            return w.writeAll("];\n}\n");
+            return out.text("];\n}\n");
         }
 
         // The blocks give the runtime the module's units as they are made, so V.far finds them.
-        try w.writeAll("];\nrt.adoptUnits(b, units(rt));\nreturn b;\n}\n");
+        try out.text("];\nrt.adoptUnits(b, units(rt));\nreturn b;\n}\n");
         try out.insert(opening, "const b = ");
         out.remove(opening + 10, 7);
         for (self.entries.items) |*entry| {
@@ -182,15 +184,23 @@ pub const ModuleEmitter = struct {
         }
 
         try self.prologue("export function units(rt) {\n", version);
-        try w.writeAll("const u = [\n");
+        try out.text("const u = [\n");
         try self.unitsOf(swf, blocks);
-        try w.writeAll("];\nreturn {\n");
+        try out.text("];\nreturn {\n");
         for (self.listed.items) |listed| {
             const unit = self.units.items[listed.unit];
-            try w.print("\"{f}\": [u[{d}], {d}, {d}],\n", .{ listed.key, unit.code.?, unit.high, unit.reach });
+            try out.byte('"');
+            try listed.key.write(out);
+            try out.text("\": [u[");
+            try out.uint(unit.code.?);
+            try out.text("], ");
+            try out.int(unit.high);
+            try out.text(", ");
+            try out.int(unit.reach);
+            try out.text("],\n");
         }
 
-        try w.writeAll("};\n}\n");
+        try out.text("};\n}\n");
     }
 
     /// Every unit V.far may ask for, as it asks: control going on at an
@@ -326,7 +336,7 @@ pub const ModuleEmitter = struct {
         found.key_ptr.* = code;
         done.code = code;
         try self.units.append(gpa, done);
-        try out.writer().writeAll(",\n");
+        try out.text(",\n");
         return unit;
     }
 
@@ -344,7 +354,7 @@ pub const ModuleEmitter = struct {
     fn unitCode(self: *ModuleEmitter, swf: []const u8, blocks: []const BlockRange, key: UnitKey) Error!void {
         const emitter = self.blocks;
         if (key.at < 0 or key.at >= key.end or key.end > key.bound or key.bound > swf.len) {
-            try self.out.writer().writeAll("[function (cx) {\nreturn -1;\n}]");
+            try self.out.text("[function (cx) {\nreturn -1;\n}]");
             emitter.unit_high = -1;
             emitter.unit_reach = -1;
             return;
@@ -355,10 +365,12 @@ pub const ModuleEmitter = struct {
     }
 
     fn prologue(self: *ModuleEmitter, opening: []const u8, version: i32) Error!void {
-        const w = self.out.writer();
-        try w.print("{s}const V = rt.version({d}", .{ opening, version });
+        const out = self.out;
+        try out.text(opening);
+        try out.text("const V = rt.version(");
+        try out.int(version);
         // A SWF 4's functions run as a SWF 5's, as Flash runs them (block.zig).
-        try w.writeAll(if (version < 5) ");\nconst V5 = rt.version(5);\n" else ");\n");
+        try out.text(if (version < 5) ");\nconst V5 = rt.version(5);\n" else ");\n");
     }
 };
 
@@ -377,10 +389,7 @@ fn moduleOf(gpa: Allocator, swf: []const u8, at: i32) (Error || error{TestUnexpe
 }
 
 fn moduleAll(gpa: Allocator, swf: []const u8, at: i32) !void {
-    moduleOf(gpa, swf, at) catch |err| switch (err) {
-        error.WriteFailed => return error.OutOfMemory,
-        else => |e| return e,
-    };
+    try moduleOf(gpa, swf, at);
 }
 
 /// As production runs it: in an arena over the allocator, freed whole.

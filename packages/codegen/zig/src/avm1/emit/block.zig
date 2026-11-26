@@ -7,7 +7,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const output = @import("../../output.zig");
 const Output = output.Output;
-const Error = output.Error;
+const Error = Allocator.Error;
 const decode = @import("../actions/decode.zig");
 const Action = decode.Action;
 const Actions = decode.Actions;
@@ -165,39 +165,39 @@ pub const BlockEmitter = struct {
 
     /// The regions `analyzed`, or a block too large to compile.
     fn regions(self: *BlockEmitter, analyzed: regions_.Error!void) Error!void {
-        const w = self.out.writer();
-        try w.writeByte('[');
+        const out = self.out;
+        try out.byte('[');
         analyzed catch |err| switch (err) {
-            error.TooLarge => return w.writeAll("function (cx) {\nV.tooLarge();\n}]"),
+            error.TooLarge => return out.text("function (cx) {\nV.tooLarge();\n}]"),
             error.OutOfMemory => |e| return e,
         };
 
         for (self.flow.regions.items, 0..) |region, i| {
             if (i > 0) {
-                try w.writeAll(", ");
+                try out.text(", ");
             }
 
             try self.writeRegion(region);
         }
 
-        try w.writeByte(']');
+        try out.byte(']');
     }
 
     fn writeRegion(self: *BlockEmitter, region: *const Region) Error!void {
-        const w = self.out.writer();
+        const out = self.out;
         self.registers = 0;
         self.in_unit = region.kind == .unit;
         self.five = if (region.kind == .function) self.version < 5 else self.in_unit and self.unit_five;
         if (region.kind != .function) {
-            try w.writeAll("function (cx) {\nconst st = cx.st;\n");
+            try out.text("function (cx) {\nconst st = cx.st;\n");
             if (self.five) {
-                try w.writeAll("const V = V5;\n");
+                try out.text("const V = V5;\n");
             }
         } else {
             // A body is called with its `this` and its arguments; a SWF 4's runs as a SWF 5's.
-            try w.writeAll("function (cx, self, args) {\nconst st = cx.st;\n");
+            try out.text("function (cx, self, args) {\nconst st = cx.st;\n");
             if (self.version < 5) {
-                try w.writeAll("const V = V5;\n");
+                try out.text("const V = V5;\n");
             }
 
             const opener = self.actions.get(region.opener.?);
@@ -209,23 +209,27 @@ pub const BlockEmitter = struct {
 
         const n = region.blockCount();
         if (n == 0) {
-            return w.writeAll("}");
+            return out.text("}");
         }
 
         try pool_.poolsOf(self.gpa, &self.actions, region, &self.pools, &self.pool_work);
         try control.heldRanges(self, region);
         const dispatch = n > 1 or control.jumpsWithin(&self.actions, region);
         if (dispatch) {
-            try w.print("let b = {d};\n", .{region.blockAt(region.start)});
-            try w.writeAll(if (self.tries) "for (;;) try { for (;;) switch (b) {\n" else "for (;;) switch (b) {\n");
+            try out.text("let b = ");
+            try out.uint(region.blockAt(region.start));
+            try out.text(";\n");
+            try out.text(if (self.tries) "for (;;) try { for (;;) switch (b) {\n" else "for (;;) switch (b) {\n");
             if (self.holds) {
-                try w.writeAll(if (self.in_unit) "case -1:\nreturn -2;\n" else "case -1:\nreturn cx.ret;\n");
+                try out.text(if (self.in_unit) "case -1:\nreturn -2;\n" else "case -1:\nreturn cx.ret;\n");
             }
         }
 
         for (0..n) |k| {
             if (dispatch) {
-                try w.print("case {d}:\n", .{k});
+                try out.text("case ");
+                try out.uint(k);
+                try out.text(":\n");
             }
 
             self.k = @intCast(k);
@@ -233,19 +237,19 @@ pub const BlockEmitter = struct {
         }
 
         if (!dispatch) {
-            try w.writeAll("}");
+            try out.text("}");
         } else if (self.tries) {
-            try w.writeAll("} } catch (e) {\nb = V.caught(cx, e, b);\n");
+            try out.text("} } catch (e) {\nb = V.caught(cx, e, b);\n");
             try control.catchInto(self);
-            try w.writeAll("}\n}");
+            try out.text("}\n}");
         } else {
-            try w.writeAll("}\n}");
+            try out.text("}\n}");
         }
     }
 
     /// Block `k` of the region, which starts with pool `pool`.
     fn code(self: *BlockEmitter, region: *const Region, entry: Pool) Error!void {
-        const w = self.out.writer();
+        const out = self.out;
         const k = self.k;
         var pool = entry;
         self.pending = null;
@@ -281,7 +285,7 @@ pub const BlockEmitter = struct {
             } else switch (last.op) {
                 .end => {
                     try control.exit(self);
-                    try w.writeByte('\n');
+                    try out.byte('\n');
                 },
                 .jump, .@"return" => {},
                 else => try control.end(self),
@@ -294,12 +298,16 @@ pub const BlockEmitter = struct {
         const to = last.fallsTo();
         if (!region.runs(to) or region.blockAt(to) != k + 1) {
             try control.goto(self, region, to);
-            try w.writeByte('\n');
+            try out.byte('\n');
         } else if (control.leaves(self.handled.items, k, k + 1)) {
-            try w.print("b = V.leave(cx, {d}); continue;\n", .{k + 1});
+            try out.text("b = V.leave(cx, ");
+            try out.uint(k + 1);
+            try out.text("); continue;\n");
         } else if (self.tries) {
             // A throw takes the block it is thrown in from `b`.
-            try w.print("b = {d};\n", .{k + 1});
+            try out.text("b = ");
+            try out.uint(k + 1);
+            try out.text(";\n");
         }
     }
 
@@ -308,21 +316,22 @@ pub const BlockEmitter = struct {
     /// set (one that is also suppressed undefined, but `arguments`), then its
     /// parameters that have one. A register past the count takes nothing.
     fn preload(self: *BlockEmitter, function: decode.Function) Error!void {
-        const w = self.out.writer();
+        const out = self.out;
         const count = self.registers;
         if (count == 0) {
             return;
         }
 
-        try w.writeAll("let ");
+        try out.text("let ");
         for (0..count) |r| {
             if (r > 0) {
-                try w.writeAll(", ");
+                try out.text(", ");
             }
 
-            try w.print("r{d}", .{r});
+            try out.byte('r');
+            try out.uint(r);
         }
-        try w.writeAll(";\n");
+        try out.text(";\n");
 
         const flags = function.flags;
         var r: u8 = 1;
@@ -348,22 +357,32 @@ pub const BlockEmitter = struct {
 
         // A clip without a parent, the root, has no register for it: _global takes it.
         if (flags.preload_parent and r < count) {
-            try w.print("{{ const p = V.parentOf(cx); if (p !== undefined) {{ r{d} = p;", .{r});
+            try out.text("{ const p = V.parentOf(cx); if (p !== undefined) { r");
+            try out.uint(r);
+            try out.text(" = p;");
             if (flags.preload_global and r + 1 < count) {
-                try w.print(" r{d} = cx.global;", .{r + 1});
+                try out.text(" r");
+                try out.uint(r + 1);
+                try out.text(" = cx.global;");
             }
-            try w.writeAll(" }");
+            try out.text(" }");
             if (flags.preload_global) {
-                try w.print(" else {{ r{d} = cx.global; }}", .{r});
+                try out.text(" else { r");
+                try out.uint(r);
+                try out.text(" = cx.global; }");
             }
-            try w.writeAll(" }\n");
+            try out.text(" }\n");
         } else if (flags.preload_global and !flags.preload_parent) {
             try self.load(r, "cx.global");
         }
 
         for (self.actions.functionParams(function), 0..) |param, i| {
             if (param.register > 0 and param.register < count) {
-                try w.print("r{d} = args[{d}];\n", .{ param.register, i });
+                try out.byte('r');
+                try out.uint(param.register);
+                try out.text(" = args[");
+                try out.uint(i);
+                try out.text("];\n");
             }
         }
     }
@@ -374,19 +393,27 @@ pub const BlockEmitter = struct {
             return;
         }
 
-        try self.out.writer().print("r{d} = {s};\n", .{ r, value });
+        const out = self.out;
+        try out.byte('r');
+        try out.uint(r);
+        try out.text(" = ");
+        try out.text(value);
+        try out.text(";\n");
     }
 
     /// Register `r` as an expression: the region's own, or one of the four
     /// global ones, the movie's; any other is none.
     pub fn register(self: *BlockEmitter, r: u8) Error!bool {
         if (r < self.registers) {
-            try self.out.writer().print("r{d}", .{r});
+            try self.out.byte('r');
+            try self.out.uint(r);
             return true;
         }
 
         if (r < 4) {
-            try self.out.writer().print("cx.g[{d}]", .{r});
+            try self.out.text("cx.g[");
+            try self.out.uint(r);
+            try self.out.byte(']');
             return true;
         }
 
@@ -396,22 +423,26 @@ pub const BlockEmitter = struct {
     /// Try: its bodies as ranges of blocks, where a throw lands for the catch
     /// (-1 out of the region, -2 for none), and the catch's variable or register.
     pub fn @"try"(self: *BlockEmitter, region: *const Region, t: decode.Try) Error!void {
-        const w = self.out.writer();
+        const out = self.out;
         const finally_from = region.firstFrom(t.finally_start);
         const finally_to = if (t.flags.finally_block) region.firstFrom(t.end) else finally_from;
         const catch_block: i64 = if (!t.flags.catch_block) -2 else if (region.runs(t.catch_start)) region.blockAt(t.catch_start) else -1;
-        try w.print("V.try(cx, {d}, {d}, {d}, {d}, {d}, ", .{ region.firstFrom(t.start), region.firstFrom(t.catch_start), finally_from, finally_to, catch_block });
+        try out.text("V.try(cx, ");
+        for ([_]i64{ region.firstFrom(t.start), region.firstFrom(t.catch_start), finally_from, finally_to, catch_block }) |n| {
+            try out.int(n);
+            try out.text(", ");
+        }
         switch (t.catch_into) {
-            .register => |r| try w.print("{d}", .{r}),
+            .register => |r| try out.uint(r),
             .variable => |name| try self.string(name),
             // Too short for its header: no catch.
-            .none => try w.writeAll("\"\""),
+            .none => try out.text("\"\""),
         }
-        try w.writeAll(");\n");
+        try out.text(");\n");
     }
 
     pub fn string(self: *BlockEmitter, s: []const u8) Error!void {
-        try writeString(self.out.writer(), s, self.version >= 6);
+        try writeString(self.out, s, self.version >= 6);
     }
 };
 
@@ -489,11 +520,7 @@ fn emitAll(gpa: Allocator, block: []const u8, as_unit: bool) !void {
     emitter.version = 6;
     const len: i32 = @intCast(block.len);
     const emitted = if (as_unit) emitter.unit(block, 0, len, len, false, len) else emitter.block(block, 0, len);
-    emitted catch |err| switch (err) {
-        // The writer fails only as its buffer cannot grow.
-        error.WriteFailed => return error.OutOfMemory,
-        error.OutOfMemory => |e| return e,
-    };
+    try emitted;
 }
 
 test "every allocation writing a block or a unit makes may fail, and it gives it back" {
