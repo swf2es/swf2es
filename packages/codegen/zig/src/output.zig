@@ -1,13 +1,13 @@
 // The JavaScript being written, as bytes, all ASCII (every character past
-// it escaped), in one growable buffer (assembly/output.ts): the AVM1
-// emitter's part of it. The emitter writes
-// through `writer()`, a std.Io.Writer, with std.fmt where it prints as AS
-// does (integers, hex); a double goes through AS's own dtoa (dtoa.zig).
+// it escaped), in one growable buffer (assembly/output.ts). The emitters,
+// AVM1's and AVM2's, write through its methods, as AssemblyScript's call
+// them; a double goes through AS's own dtoa (dtoa.zig). The test build's
+// dumps write through `writer()`, a std.Io.Writer, with std.fmt.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const dtoa = @import("dtoa.zig");
 
-/// What writing can fail with: a writer that cannot grow, or an allocation.
+/// What writing through `writer()` can fail with: a writer that cannot grow, or an allocation.
 pub const Error = std.Io.Writer.Error || Allocator.Error;
 
 pub const Output = struct {
@@ -101,7 +101,9 @@ pub const Output = struct {
         try self.uint(@abs(n));
     }
 
-    pub fn uint(self: *Output, n: u64) Allocator.Error!void {
+    /// Not inlined, as `text` is not: inlined, its loop came to some 16 KB
+    /// over the emitters' 180 calls, and sharing it costs no time (P8).
+    pub noinline fn uint(self: *Output, n: u64) Allocator.Error!void {
         var digits: [20]u8 = undefined;
         var at: usize = digits.len;
         var rest = n;
@@ -302,39 +304,6 @@ test "the AVM2 emitters' methods write as AssemblyScript's Output does" {
     try std.testing.expectEqualStrings(" !#[]~plain\\x7fend\\\"tailab\\u00e9cd\\x01e", out.written());
 }
 
-/// A JavaScript number literal for a double: exact, and valid for NaN,
-/// infinities and -0; an integer as std.fmt writes it, any other as AS's
-/// dtoa does, which std.fmt's shortest form would not match.
-pub fn writeDouble(w: *std.Io.Writer, d: f64) std.Io.Writer.Error!void {
-    if (std.math.isNan(d)) {
-        try w.writeAll("NaN");
-    } else if (std.math.isInf(d)) {
-        try w.writeAll(if (d > 0) "Infinity" else "-Infinity");
-    } else if (d == 0 and std.math.signbit(d)) {
-        try w.writeAll("-0");
-    } else if (d == @floor(d) and @abs(d) < 9007199254740992) {
-        try w.print("{d}", .{@as(i64, @intFromFloat(d))});
-    } else {
-        var buffer: [dtoa.max_length]u8 = undefined;
-        try w.writeAll(dtoa.dtoa(&buffer, d));
-    }
-}
-
-/// A UTF-16 code unit as a \u escape: its low 16 bits, as Output.unit writes two bytes' hex.
-pub fn writeUnit(w: *std.Io.Writer, u: u32) std.Io.Writer.Error!void {
-    try w.print("\\u{x:0>4}", .{@as(u16, @truncate(u))});
-}
-
-/// A code point as \u escapes, two surrogates' past U+FFFF (Output.point).
-pub fn writePoint(w: *std.Io.Writer, c: u32) std.Io.Writer.Error!void {
-    if (c > 0xffff) {
-        try writeUnit(w, (((c - 0x10000) >> 10) & 0x3ff) + 0xd800);
-        try writeUnit(w, ((c - 0x10000) & 0x3ff) + 0xdc00);
-    } else {
-        try writeUnit(w, c);
-    }
-}
-
 /// The code point of the well-formed sequence of `n` bytes that starts `p` (wellFormed).
 pub fn codePoint(p: []const u8, n: u32) u32 {
     const c: u32 = p[0];
@@ -376,13 +345,14 @@ test "numbers as AssemblyScript writes them" {
     defer arena.deinit();
 
     var out: Output = try .init(arena.allocator());
-    const w = out.writer();
-    try writeDouble(w, -0.0);
-    try writeDouble(w, -12);
-    try w.writeByte(' ');
-    try writeDouble(w, 0.5);
-    try w.print(" {d} ", .{std.math.minInt(i32)});
-    try writeUnit(w, 0xe9);
+    try out.double(-0.0);
+    try out.double(-12);
+    try out.byte(' ');
+    try out.double(0.5);
+    try out.byte(' ');
+    try out.int(std.math.minInt(i32));
+    try out.byte(' ');
+    try out.unit(0xe9);
     try out.insert(0, "[");
     out.remove(1, 2);
     try std.testing.expectEqualStrings("[-12 0.5 -2147483648 \\u00e9", out.written());
