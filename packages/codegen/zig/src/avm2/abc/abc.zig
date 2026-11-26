@@ -265,13 +265,4 @@ pub const Abc = struct {
     pub inline fn bodyCount(self: *const Abc) u32 {
         return @intCast(self.bodyMethod.len);
     }
-
-    /// Record the first error of linking the ABC, as avmplus stops at the first throw; returns false.
-    pub fn fail(self: *Abc, err: i32) bool {
-        if (self.@"error" == 0) {
-            self.@"error" = err;
-        }
-
-        return false;
-    }
 };

@@ -63,14 +63,52 @@ pub const TraitsKind = enum(u8) {
 
 pub const TYPE_Any: i32 = -1;
 
-// Binding kinds, as avmplus' BindingKind; a binding is id << 3 | kind.
-pub const BIND_None: u32 = 0;
-pub const BKIND_Method: u32 = 1;
-pub const BKIND_Var: u32 = 2;
-pub const BKIND_Const: u32 = 3;
-pub const BKIND_Get: u32 = 5;
-pub const BKIND_Set: u32 = 6;
-pub const BKIND_GetSet: u32 = 7;
+/// A binding's kind, as avmplus' BindingKind: the low three bits of a
+/// Binding. Kind 4 is one avmplus does not use.
+pub const BindingKind = enum(u3) {
+    none = 0,
+    method = 1,
+    variable = 2,
+    constant = 3,
+    get = 5,
+    set = 6,
+    get_set = 7,
+    _,
+
+    /// Whether it is an accessor's: get, set, or both.
+    pub fn isAccessor(kind: BindingKind) bool {
+        return kind == .get or kind == .set or kind == .get_set;
+    }
+};
+
+/// A name's binding in a traits, as avmplus' Binding: the kind in the low
+/// three bits and the id above them, `id << 3 | kind` in one u32 (checked
+/// below), so that the tables keep the numbers avmplus' layout gives. The
+/// id is the slot (variable, constant), the dispatch id (method, accessor:
+/// a getter's, its setter's the next).
+pub const Binding = packed struct(u32) {
+    kind: BindingKind,
+    id: u29,
+
+    /// No binding: 0.
+    pub const none: Binding = @bitCast(@as(u32, 0));
+    /// Bound differently in two of the places a lookup searched
+    /// (types.zig): 0xffffffff, kind get_set and the largest id, which no
+    /// table holds.
+    pub const ambiguous: Binding = @bitCast(@as(u32, 0xffffffff));
+
+    /// Kind `kind` at `id`, its top three bits dropped as `id << 3` in a
+    /// u32 drops them.
+    pub fn of(id: u32, kind: BindingKind) Binding {
+        return .{ .kind = kind, .id = @truncate(id) };
+    }
+};
+
+comptime {
+    // The word avmplus' layout gives, which the tables and the modules hold.
+    std.debug.assert(@sizeOf(Binding) == 4);
+    std.debug.assert(@as(u32, @bitCast(Binding.of(5, .get))) == 5 << 3 | 5);
+}
 /// Types the rules below treat specially, as avmplus' BuiltinType.
 /// Computed from a type id (Domain.builtin), never stored.
 pub const Builtin = enum(u8) {
@@ -88,13 +126,12 @@ pub const Builtin = enum(u8) {
 };
 
 /// As isCompatibleOverrideKind: whether `over` may implement a binding of kind `base`.
-pub fn compatibleKind(base: u32, over: u32) bool {
-    if (base == BKIND_Method) {
-        return over == BKIND_Method;
+pub fn compatibleKind(base: BindingKind, over: BindingKind) bool {
+    if (base == .method) {
+        return over == .method;
     }
 
-    const accessors: u32 = (1 << BKIND_Get) | (1 << BKIND_Set) | (1 << BKIND_GetSet);
-    return ((accessors >> @intCast(base)) & 1) == 1 and ((accessors >> @intCast(over)) & 1) == 1;
+    return base.isAccessor() and over.isAccessor();
 }
 
 /// The scope chain a method is created in (avmplus' ScopeTypeChain): the
@@ -215,7 +252,7 @@ pub const TraitsTable = struct {
     memberNs: Rows(u32) = .{},
     memberName: Rows(u32) = .{},
     memberVersion: Rows(u8) = .{},
-    memberBinding: Rows(u32) = .{},
+    memberBinding: Rows(Binding) = .{},
     members: IdTable,
 
     // Filled when resolved: each slot's type and each dispatch id's method,
@@ -366,14 +403,14 @@ pub const TraitsTable = struct {
     }
 
     /// The binding of `name` in `ns` among t's own members, visible at `version`.
-    pub fn own(self: *const TraitsTable, t: u32, ns: u32, name: u32, version: u8) u32 {
+    pub fn own(self: *const TraitsTable, t: u32, ns: u32, name: u32, version: u8) Binding {
         const hash = hashPair(hashPair(t, ns), name);
         const members = &self.members;
         var slot = members.start(hash);
         while (true) {
             const id = members.at(slot);
             if (id < 0) {
-                return BIND_None;
+                return Binding.none;
             }
 
             const m: u32 = @intCast(id);
@@ -395,21 +432,21 @@ pub const TraitsTable = struct {
     }
 
     /// As TraitsBindings::findBinding: t's own members, then its base's.
-    pub fn find(self: *const TraitsTable, type_: i32, ns: u32, name: u32, version: u8) u32 {
+    pub fn find(self: *const TraitsTable, type_: i32, ns: u32, name: u32, version: u8) Binding {
         var t = type_;
         while (t >= 0) : (t = self.base.get(@intCast(t))) {
             const b = self.own(@intCast(t), ns, name, version);
-            if (b != BIND_None) {
+            if (b != Binding.none) {
                 return b;
             }
         }
 
-        return BIND_None;
+        return Binding.none;
     }
 
     /// As TraitsBindings::findBinding by name alone: the first member named
     /// `name` in any namespace of t or its bases.
-    pub fn findName(self: *const TraitsTable, type_: i32, name: u32) u32 {
+    pub fn findName(self: *const TraitsTable, type_: i32, name: u32) Binding {
         var t = type_;
         while (t >= 0) : (t = self.base.get(@intCast(t))) {
             const last = self.memberEnd.get(@intCast(t));
@@ -421,11 +458,11 @@ pub const TraitsTable = struct {
             }
         }
 
-        return BIND_None;
+        return Binding.none;
     }
 
     /// Bind a member of t, replacing one with the same name, namespace and version.
-    pub fn add(self: *TraitsTable, gpa: Allocator, t: u32, ns: u32, name: u32, version: u8, binding: u32) Allocator.Error!void {
+    pub fn add(self: *TraitsTable, gpa: Allocator, t: u32, ns: u32, name: u32, version: u8, binding: Binding) Allocator.Error!void {
         const hash = hashPair(hashPair(t, ns), name);
         const start = self.memberStart.get(t);
         var slot = self.members.start(hash);
@@ -797,6 +834,22 @@ pub fn legalDefault(bt: Builtin, value: Value) bool {
 
 const testing = std.testing;
 
+test "a binding is the word id << 3 | kind, both ways" {
+    const words = [_]u32{ 0, 1, 2 << 3 | 2, 12 << 3 | 3, 7 << 3 | 5, 7 << 3 | 6, 7 << 3 | 7, 0x1fffffff << 3 | 1, 0xffffffff };
+    for (words) |word| {
+        const b: Binding = @bitCast(word);
+        try testing.expectEqual(word & 7, @backingInt(b.kind));
+        try testing.expectEqual(word >> 3, b.id);
+        try testing.expectEqual(word, @as(u32, @bitCast(Binding.of(word >> 3, b.kind))));
+    }
+
+    try testing.expectEqual(@as(u32, 0), @as(u32, @bitCast(Binding.none)));
+    try testing.expectEqual(@as(u32, 0xffffffff), @as(u32, @bitCast(Binding.ambiguous)));
+    // An id past 29 bits loses its top bits, as id << 3 in a u32 did.
+    const wide: u32 = 0xe0000005;
+    try testing.expectEqual(wide << 3 | 1, @as(u32, @bitCast(Binding.of(wide, .method))));
+}
+
 test "int and uint defaults are numbers they hold exactly" {
     try testing.expect(legalDefault(.int, .{ .double = -2147483648 }));
     try testing.expect(!legalDefault(.int, .{ .double = 2147483648 }));
@@ -809,8 +862,8 @@ test "int and uint defaults are numbers they hold exactly" {
 }
 
 test "an override meets accessors with accessors and methods with methods" {
-    try testing.expect(compatibleKind(BKIND_Method, BKIND_Method));
-    try testing.expect(!compatibleKind(BKIND_Method, BKIND_Get));
-    try testing.expect(compatibleKind(BKIND_Get, BKIND_GetSet));
-    try testing.expect(!compatibleKind(BKIND_Var, BKIND_Var));
+    try testing.expect(compatibleKind(BindingKind.method, BindingKind.method));
+    try testing.expect(!compatibleKind(BindingKind.method, BindingKind.get));
+    try testing.expect(compatibleKind(BindingKind.get, BindingKind.get_set));
+    try testing.expect(!compatibleKind(BindingKind.variable, BindingKind.variable));
 }

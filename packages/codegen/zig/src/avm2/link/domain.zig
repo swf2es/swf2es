@@ -17,6 +17,7 @@ const memory = @import("../../memory.zig");
 const Rows = memory.Rows;
 const output = @import("../../output.zig");
 const Abc = @import("../abc/abc.zig").Abc;
+const Diagnostics = @import("../abc/errors.zig").Diagnostics;
 const C = @import("../abc/constants.zig");
 const ConstantPool = @import("../abc/pool.zig").ConstantPool;
 const BodyDecoder = @import("../abc/code.zig").BodyDecoder;
@@ -29,6 +30,8 @@ const IdTable = table.IdTable;
 const hashBytes = table.hashBytes;
 const hashPair = table.hashPair;
 const traits_ = @import("traits.zig");
+const Binding = traits_.Binding;
+const BindingKind = traits_.BindingKind;
 const TraitsTable = traits_.TraitsTable;
 const TYPE_Any = traits_.TYPE_Any;
 const typenames = @import("typenames.zig");
@@ -46,6 +49,12 @@ pub const NsType = enum(u8) {
     static_protected = 4,
     private = 5,
     _,
+
+    /// The one reading of a word, a save's or an export's: its low byte.
+    /// A save's word above 0xff is refused before (lifetime.zig's Words.kind).
+    pub fn fromWord(word: u32) @This() {
+        return @fromBackingInt(@as(u8, @truncate(word)));
+    }
 };
 
 /// avmplus' ApiVersion values that swf2es needs; see core/api-versions.h.
@@ -67,12 +76,26 @@ pub const DomainState = enum(u8) {
     dropped = 2,
     _,
 
+    /// The one reading of a word, a save's or an export's: its low byte.
+    /// A save's word above 0xff is refused before (lifetime.zig's Words.kind).
+    pub fn fromWord(word: u32) @This() {
+        return @fromBackingInt(@as(u8, @truncate(word)));
+    }
+
     /// Whether it is one of the named states, not a corrupt number.
     pub fn isNamed(state: DomainState) bool {
         return switch (state) {
             .live, .evicted, .dropped => true,
             _ => false,
         };
+    }
+
+    /// Whether it is nearer live than `other`. The order live, evicted,
+    /// dropped is the tags' and is meant: a domain only moves away from
+    /// live, but by revival, and a child is never nearer live than its
+    /// parent.
+    pub fn nearerLive(state: DomainState, other: DomainState) bool {
+        return @backingInt(state) < @backingInt(other);
     }
 
     /// Of two states, the one further from live: dropped, then evicted.
@@ -85,8 +108,11 @@ pub const DomainState = enum(u8) {
 pub const ABC_Weight: u64 = 3;
 
 /// The kinds of the log's entries (see Domain.logKind). Saved and
-/// journaled, so their values are fixed; non-exhaustive, and an entry of
-/// another kind is skipped or refused where it is replayed, as before.
+/// journaled, so their values are fixed. Non-exhaustive: a loaded save's
+/// entry of another kind, or a word above 0xff, is refused at load
+/// (lifetime.zig's Words.kind and consistent); journal text's is refused
+/// by replayEntry, which takes no kind past verify, and by replayed, which
+/// does only verify, sign and resolve.
 pub const LogKind = enum(u8) {
     /// An entry undone in place (a verification left before its end).
     none = 0,
@@ -99,6 +125,12 @@ pub const LogKind = enum(u8) {
     /// An ABC verified for the first time, or finding scopes for the first time.
     verify = 4,
     _,
+
+    /// The one reading of a word, a save's or an export's: its low byte.
+    /// A save's word above 0xff is refused before (lifetime.zig's Words.kind).
+    pub fn fromWord(word: u32) @This() {
+        return @fromBackingInt(@as(u8, @truncate(word)));
+    }
 
     /// Whether it is one of the named kinds, not a corrupt number.
     pub fn isNamed(kind: LogKind) bool {
@@ -358,7 +390,7 @@ pub const Domain = struct {
     memoType: Rows(i32) = .{},
     memoAbc: Rows(u32) = .{},
     memoName: Rows(u32) = .{},
-    memoBinding: Rows(u32) = .{},
+    memoBinding: Rows(traits_.Binding) = .{},
     /// Whether the memo was cleared since the Change began, which a
     /// rollback then cannot give back its rows from before.
     memoCleared: bool = false,
@@ -604,7 +636,17 @@ pub const Domain = struct {
         const classCount = self.classAbc.len;
         const typeCount = self.typeNs.len;
         const builtins = self.saveBuiltins();
-        if (!try classes.link(self, index)) {
+        var diag: Diagnostics = .{};
+        const linked = if (classes.link(self, index, &diag)) true else |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.Verify => false,
+        };
+        if (!linked) {
+            // Recorded, not unwound: the ABC keeps its error for its readers.
+            if (abc.@"error" == 0) {
+                abc.@"error" = diag.code;
+            }
+
             self.abcs.truncate(index);
             self.abcBase.truncate(index);
             self.abcBuffer.truncate(index);
@@ -929,7 +971,7 @@ pub const Domain = struct {
         var t = type_;
         while (t >= 0) : (t = traits.base.get(@intCast(t))) {
             const b = types.getOwnBinding(self, index, @intCast(t), mn);
-            if (b == traits_.BIND_None) {
+            if (b == Binding.none) {
                 continue;
             }
 
@@ -1051,7 +1093,7 @@ pub const Domain = struct {
 
         const nsId = self.abcNs.get(index)[ns];
         const version = self.abcNsVersion.get(index)[ns];
-        try traits.add(gpa, t, nsId, self.nameOf(index, name), version, traits_.BKIND_Var);
+        try traits.add(gpa, t, nsId, self.nameOf(index, name), version, Binding.of(0, .variable));
         traits.slotCount.set(t, 1);
         traits.slotStart.set(t, traits.slotType.len);
         try traits.slotType.push(gpa, type_);

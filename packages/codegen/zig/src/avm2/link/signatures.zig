@@ -9,18 +9,20 @@ const C = @import("../abc/constants.zig");
 const overridden = @import("bindings.zig").overridden;
 const Domain = @import("domain.zig").Domain;
 const traits_ = @import("traits.zig");
+const Binding = traits_.Binding;
+const BindingKind = traits_.BindingKind;
 const TraitsTable = traits_.TraitsTable;
 const TYPE_Any = traits_.TYPE_Any;
 const resolveTypeId = @import("typenames.zig").resolveTypeId;
 
-fn hasGetter(binding: u32) bool {
-    const kind = binding & 7;
-    return kind == traits_.BKIND_Get or kind == traits_.BKIND_GetSet;
+fn hasGetter(binding: Binding) bool {
+    const kind = binding.kind;
+    return kind == BindingKind.get or kind == BindingKind.get_set;
 }
 
-fn hasSetter(binding: u32) bool {
-    const kind = binding & 7;
-    return kind == traits_.BKIND_Set or kind == traits_.BKIND_GetSet;
+fn hasSetter(binding: Binding) bool {
+    const kind = binding.kind;
+    return kind == BindingKind.set or kind == BindingKind.get_set;
 }
 
 /// As Traits::finishSlotsAndMethods: each slot's type, and each method's
@@ -105,15 +107,15 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
         } else if (kind.bindsMethod()) {
             traits.readName(dom, index, i);
             const b = traits.own(t, traits.nameNs, traits.nameId, traits.nameVersion);
-            if (b == traits_.BIND_None) {
+            if (b == Binding.none) {
                 continue;
             }
 
-            const d = (b >> 3) + @intFromBool(kind == .setter);
-            const baseBinding = overridden(traits, t, traits.nameNs, traits.nameNsVersion, traits.nameId, tag);
-            if (baseBinding > 0) {
-                const bb: u32 = @intCast(baseBinding);
-                if ((bb & 7) == traits_.BKIND_Method or
+            const d = @as(u32, b.id) + @intFromBool(kind == .setter);
+            const baseBinding = overridden(traits, t, traits.nameNs, traits.nameNsVersion, traits.nameId, tag) orelse Binding.none;
+            if (baseBinding != Binding.none) {
+                const bb = baseBinding;
+                if (bb.kind == .method or
                     (hasGetter(bb) and kind == .getter) or
                     (hasSetter(bb) and kind == .setter))
                 {
@@ -222,14 +224,14 @@ pub fn checkInterfaces(traits: *const TraitsTable, dom: *const Domain, t: u32, i
         while (m < last) : (m += 1) {
             const iBinding = traits.memberBinding.get(m);
             const cBinding = traits.find(@intCast(t), traits.memberNs.get(m), traits.memberName.get(m), traits.memberVersion.get(m));
-            const iKind = iBinding & 7;
-            if (!traits_.compatibleKind(iKind, cBinding & 7)) {
+            const iKind = iBinding.kind;
+            if (!traits_.compatibleKind(iKind, cBinding.kind)) {
                 return false;
             }
 
-            const iId = iBinding >> 3;
-            const cId = cBinding >> 3;
-            if (iKind == traits_.BKIND_Method) {
+            const iId = @as(u32, iBinding.id);
+            const cId = @as(u32, cBinding.id);
+            if (iKind == BindingKind.method) {
                 const virt = traits.dispatch.get(ifcDispatch + iId);
                 const over = traits.dispatch.get(dispatch + cId);
                 if (virt >= 0 and !try checkOverride(traits, dom, t, @intCast(virt), over)) {

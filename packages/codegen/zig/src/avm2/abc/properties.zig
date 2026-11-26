@@ -7,10 +7,9 @@ const std = @import("std");
 const Error = std.mem.Allocator.Error;
 const ir_ = @import("../ir/ir.zig");
 const traits_ = @import("../link/traits.zig");
-const BIND_None = traits_.BIND_None;
+const Binding = traits_.Binding;
 const TYPE_Any = traits_.TYPE_Any;
 const types = @import("../link/types.zig");
-const BIND_Ambiguous = types.BIND_Ambiguous;
 const code_ = @import("code.zig");
 const BodyDecoder = code_.BodyDecoder;
 const NOT_NULL = code_.NOT_NULL;
@@ -51,9 +50,9 @@ pub fn propertyDepth(bd: *BodyDecoder, mn: u32, depth: u32) u32 {
 }
 
 /// The binding of `mn` on `type`, recording 1008 if it is ambiguous.
-pub fn binding(bd: *BodyDecoder, ty: i32, mn: u32) Error!u32 {
+pub fn binding(bd: *BodyDecoder, ty: i32, mn: u32) Error!Binding {
     const b = try types.getBinding(bd.domain, bd.index, ty, mn);
-    if (b == BIND_Ambiguous) {
+    if (b == Binding.ambiguous) {
         _ = bd.fail(C.kAmbiguousBindingError);
     }
 
@@ -61,7 +60,7 @@ pub fn binding(bd: *BodyDecoder, ty: i32, mn: u32) Error!u32 {
 }
 
 /// As Verifier::readBinding: resolve `type`, then the type of its binding b; below TYPE_Any on error.
-pub fn readBinding(bd: *BodyDecoder, ty: i32, b: u32) Error!i32 {
+pub fn readBinding(bd: *BodyDecoder, ty: i32, b: Binding) Error!i32 {
     if (ty < 0) {
         return TYPE_Any;
     }
@@ -201,11 +200,11 @@ pub fn findProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
         while (i >= base) : (i -= 1) {
             const v: u32 = @intCast(i);
             const b = try binding(bd, bd.typeOf(v), mn);
-            if (b == BIND_Ambiguous) {
+            if (b == Binding.ambiguous) {
                 return false;
             }
 
-            if (b != 0) {
+            if (b != Binding.none) {
                 _ = bd.push(bd.typeOf(v), bd.valueFlags[v] & NOT_NULL);
                 return emitFound(bd, .getscopeobject, top, i, v - bd.localCount, 0);
             }
@@ -220,11 +219,11 @@ pub fn findProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
             while (j > 0) : (j -= 1) {
                 const t = outer.types[@intCast(j)];
                 const b = try binding(bd, t, mn);
-                if (b == BIND_Ambiguous) {
+                if (b == Binding.ambiguous) {
                     return false;
                 }
 
-                if (b != 0) {
+                if (b != Binding.none) {
                     _ = bd.push(t, NOT_NULL);
                     return emitFound(bd, .getouterscope, top, -1, @intCast(j), 0);
                 }
@@ -326,7 +325,7 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
     const obj = bd.peek(n);
     const ty = bd.typeOf(obj);
     const b = try binding(bd, ty, mn);
-    if (b == BIND_Ambiguous) {
+    if (b == Binding.ambiguous) {
         return false;
     }
 
@@ -336,17 +335,17 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
     }
 
     try bd.checkNull(obj);
-    const kind = b & 7;
-    if (kind == 2 or kind == 3) {
+    const kind = b.kind;
+    if (kind == .variable or kind == .constant) {
         // The builtin global's Math and Number are never null.
         const notNull = domain.traits.abc.get(@intCast(ty)) == @as(u32, @bitCast(domain.builtinAbc)) and domain.isMathOrNumber(bd.index, mn);
         _ = bd.popPush(n, propType, if (notNull) NOT_NULL else 0);
-        return bd.emitOn(.getslot, @bitCast(obj), @bitCast(obj), 1, b >> 3, 0, 0);
+        return bd.emitOn(.getslot, @bitCast(obj), @bitCast(obj), 1, @as(u32, b.id), 0, 0);
     }
 
-    if (kind == 5 or kind == 7) {
+    if (kind == .get or kind == .get_set) {
         const t: u32 = @intCast(ty);
-        const getter = domain.traits.dispatch.get(domain.traits.dispatchStart.get(t) + (b >> 3));
+        const getter = domain.traits.dispatch.get(domain.traits.dispatchStart.get(t) + @as(u32, b.id));
         if (getter >= 0 and !try coerceArgs(bd, @intCast(getter), 0)) {
             return false;
         }
@@ -358,7 +357,7 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
             return bd.emitOn(.getproperty, @bitCast(obj), @bitCast(obj), n, mn, 0, 0);
         }
 
-        return bd.emitOn(.ir_call_getter, @bitCast(obj), @bitCast(obj), 1, b >> 3, 0, getter);
+        return bd.emitOn(.ir_call_getter, @bitCast(obj), @bitCast(obj), 1, @as(u32, b.id), 0, getter);
     }
 
     if (propType == TYPE_Any and numericIndex(bd, mn)) {
@@ -403,7 +402,7 @@ pub fn setProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
     const obj = bd.peek(n);
     const ty = bd.typeOf(obj);
     const b = try binding(bd, ty, mn);
-    if (b == BIND_Ambiguous) {
+    if (b == Binding.ambiguous) {
         return false;
     }
 
@@ -413,20 +412,20 @@ pub fn setProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
     }
 
     try bd.checkNull(obj);
-    const kind = b & 7;
+    const kind = b.kind;
     const top = bd.peek(1);
 
     // A var, or a const set by the initializer of the traits declaring it.
-    if (kind == 2 or
-        (kind == 3 and opcode == .initproperty and domain.initOfDeclarer(ty, bd.index, mn) == @as(i32, @bitCast(bd.global))))
+    if (kind == .variable or
+        (kind == .constant and opcode == .initproperty and domain.initOfDeclarer(ty, bd.index, mn) == @as(i32, @bitCast(bd.global))))
     {
         try bd.coerce(top, propType);
-        return bd.emitOn(.setslot, -1, @bitCast(obj), 2, b >> 3, 0, 0);
+        return bd.emitOn(.setslot, -1, @bitCast(obj), 2, @as(u32, b.id), 0, 0);
     }
 
-    if (kind == 6 or kind == 7) {
+    if (kind == .set or kind == .get_set) {
         const t: u32 = @intCast(ty);
-        const setter = domain.traits.dispatch.get(domain.traits.dispatchStart.get(t) + (b >> 3) + 1);
+        const setter = domain.traits.dispatch.get(domain.traits.dispatchStart.get(t) + @as(u32, b.id) + 1);
         if (setter >= 0 and !try coerceArgs(bd, @intCast(setter), 1)) {
             return false;
         }
@@ -435,7 +434,7 @@ pub fn setProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
             return bd.emitOn(ir_.of(opcode), -1, @bitCast(obj), n, mn, 0, 0);
         }
 
-        return bd.emitOn(.ir_call_setter, -1, @bitCast(obj), 2, (b >> 3) + 1, 0, setter);
+        return bd.emitOn(.ir_call_setter, -1, @bitCast(obj), 2, @as(u32, b.id) + 1, 0, setter);
     }
 
     if (numericIndex(bd, mn)) {
@@ -452,7 +451,7 @@ pub fn setProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
     // initializer is written as setproperty writes it: ReferenceError 1074.
     // A global's is left to initproperty: a SWF loaded again into the one
     // domain initializes its classes on the first load's global.
-    const late = kind == 3 and opcode == .initproperty and ty >= 0 and domain.traits.kind.get(@intCast(ty)) == .instance;
+    const late = kind == .constant and opcode == .initproperty and ty >= 0 and domain.traits.kind.get(@intCast(ty)) == .instance;
     const write: Op = if (late) .setproperty else opcode;
     return bd.emitOn(ir_.of(write), -1, @bitCast(obj), n, mn, 0, 0);
 }
@@ -476,16 +475,16 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
     }
 
     var b = try binding(bd, ty, mn);
-    if (b == BIND_Ambiguous) {
+    if (b == Binding.ambiguous) {
         return false;
     }
 
     try bd.checkNull(obj);
     const voidCall = opcode == .callpropvoid;
-    if ((b & 7) == 1) {
+    if (b.kind == .method) {
         b = try fasterCall(bd, ty, mn, b, argc);
         const t: u32 = @intCast(ty);
-        const m = traits.dispatch.get(traits.dispatchStart.get(t) + (b >> 3));
+        const m = traits.dispatch.get(traits.dispatchStart.get(t) + @as(u32, b.id));
         if (m >= 0) {
             const mu: u32 = @intCast(m);
             const signError = try traits.sign(domain, mu);
@@ -505,10 +504,10 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
 
                 // An interface's method has no dispatch id of its own on the receiver.
                 const call: IrOp = if (traits.isInterface.get(t) != 0) .ir_call_interface else .callmethod;
-                return bd.emitOn(call, if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, b >> 3, argc, m);
+                return bd.emitOn(call, if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, @as(u32, b.id), argc, m);
             }
         }
-    } else if (((b & 7) == 2 or (b & 7) == 3) and argc == 1) {
+    } else if ((b.kind == .variable or b.kind == .constant) and argc == 1) {
         // Calling a class slot with one argument converts or coerces to the class.
         const slotType = types.bindingType(domain, ty, b);
         const converted = domain.conversionOf(slotType);
@@ -562,7 +561,7 @@ fn conversionOp(bd: *BodyDecoder, ty: i32) IrOp {
 /// As Verifier::findMathFunction and findStringFunction: Math's and
 /// String's methods have variants named with a leading underscore for
 /// arguments of the right types.
-fn fasterCall(bd: *BodyDecoder, ty: i32, mn: u32, b: u32, argc: u32) Error!u32 {
+fn fasterCall(bd: *BodyDecoder, ty: i32, mn: u32, b: Binding, argc: u32) Error!Binding {
     const domain = bd.domain;
     if (ty < 0 or (ty != domain.mathStatic and ty != domain.stringType)) {
         return b;
@@ -570,12 +569,12 @@ fn fasterCall(bd: *BodyDecoder, ty: i32, mn: u32, b: u32, argc: u32) Error!u32 {
 
     const name = try domain.underscored(bd.index, mn);
     const traits = &domain.traits;
-    const faster = if (name < 0) BIND_None else traits.findName(ty, @intCast(name));
-    if ((faster & 7) != 1) {
+    const faster = if (name < 0) Binding.none else traits.findName(ty, @intCast(name));
+    if (faster.kind != .method) {
         return b;
     }
 
-    const m = traits.dispatch.get(traits.dispatchStart.get(@intCast(ty)) + (faster >> 3));
+    const m = traits.dispatch.get(traits.dispatchStart.get(@intCast(ty)) + @as(u32, faster.id));
     if (m < 0 or try traits.sign(domain, @intCast(m)) != 0) {
         return b;
     }
@@ -653,19 +652,19 @@ pub fn callSuper(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool {
     }
 
     const b = try binding(bd, base, mn);
-    if (b == BIND_Ambiguous) {
+    if (b == Binding.ambiguous) {
         return false;
     }
 
     var result = TYPE_Any;
     var m: i32 = -1;
-    if ((b & 7) == 1) {
+    if (b.kind == .method) {
         const err = try traits.resolve(domain, @intCast(base));
         if (err != 0) {
             return bd.fail(err);
         }
 
-        m = traits.dispatch.get(traits.dispatchStart.get(@intCast(base)) + (b >> 3));
+        m = traits.dispatch.get(traits.dispatchStart.get(@intCast(base)) + @as(u32, b.id));
         if (m < 0) {
             return bd.fail(C.kCorruptABCError);
         }
@@ -695,7 +694,7 @@ pub fn callSuper(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool {
                 return false;
             }
 
-            return bd.emitOn(.ir_call_super, if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, b >> 3, argc, m);
+            return bd.emitOn(.ir_call_super, if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, @as(u32, b.id), argc, m);
         }
     }
 
@@ -716,7 +715,7 @@ pub fn getSuper(bd: *BodyDecoder, mn: u32) Error!bool {
     }
 
     const b = try binding(bd, base, mn);
-    if (b == BIND_Ambiguous) {
+    if (b == Binding.ambiguous) {
         return false;
     }
 

@@ -244,7 +244,7 @@ pub fn domainRevive(appDomain: i32, stepped: bool) Allocator.Error!i32 {
 pub fn domainFound(appDomain: i32, nsKind: i32, uri: []const u8, name: []const u8, abc: i32, asType: bool) Allocator.Error!void {
     abandon();
     forgetVerified();
-    try changed(Domain.addFound, .{ @as(u32, @bitCast(appDomain)), @as(domain_.NsType, @fromBackingInt(@as(u8, @truncate(@as(u32, @bitCast(nsKind)))))), uri, name, @as(u32, @bitCast(abc)), asType });
+    try changed(Domain.addFound, .{ @as(u32, @bitCast(appDomain)), domain_.NsType.fromWord(@bitCast(nsKind)), uri, name, @as(u32, @bitCast(abc)), asType });
 }
 
 /// ABC `index` of the domain, or the last added for -1; -1 again where
@@ -1053,7 +1053,7 @@ pub fn replayEntry(kind: u32, index: u32, a: u32, b: u32) Allocator.Error!bool {
     const dom = try domain();
     if (kind > @backingInt(domain_.LogKind.verify) or index >= dom.abcs.len or !dom.isLive(index)) return false;
 
-    return changed(replayOne, .{ @as(domain_.LogKind, @fromBackingInt(@as(u8, @intCast(kind)))), index, a, b });
+    return changed(replayOne, .{ domain_.LogKind.fromWord(kind), index, a, b });
 }
 
 fn replayOne(dom: *Domain, kind: domain_.LogKind, index: u32, a: u32, b: u32) Allocator.Error!bool {
@@ -1111,7 +1111,7 @@ fn replayLog(dom: *Domain, gpa: Allocator, log: []const u8, at: u32) Allocator.E
                 break;
             }
 
-            ok = try replayed(dom, @fromBackingInt(@as(u8, @truncate(@as(u32, @bitCast(kind))))), seen[@intCast(place)], @intCast(a), @intCast(b));
+            ok = try replayed(dom, domain_.LogKind.fromWord(@bitCast(kind)), seen[@intCast(place)], @intCast(a), @intCast(b));
         }
     }
 

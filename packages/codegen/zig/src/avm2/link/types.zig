@@ -7,11 +7,9 @@ const C = @import("../abc/constants.zig");
 const Domain = @import("domain.zig").Domain;
 const hashPair = @import("table.zig").hashPair;
 const traits_ = @import("traits.zig");
-const BIND_None = traits_.BIND_None;
+const Binding = traits_.Binding;
+const BindingKind = traits_.BindingKind;
 const TYPE_Any = traits_.TYPE_Any;
-
-/// A name bound differently in two namespaces of a set it is looked up in.
-pub const BIND_Ambiguous: u32 = 0xffffffff;
 
 /// As Multiname::isBinding: whether multiname `mn` of ABC `index` names
 /// something that can be bound early, a name in known namespaces.
@@ -32,12 +30,12 @@ pub fn isBindingName(dom: *const Domain, index: u32, multiname: u32) bool {
 }
 
 /// As avmplus' getBinding: the binding multiname `mn` of ABC `index` has on
-/// `type`, BIND_None, or BIND_Ambiguous if it binds differently in two of
+/// `type`, Binding.none, or Binding.ambiguous if it binds differently in two of
 /// its namespaces. The type's own members are searched before its base's.
-pub fn getBinding(dom: *Domain, index: u32, type_: i32, mn: u32) Allocator.Error!u32 {
+pub fn getBinding(dom: *Domain, index: u32, type_: i32, mn: u32) Allocator.Error!Binding {
     dom.changing();
     if (type_ < 0) {
-        return BIND_None;
+        return Binding.none;
     }
 
     // Answered before, as the verifier asks again and again (findProperty
@@ -78,9 +76,9 @@ pub fn getBinding(dom: *Domain, index: u32, type_: i32, mn: u32) Allocator.Error
 }
 
 /// getBinding, looked up.
-fn lookupBinding(dom: *const Domain, index: u32, type_: i32, multiname: u32) u32 {
+fn lookupBinding(dom: *const Domain, index: u32, type_: i32, multiname: u32) Binding {
     if (!isBindingName(dom, index, multiname)) {
-        return BIND_None;
+        return Binding.none;
     }
 
     const pool = &dom.abcs.get(index).pool;
@@ -103,33 +101,33 @@ fn lookupBinding(dom: *const Domain, index: u32, type_: i32, multiname: u32) u32
     const last = pool.nsSetStart[set + 1];
     var t = type_;
     while (t >= 0) : (t = traits.base.get(@intCast(t))) {
-        var found = BIND_None;
+        var found = Binding.none;
         var m = first;
         while (m < last) : (m += 1) {
             const ns = pool.nsSetMembers[m];
             const b = traits.own(@intCast(t), ids[ns], name, versions[ns]);
-            if (b == BIND_None) {
+            if (b == Binding.none) {
                 continue;
             }
 
-            if (found != BIND_None and found != b) {
-                return BIND_Ambiguous;
+            if (found != Binding.none and found != b) {
+                return Binding.ambiguous;
             }
 
             found = b;
         }
 
-        if (found != BIND_None) {
+        if (found != Binding.none) {
             return found;
         }
     }
 
-    return BIND_None;
+    return Binding.none;
 }
 
 /// The binding multiname `mn` of ABC `index` has among t's own members, or
-/// BIND_None; Domain.foundNs is then the namespace it was found in.
-pub fn getOwnBinding(dom: *Domain, index: u32, t: u32, multiname: u32) u32 {
+/// Binding.none; Domain.foundNs is then the namespace it was found in.
+pub fn getOwnBinding(dom: *Domain, index: u32, t: u32, multiname: u32) Binding {
     const pool = &dom.abcs.get(index).pool;
     var mn = multiname;
     if (pool.mnKind[mn] == .type_name) {
@@ -151,27 +149,27 @@ pub fn getOwnBinding(dom: *Domain, index: u32, t: u32, multiname: u32) u32 {
     while (m < pool.nsSetStart[set + 1]) : (m += 1) {
         const ns = pool.nsSetMembers[m];
         const b = traits.own(t, ids[ns], name, versions[ns]);
-        if (b != BIND_None) {
+        if (b != Binding.none) {
             dom.foundNs = @intCast(ids[ns]);
             return b;
         }
     }
 
-    return BIND_None;
+    return Binding.none;
 }
 
 /// As Traits::readBinding: the type binding `b` holds on resolved `type`: a
 /// slot's type, a getter's return type, and * for anything else.
-pub fn bindingType(dom: *const Domain, type_: i32, b: u32) i32 {
-    const kind = b & 7;
+pub fn bindingType(dom: *const Domain, type_: i32, b: Binding) i32 {
+    const kind = b.kind;
     const traits = &dom.traits;
     const t: u32 = @intCast(type_);
-    if (kind == traits_.BKIND_Var or kind == traits_.BKIND_Const) {
-        return traits.slotType.get(traits.slotStart.get(t) + (b >> 3));
+    if (kind == BindingKind.variable or kind == BindingKind.constant) {
+        return traits.slotType.get(traits.slotStart.get(t) + @as(u32, b.id));
     }
 
-    if (kind == traits_.BKIND_Get or kind == traits_.BKIND_GetSet) {
-        const m = traits.dispatch.get(traits.dispatchStart.get(t) + (b >> 3));
+    if (kind == BindingKind.get or kind == BindingKind.get_set) {
+        const m = traits.dispatch.get(traits.dispatchStart.get(t) + @as(u32, b.id));
         return if (m < 0) TYPE_Any else traits.returnType.get(@intCast(m));
     }
 

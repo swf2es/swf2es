@@ -8,16 +8,9 @@ const Allocator = std.mem.Allocator;
 const C = @import("../abc/constants.zig");
 const Domain = @import("domain.zig").Domain;
 const traits_ = @import("traits.zig");
+const Binding = traits_.Binding;
+const BindingKind = traits_.BindingKind;
 const TraitsTable = traits_.TraitsTable;
-const BIND_None = traits_.BIND_None;
-const BKIND_Get = traits_.BKIND_Get;
-const BKIND_GetSet = traits_.BKIND_GetSet;
-const BKIND_Method = traits_.BKIND_Method;
-const BKIND_Set = traits_.BKIND_Set;
-
-// Which base binding kinds each trait kind may meet (Traits::getOverride).
-const LEGAL_Method: u32 = (1 << BIND_None) | (1 << BKIND_Method);
-const LEGAL_Accessor: u32 = (1 << BIND_None) | (1 << BKIND_Get) | (1 << BKIND_Set) | (1 << BKIND_GetSet);
 
 /// As Traits::verifyBindings: bind t's members, whose base traits are
 /// already laid out; 0, or the VerifyError.
@@ -84,7 +77,7 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
                     return C.kIllegalOverrideError;
                 }
 
-                if (traits.own(t, nsId, name, version) != BIND_None) {
+                if (traits.own(t, nsId, name, version) != Binding.none) {
                     return C.kCorruptABCError;
                 }
 
@@ -92,44 +85,34 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
                     return C.kIllegalSlotError;
                 }
 
-                const bkind = if (kind == .slot) traits_.BKIND_Var else traits_.BKIND_Const;
-                try traits.add(gpa, t, nsId, name, version, ((slot -% 1) << 3) | bkind);
+                const bkind: BindingKind = if (kind == .slot) .variable else .constant;
+                try traits.add(gpa, t, nsId, name, version, .of(slot -% 1, bkind));
             },
             .method => {
-                const baseBinding = overridden(traits, t, nsId, nsVersion, name, tag);
-                if (baseBinding < 0) {
-                    return C.kIllegalOverrideError;
-                }
-
-                if (baseBinding == BIND_None) {
-                    try traits.add(gpa, t, nsId, name, version, (methodCount << 3) | BKIND_Method);
+                const baseBinding = overridden(traits, t, nsId, nsVersion, name, tag) orelse return C.kIllegalOverrideError;
+                if (baseBinding == Binding.none) {
+                    try traits.add(gpa, t, nsId, name, version, .of(methodCount, .method));
                     methodCount +%= 1;
-                } else if ((@as(u32, @intCast(baseBinding)) & 7) == BKIND_Method) {
-                    try traits.add(gpa, t, nsId, name, version, @intCast(baseBinding));
+                } else if (baseBinding.kind == .method) {
+                    try traits.add(gpa, t, nsId, name, version, baseBinding);
                 } else {
                     return C.kCorruptABCError;
                 }
             },
             .getter, .setter => {
                 // The other accessor of the pair may be defined here already.
-                var baseBinding: i64 = traits.own(t, nsId, name, version);
-                if (baseBinding == BIND_None) {
-                    baseBinding = overridden(traits, t, nsId, nsVersion, name, tag);
-                    if (baseBinding < 0) {
-                        return C.kIllegalOverrideError;
-                    }
+                var baseBinding = traits.own(t, nsId, name, version);
+                if (baseBinding == Binding.none) {
+                    baseBinding = overridden(traits, t, nsId, nsVersion, name, tag) orelse return C.kIllegalOverrideError;
                 }
 
-                const us = if (kind == .getter) BKIND_Get else BKIND_Set;
-                const them = if (kind == .getter) BKIND_Set else BKIND_Get;
-                const bb: u32 = @truncate(@as(u64, @bitCast(baseBinding)));
-                const baseKind = bb & 7;
-                if (baseBinding == BIND_None) {
-                    try traits.add(gpa, t, nsId, name, version, (methodCount << 3) | us);
+                const us: BindingKind = if (kind == .getter) .get else .set;
+                const them: BindingKind = if (kind == .getter) .set else .get;
+                if (baseBinding == Binding.none) {
+                    try traits.add(gpa, t, nsId, name, version, .of(methodCount, us));
                     methodCount +%= 2;
-                } else if (baseKind == BKIND_Get or baseKind == BKIND_Set or baseKind == BKIND_GetSet) {
-                    const id = bb & ~@as(u32, 7);
-                    try traits.add(gpa, t, nsId, name, version, if (baseKind == them) id | BKIND_GetSet else bb);
+                } else if (baseBinding.kind.isAccessor()) {
+                    try traits.add(gpa, t, nsId, name, version, if (baseBinding.kind == them) .{ .kind = .get_set, .id = baseBinding.id } else baseBinding);
                 } else {
                     return C.kCorruptABCError;
                 }
@@ -168,13 +151,13 @@ fn bindInterfaces(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!vo
             const ns = traits.memberNs.get(m);
             const name = traits.memberName.get(m);
             const version = traits.memberVersion.get(m);
-            const iKind = traits.memberBinding.get(m) & 7;
-            if (traits_.compatibleKind(iKind, traits.find(@intCast(t), ns, name, version) & 7)) {
+            const iKind = traits.memberBinding.get(m).kind;
+            if (traits_.compatibleKind(iKind, traits.find(@intCast(t), ns, name, version).kind)) {
                 continue;
             }
 
-            const p = if (publicNs >= 0) traits.find(@intCast(t), @intCast(publicNs), name, publicVersion) else BIND_None;
-            if (traits_.compatibleKind(iKind, p & 7)) {
+            const p = if (publicNs >= 0) traits.find(@intCast(t), @intCast(publicNs), name, publicVersion) else Binding.none;
+            if (traits_.compatibleKind(iKind, p.kind)) {
                 try traits.add(dom.gpa, t, ns, name, version, p);
             }
         }
@@ -182,12 +165,12 @@ fn bindInterfaces(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!vo
 }
 
 /// As Traits::getOverride: the base binding a method or accessor named
-/// `name` in `ns` meets, or -1 if the trait may not meet it that way:
+/// `name` in `ns` meets, or null if the trait may not meet it that way:
 /// overriding something of another kind, or with the override attribute
 /// set where nothing is overridden, or not set where something is.
-pub fn overridden(traits: *const TraitsTable, t: u32, ns: u32, version: u8, name: u32, tag: C.TraitTag) i64 {
+pub fn overridden(traits: *const TraitsTable, t: u32, ns: u32, version: u8, name: u32, tag: C.TraitTag) ?Binding {
     const base = traits.base.get(t);
-    var binding = BIND_None;
+    var binding = Binding.none;
     if (base >= 0) {
         const protectedNs = traits.protectedNs.get(t);
         const baseProtected = traits.protectedNs.get(@intCast(base));
@@ -195,19 +178,20 @@ pub fn overridden(traits: *const TraitsTable, t: u32, ns: u32, version: u8, name
         binding = traits.find(base, lookup, name, version);
     }
 
-    const baseKind = binding & 7;
+    const baseKind = binding.kind;
     const kind = tag.kind;
-    const desired = if (kind == .method) BKIND_Method else if (kind == .getter) BKIND_Get else BKIND_Set;
-    const legal = if (kind == .method) LEGAL_Method else LEGAL_Accessor;
-    if ((legal >> @intCast(baseKind)) & 1 == 0) {
-        return -1;
+    const desired: BindingKind = if (kind == .method) .method else if (kind == .getter) .get else .set;
+    // The base kinds each trait kind may meet.
+    const legal = baseKind == .none or (if (kind == .method) baseKind == .method else baseKind.isAccessor());
+    if (!legal) {
+        return null;
     }
 
     // Overriding is required exactly where the base has a binding of traits kind.
     const required = baseKind == desired or
-        (baseKind == BKIND_GetSet and (desired == BKIND_Get or desired == BKIND_Set));
+        (baseKind == .get_set and (desired == .get or desired == .set));
     if (required != tag.override) {
-        return -1;
+        return null;
     }
 
     return binding;
