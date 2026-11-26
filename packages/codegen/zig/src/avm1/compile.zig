@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const memory = @import("../memory.zig");
 const output = @import("../output.zig");
 const Output = output.Output;
-const Error = output.Error;
+const Error = Allocator.Error;
 const module_ = @import("emit/module.zig");
 const ModuleEmitter = module_.ModuleEmitter;
 const units = @import("emit/units.zig");
@@ -80,7 +80,10 @@ pub fn moduleEntries(gpa: Allocator) Error![]const u8 {
     const text = w.text;
     var entries: Output = try .init(gpa);
     for (w.entries, 0..) |entry, k| {
-        try entries.writer().print("{d}\x01{s}\x02", .{ k, text[entry.start..entry.end] });
+        try entries.uint(k);
+        try entries.byte(1);
+        try entries.text(text[entry.start..entry.end]);
+        try entries.byte(2);
     }
 
     return entries.written();
@@ -100,10 +103,20 @@ pub fn moduleUnits(gpa: Allocator) Error![]const u8 {
         const unit = all[listed.unit];
         const key = unit.key;
         const code = codes[unit.code.?];
-        try entries.writer().print("{f}\x01{d},{d},{d},{d}\x01{d},{d}\x01{s}\x02", .{
-            listed.key, key.at,     key.end,                    key.bound, @intFromBool(key.five),
-            unit.high,  unit.reach, text[code.start..code.end],
-        });
+        try listed.key.write(&entries);
+        try entries.byte(1);
+        for ([_]i64{ key.at, key.end, key.bound }) |n| {
+            try entries.int(n);
+            try entries.byte(',');
+        }
+        try entries.byte(if (key.five) '1' else '0');
+        try entries.byte(1);
+        try entries.int(unit.high);
+        try entries.byte(',');
+        try entries.int(unit.reach);
+        try entries.byte(1);
+        try entries.text(text[code.start..code.end]);
+        try entries.byte(2);
     }
 
     return entries.written();
@@ -216,7 +229,10 @@ pub fn emitEach(gpa: Allocator, swf: Swf, version: i32, blocks: []const u8, reus
         const block = swf.blocks[@intCast(k)];
         try emitter.blocks.block(swf.bytes, block.offset, block.length);
         emitter.blocks.units.clearRetainingCapacity();
-        try entries.writer().print("{d}\x01{s}\x02", .{ k, out.written() });
+        try entries.int(k);
+        try entries.byte(1);
+        try entries.text(out.written());
+        try entries.byte(2);
     }
 
     return entries.written();
@@ -243,10 +259,7 @@ fn everyEntry(source: Allocator, _: *memory.Pages) !void {
 
     var arena: memory.Arena = .init(source);
     defer arena.deinit();
-    calls(arena.allocator(), source) catch |err| switch (err) {
-        // The writer fails only as its buffer cannot grow.
-        error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
-    };
+    try calls(arena.allocator(), source);
 }
 
 fn calls(gpa: Allocator, lasting: Allocator) Error!void {

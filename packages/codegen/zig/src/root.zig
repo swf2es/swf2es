@@ -116,8 +116,8 @@ fn swfOf(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32
     return .{ .bytes = staged(u8, swf, swf_len), .blocks = blocks };
 }
 
-/// What writing a module fails with, as codegenError() reports it: the
-/// writer fails only as its buffer cannot grow.
+/// What the test build's dumps fail with, as codegenError() reports it:
+/// their writer fails only as its buffer cannot grow.
 pub fn failWriting(err: output.Error) usize {
     return fail(switch (err) {
         error.OutOfMemory, error.WriteFailed => error.OutOfMemory,
@@ -128,15 +128,15 @@ pub fn failWriting(err: output.Error) usize {
 
 pub export fn actionsModuleBytes(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, keep: bool) usize {
     const s = swfOf(swf, swf_len, offsets, offsets_len, lengths, lengths_len) catch |err| return fail(err);
-    return handOut(avm1.moduleBytes(gpa(), memory.pages().allocator(), s, version, keep) catch |err| return failWriting(err));
+    return handOut(avm1.moduleBytes(gpa(), memory.pages().allocator(), s, version, keep) catch |err| return fail(err));
 }
 
 pub export fn actionsModuleEntries() usize {
-    return handOut(avm1.moduleEntries(gpa()) catch |err| return failWriting(err));
+    return handOut(avm1.moduleEntries(gpa()) catch |err| return fail(err));
 }
 
 pub export fn actionsModuleUnits() usize {
-    return handOut(avm1.moduleUnits(gpa()) catch |err| return failWriting(err));
+    return handOut(avm1.moduleUnits(gpa()) catch |err| return fail(err));
 }
 
 pub export fn actionsEmitEach(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, blocks: [*]const u8, blocks_len: u32, reuse: bool) usize {
@@ -145,7 +145,7 @@ pub export fn actionsEmitEach(swf: [*]const u8, swf_len: u32, offsets: [*]const 
 
 pub export fn actionsEmitEachBytes(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, blocks: [*]const u8, blocks_len: u32, reuse: bool) usize {
     const s = swfOf(swf, swf_len, offsets, offsets_len, lengths, lengths_len) catch |err| return fail(err);
-    return handOut(avm1.emitEach(gpa(), s, version, staged(u8, blocks, blocks_len), reuse) catch |err| return failWriting(err));
+    return handOut(avm1.emitEach(gpa(), s, version, staged(u8, blocks, blocks_len), reuse) catch |err| return fail(err));
 }
 
 pub export fn actionsHold(handle: i32, swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32) void {
@@ -167,20 +167,20 @@ pub export fn actionsHeldCount() i32 {
 }
 
 pub export fn actionsHeldEmitEachBytes(handle: i32, version: i32, blocks: [*]const u8, blocks_len: u32) usize {
-    const text = avm1.heldEmitEach(gpa(), handle, version, staged(u8, blocks, blocks_len)) catch |err| return failWriting(err);
+    const text = avm1.heldEmitEach(gpa(), handle, version, staged(u8, blocks, blocks_len)) catch |err| return fail(err);
     return if (avm1.heldAt(handle) == null) handOutNone() else handOut(text);
 }
 
 pub export fn actionsHeldUnitBytes(handle: i32, version: i32, at: i32, end: i32, bound: i32, five: bool) usize {
     const key: units.UnitKey = .{ .at = at, .end = end, .bound = bound, .five = five };
-    const code = avm1.heldUnitBytes(gpa(), handle, version, key) catch |err| return failWriting(err);
+    const code = avm1.heldUnitBytes(gpa(), handle, version, key) catch |err| return fail(err);
     return if (code) |text| handOut(text) else handOutNone();
 }
 
 pub export fn actionsUnitBytes(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, at: i32, end: i32, bound: i32, five: bool) usize {
     const s = swfOf(swf, swf_len, offsets, offsets_len, lengths, lengths_len) catch |err| return fail(err);
     const key: units.UnitKey = .{ .at = at, .end = end, .bound = bound, .five = five };
-    return handOut(avm1.unitBytes(gpa(), s, version, key) catch |err| return failWriting(err));
+    return handOut(avm1.unitBytes(gpa(), s, version, key) catch |err| return fail(err));
 }
 
 /// Where the high and reach of the unit compiled last are, two f64s.

@@ -4,7 +4,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const output = @import("../../output.zig");
 const Output = output.Output;
-const Error = output.Error;
+const Error = Allocator.Error;
 const decode = @import("../actions/decode.zig");
 const Action = decode.Action;
 const Actions = decode.Actions;
@@ -19,11 +19,13 @@ const BlockEmitter = block_.BlockEmitter;
 
 /// `V.<name>` of the `operands` values on top of the stack, the top first, its result pushed.
 pub fn operation(em: *BlockEmitter, name: []const u8, operands: u8) Error!void {
-    const w = em.out.writer();
+    const out = em.out;
     const start = try detach(em);
-    try w.print("st.push(V.{s}(", .{name});
+    try out.text("st.push(V.");
+    try out.text(name);
+    try out.byte('(');
     try takeValue(em);
-    try w.writeAll(switch (operands) {
+    try out.text(switch (operands) {
         3 => ", st.pop(), st.pop()));\n",
         2 => ", st.pop()));\n",
         else => "));\n",
@@ -33,36 +35,35 @@ pub fn operation(em: *BlockEmitter, name: []const u8, operands: u8) Error!void {
 
 pub fn push(em: *BlockEmitter, push_: decode.Span, pool: Pool) Error!void {
     const out = em.out;
-    const w = out.writer();
     const values = em.actions.pushValues(push_);
     if (values.len == 0) {
         return;
     }
 
     const start = out.len();
-    try w.writeAll("st.push(");
+    try out.text("st.push(");
     var last = out.len();
     for (values, 0..) |value, i| {
         if (i > 0) {
-            try w.writeAll(", ");
+            try out.text(", ");
         }
 
         last = out.len();
         switch (value) {
             .string => |s| try em.string(s),
-            .float, .double, .integer => try output.writeDouble(w, value.number().?),
-            .null => try w.writeAll("null"),
-            .undefined => try w.writeAll("undefined"),
-            .boolean => |boolean| try w.writeAll(if (boolean) "true" else "false"),
+            .float, .double, .integer => try out.double(value.number().?),
+            .null => try out.text("null"),
+            .undefined => try out.text("undefined"),
+            .boolean => |boolean| try out.text(if (boolean) "true" else "false"),
             .constant8 => |index| try constant(em, pool, index),
             .constant16 => |index| try constant(em, pool, index),
             .register => |r| if (!try em.register(r)) {
-                try w.writeAll("undefined");
+                try out.text("undefined");
             },
         }
     }
 
-    try w.writeAll(");\n");
+    try out.text(");\n");
     em.pending = .{ .statement = start, .value = last, .end = out.len(), .more = values.len > 1 };
 }
 
@@ -74,11 +75,13 @@ pub fn constant(em: *BlockEmitter, pool: Pool, index: u16) Error!void {
             if (index < strings.len) {
                 try em.string(strings[index]);
             } else {
-                try em.out.writer().writeAll("undefined");
+                try em.out.text("undefined");
             }
         },
         .unknown, .unreached => {
-            try em.out.writer().print("cx.pool[{d}]", .{index});
+            try em.out.text("cx.pool[");
+            try em.out.uint(index);
+            try em.out.byte(']');
         },
     }
 }
@@ -89,9 +92,9 @@ pub fn constant(em: *BlockEmitter, pool: Pool, index: u16) Error!void {
 /// Where the statement it writes starts.
 pub fn top(em: *BlockEmitter, prefix: []const u8, rest: []const u8) Error!u32 {
     const start = try detach(em);
-    try em.out.writer().writeAll(prefix);
+    try em.out.text(prefix);
     try takeValue(em);
-    try em.out.writer().writeAll(rest);
+    try em.out.text(rest);
     return start;
 }
 
@@ -110,7 +113,7 @@ pub fn detach(em: *BlockEmitter) Error!u32 {
     try em.scratch.appendSlice(em.gpa, out.written()[pending.value .. out.len() - 3]);
     if (pending.more) {
         out.shrink(pending.value - 2);
-        try out.writer().writeAll(");\n");
+        try out.text(");\n");
     } else {
         out.shrink(pending.statement);
     }
@@ -121,7 +124,7 @@ pub fn detach(em: *BlockEmitter) Error!u32 {
 
 /// The value detach took, else `st.pop()`.
 pub fn takeValue(em: *BlockEmitter) Error!void {
-    try em.out.writer().writeAll(em.detached orelse "st.pop()");
+    try em.out.text(em.detached orelse "st.pop()");
     em.pending = null;
 }
 

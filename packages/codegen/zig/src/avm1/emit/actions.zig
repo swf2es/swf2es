@@ -3,7 +3,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const output = @import("../../output.zig");
 const Output = output.Output;
-const Error = output.Error;
+const Error = Allocator.Error;
 const decode = @import("../actions/decode.zig");
 const Action = decode.Action;
 const Actions = decode.Actions;
@@ -149,13 +149,13 @@ const emits: [256]?Emit = blk: {
 pub fn writeAction(em: *BlockEmitter, region: *const Region, action: *const Action, pool: Pool) Error!void {
     if (!action.ok()) {
         // adl stops the whole SWF at an action it cannot read; the block's end returns.
-        return em.out.writer().writeAll("V.halt(cx);\n");
+        return em.out.text("V.halt(cx);\n");
     }
 
-    const w = em.out.writer();
+    const out = em.out;
     const emit = emits[@backingInt(action.op)] orelse return;
     switch (emit) {
-        .fixed => |text| try w.writeAll(text),
+        .fixed => |text| try out.text(text),
         .operation => |operation| try stack.operation(em, operation.name, operation.operands),
         .pops => |pops| {
             const start = try stack.top(em, pops.prefix, pops.rest);
@@ -169,39 +169,43 @@ pub fn writeAction(em: *BlockEmitter, region: *const Region, action: *const Acti
 
 /// The actions whose operands decide what they become.
 pub fn special(em: *BlockEmitter, region: *const Region, action: *const Action, pool: Pool) Error!void {
-    const w = em.out.writer();
+    const out = em.out;
     switch (action.operands) {
         .push => |values| try stack.push(em, values, pool),
         .pool => |strings| {
-            try w.writeAll("V.constantPool(cx, [");
+            try out.text("V.constantPool(cx, [");
             for (em.actions.poolStrings(strings), 0..) |s, i| {
                 if (i > 0) {
-                    try w.writeAll(", ");
+                    try out.text(", ");
                 }
 
                 try em.string(s);
             }
-            try w.writeAll("]);\n");
+            try out.text("]);\n");
         },
         .function => |function| try defineFunction(em, action.op == .define_function2, function),
         .register => |r| {
             // StoreRegister: the value stays, popped and pushed again, undefined on an empty stack.
-            try w.writeAll("st.push(");
+            try out.text("st.push(");
             if (try em.register(r)) {
-                try w.writeAll(" = ");
+                try out.text(" = ");
             }
-            try w.writeAll("st.pop());\n");
+            try out.text("st.pop());\n");
         },
         .with => |body| {
-            try w.print("if (!V.with(cx, st.pop(), {d}, {d})) {{ ", .{ region.firstFrom(body.start), region.firstFrom(body.end) });
+            try out.text("if (!V.with(cx, st.pop(), ");
+            try out.uint(region.firstFrom(body.start));
+            try out.text(", ");
+            try out.uint(region.firstFrom(body.end));
+            try out.text(")) { ");
             try control.goto(em, region, action.next);
-            try w.writeAll(" }\n");
+            try out.text(" }\n");
         },
         .@"try" => |t| try em.@"try"(region, t),
         .branch => |to| switch (action.op) {
             .jump => {
                 try control.goto(em, region, to);
-                try w.writeByte('\n');
+                try out.byte('\n');
             },
             else => {
                 _ = try stack.top(em, "if (V.toBoolean(", ")) ");
@@ -211,38 +215,46 @@ pub fn special(em: *BlockEmitter, region: *const Region, action: *const Action, 
         .wait => |wait| {
             // A frame not loaded skips the actions after.
             if (action.op == .wait_for_frame) {
-                try w.print("if (!V.frameLoaded(cx, {d})) ", .{wait.frame});
+                try out.text("if (!V.frameLoaded(cx, ");
+                try out.uint(wait.frame);
+                try out.text(")) ");
             } else {
                 _ = try stack.top(em, "if (!V.frameLoaded2(cx, ", ")) ");
             }
             try control.branch(em, region, wait.target.?);
         },
-        .frame => |frame| try w.print("V.gotoFrame(cx, {d});\n", .{frame}),
+        .frame => |frame| {
+            try out.text("V.gotoFrame(cx, ");
+            try out.uint(frame);
+            try out.text(");\n");
+        },
         .name => |name| {
-            try w.writeAll(if (action.op == .goto_label) "V.gotoLabel(cx, " else "V.setTarget(cx, ");
+            try out.text(if (action.op == .goto_label) "V.gotoLabel(cx, " else "V.setTarget(cx, ");
             try em.string(name);
-            try w.writeAll(");\n");
+            try out.text(");\n");
         },
         .goto_frame2 => |frame2| {
             _ = try stack.top(em, "V.gotoFrame2(cx, ", if (frame2.play) ", true, " else ", false, ");
-            try w.print("{d});\n", .{frame2.bias});
+            try out.uint(frame2.bias);
+            try out.text(");\n");
         },
         .url => |url| {
-            try w.writeAll("V.getUrl(cx, ");
+            try out.text("V.getUrl(cx, ");
             try em.string(url.url);
-            try w.writeAll(", ");
+            try out.text(", ");
             try em.string(url.target);
-            try w.writeAll(");\n");
+            try out.text(");\n");
         },
         .get_url2 => |flags| {
             _ = try stack.top(em, "V.getUrl2(cx, ", ", st.pop(), ");
-            try w.print("{d});\n", .{flags});
+            try out.uint(flags);
+            try out.text(");\n");
         },
         .none => switch (action.op) {
             .@"return" => {
                 // A Try's finally runs first, where one holds.
                 if (control.within(em.returns.items, em.k)) {
-                    try w.writeAll("b = V.ret(cx); continue;\n");
+                    try out.text("b = V.ret(cx); continue;\n");
                 } else if (em.in_unit) {
                     _ = try stack.top(em, "cx.ret = ", "; return -2;\n");
                 } else {
@@ -251,7 +263,7 @@ pub fn special(em: *BlockEmitter, region: *const Region, action: *const Action, 
             },
             .get_time => {
                 const start = em.out.len();
-                try w.writeAll("st.push(V.getTime(cx));\n");
+                try out.text("st.push(V.getTime(cx));\n");
                 stack.pushed(em, start);
             },
             else => unreachable,
@@ -263,24 +275,27 @@ pub fn special(em: *BlockEmitter, region: *const Region, action: *const Action, 
 /// with its name, and its parameters that are variables, null for those
 /// in a register; a DefineFunction2's flags.
 pub fn defineFunction(em: *BlockEmitter, two: bool, function: decode.Function) Error!void {
-    const w = em.out.writer();
-    try w.print("V.defineFunction{s}(cx, {d}, ", .{ if (two) "2" else "", function.region.? });
+    const out = em.out;
+    try out.text(if (two) "V.defineFunction2(cx, " else "V.defineFunction(cx, ");
+    try out.uint(function.region.?);
+    try out.text(", ");
     try em.string(function.name);
-    try w.writeAll(", [");
+    try out.text(", [");
     for (em.actions.functionParams(function), 0..) |param, i| {
         if (i > 0) {
-            try w.writeAll(", ");
+            try out.text(", ");
         }
 
         if (two and param.register != 0) {
-            try w.writeAll("null");
+            try out.text("null");
         } else {
             try em.string(param.name);
         }
     }
-    try w.writeByte(']');
+    try out.byte(']');
     if (two) {
-        try w.print(", {d}", .{@as(u16, @bitCast(function.flags))});
+        try out.text(", ");
+        try out.uint(@as(u16, @bitCast(function.flags)));
     }
-    try w.writeAll(");\n");
+    try out.text(");\n");
 }

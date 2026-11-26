@@ -3,25 +3,30 @@
 // from SWF 6 UTF-8 read leniently, as Unicode's old ConvertUTF.c reads it;
 // every character past ASCII escaped, to keep the module ASCII.
 const std = @import("std");
-const Writer = std.Io.Writer;
+const Allocator = std.mem.Allocator;
 const output = @import("../../output.zig");
-const writeUnit = output.writeUnit;
-const writePoint = output.writePoint;
+const Output = output.Output;
 
 /// What ConvertUTF.c subtracts from the sum of a sequence of 1 to 6 bytes.
 const offsets = [_]u32{ 0, 0x3080, 0xe2080, 0x3c82080, 0xfa082080, 0x82082080 };
 
 /// The string `s`, read as UTF-8 if `utf8`, else a character a byte.
-pub fn writeString(w: *Writer, s: []const u8, utf8: bool) Writer.Error!void {
-    try w.writeByte('"');
+pub fn writeString(out: *Output, s: []const u8, utf8: bool) Allocator.Error!void {
+    try out.byte('"');
     var i: usize = 0;
     while (i < s.len) {
         const b = s[i];
         if (b < 0x80) {
             switch (b) {
-                '"', '\\' => try w.writeAll(&.{ '\\', b }),
-                0...0x1f, 0x7f => try w.print("\\x{x:0>2}", .{b}),
-                else => try w.writeByte(b),
+                '"', '\\' => {
+                    try out.byte('\\');
+                    try out.byte(b);
+                },
+                0...0x1f, 0x7f => {
+                    try out.text("\\x");
+                    try out.hex(b);
+                },
+                else => try out.byte(b),
             }
 
             i += 1;
@@ -29,7 +34,7 @@ pub fn writeString(w: *Writer, s: []const u8, utf8: bool) Writer.Error!void {
         }
 
         if (!utf8) {
-            try writeUnit(w, b);
+            try out.unit(b);
             i += 1;
             continue;
         }
@@ -38,7 +43,7 @@ pub fn writeString(w: *Writer, s: []const u8, utf8: bool) Writer.Error!void {
         // past ASCII is, to keep the module ASCII.
         const n = output.wellFormed(s[i..]);
         if (n != 0) {
-            try writePoint(w, output.codePoint(s[i..], n));
+            try out.point(output.codePoint(s[i..], n));
             i += n;
             continue;
         }
@@ -66,19 +71,19 @@ pub fn writeString(w: *Writer, s: []const u8, utf8: bool) Writer.Error!void {
         // Escaped, since what it reads as may be a quote or a line's end.
         switch (c) {
             0 => break,
-            0xd800...0xdfff, 0x110000...std.math.maxInt(u32) => try writeUnit(w, 0xfffd),
-            else => try writePoint(w, c),
+            0xd800...0xdfff, 0x110000...std.math.maxInt(u32) => try out.unit(0xfffd),
+            else => try out.point(c),
         }
     }
 
-    try w.writeByte('"');
+    try out.byte('"');
 }
 
 fn expectString(bytes: []const u8, utf8: bool, js: []const u8) !void {
-    var buffer: [64]u8 = undefined;
-    var w: Writer = .fixed(&buffer);
-    try writeString(&w, bytes, utf8);
-    try std.testing.expectEqualStrings(js, w.buffered());
+    var out: Output = try .init(std.testing.allocator);
+    defer out.deinit();
+    try writeString(&out, bytes, utf8);
+    try std.testing.expectEqualStrings(js, out.written());
 }
 
 test "strings read as adl reads them" {

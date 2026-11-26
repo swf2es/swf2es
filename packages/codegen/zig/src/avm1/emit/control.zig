@@ -5,7 +5,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const output = @import("../../output.zig");
 const Output = output.Output;
-const Error = output.Error;
+const Error = Allocator.Error;
 const decode = @import("../actions/decode.zig");
 const Action = decode.Action;
 const Actions = decode.Actions;
@@ -87,31 +87,33 @@ pub fn heldRanges(em: *BlockEmitter, region: *const Region) Error!void {
 
 /// The catch handler's part that sets a register a catch took a value into.
 pub fn catchInto(em: *BlockEmitter) Error!void {
-    const w = em.out.writer();
+    const out = em.out;
     if (em.catch_registers.items.len == 0) {
         return;
     }
 
-    try w.writeAll("switch (cx.into) {\n");
+    try out.text("switch (cx.into) {\n");
     for (em.catch_registers.items) |r| {
         if (r >= em.registers and r >= 4) {
             continue;
         }
 
-        try w.print("case {d}: ", .{r});
+        try out.text("case ");
+        try out.uint(r);
+        try out.text(": ");
         _ = try em.register(r);
-        try w.writeAll(" = cx.thrown; break;\n");
+        try out.text(" = cx.thrown; break;\n");
     }
-    try w.writeAll("}\n");
+    try out.text("}\n");
 }
 
 /// The branch of an If or a WaitForFrame to `target`: there, or the region's exit.
 pub fn branch(em: *BlockEmitter, region: *const Region, target: i32) Error!void {
     if (region.runs(target) or within(em.finallies.items, em.k) or transfers(em, region, target)) {
-        const w = em.out.writer();
-        try w.writeAll("{ ");
+        const out = em.out;
+        try out.text("{ ");
         try goto(em, region, target);
-        try w.writeAll(" }\n");
+        try out.text(" }\n");
     } else {
         try end(em);
     }
@@ -121,7 +123,7 @@ pub fn branch(em: *BlockEmitter, region: *const Region, target: i32) Error!void 
 /// the region, without a line's end: through V.leave where it leaves
 /// what a With or a Try holds.
 pub fn goto(em: *BlockEmitter, region: *const Region, offset: i32) Error!void {
-    const w = em.out.writer();
+    const out = em.out;
     if (!region.runs(offset)) {
         return if (transfers(em, region, offset)) transfer(em, region, offset) else exit(em);
     }
@@ -129,28 +131,32 @@ pub fn goto(em: *BlockEmitter, region: *const Region, offset: i32) Error!void {
     const to = region.blockAt(offset);
     // A jump back may loop: it counts down to the script timeout's check (docs/avm1.md, "The frame").
     if (to <= em.k) {
-        try w.writeAll("if (--V.budget < 0) V.timeout(cx); ");
+        try out.text("if (--V.budget < 0) V.timeout(cx); ");
     }
 
     if (leaves(em.handled.items, em.k, to) or crosses(em.scoped.items, em.k, to)) {
-        try w.print("b = V.leave(cx, {d}); continue;", .{to});
+        try out.text("b = V.leave(cx, ");
+        try out.uint(to);
+        try out.text("); continue;");
     } else {
-        try w.print("b = {d}; continue;", .{to});
+        try out.text("b = ");
+        try out.uint(to);
+        try out.text("; continue;");
     }
 }
 
 /// Control out of the region: through V.leave where a finally may hold a throw or a Return.
 pub fn exit(em: *BlockEmitter) Error!void {
     if (within(em.finallies.items, em.k)) {
-        try em.out.writer().writeAll("b = V.leave(cx, -1); continue;");
+        try em.out.text("b = V.leave(cx, -1); continue;");
     } else {
-        try em.out.writer().writeAll(if (em.in_unit) "return -1;" else "return;");
+        try em.out.text(if (em.in_unit) "return -1;" else "return;");
     }
 }
 
 /// The region's exit as a line of its own.
 pub fn end(em: *BlockEmitter) Error!void {
-    try em.out.writer().writeAll(if (em.in_unit) "return -1;\n" else "return;\n");
+    try em.out.text(if (em.in_unit) "return -1;\n" else "return;\n");
 }
 
 /// Whether control at `offset`, outside the region's home, goes on in a
@@ -167,7 +173,7 @@ pub fn transfers(em: *const BlockEmitter, region: *const Region, offset: i32) bo
 
 /// Control to `offset` in the unit there, without a line's end.
 pub fn transfer(em: *BlockEmitter, region: *const Region, offset: i32) Error!void {
-    const w = em.out.writer();
+    const out = em.out;
     const base = em.actions.start;
     const key: UnitKey = .{
         .at = base + offset,
@@ -177,16 +183,26 @@ pub fn transfer(em: *BlockEmitter, region: *const Region, offset: i32) Error!voi
     };
     if (em.in_unit) {
         try em.exits.append(em.gpa, key.at);
-        return w.print("return {d};", .{key.at});
+        try out.text("return ");
+        try out.int(key.at);
+        return out.byte(';');
     }
 
     try em.units.append(em.gpa, key);
-    try w.print("return V.far(cx, {d}, {d}, {d}, {});", .{ key.at, key.end, key.bound, key.five });
+    try out.text("return V.far(cx, ");
+    try out.int(key.at);
+    try out.text(", ");
+    try out.int(key.end);
+    try out.text(", ");
+    try out.int(key.bound);
+    try out.text(if (key.five) ", true);" else ", false);");
 }
 
 /// V.scopes after the first action of the late block `k`.
 pub fn scopes(em: *BlockEmitter, k: u32) Error!void {
-    try em.out.writer().print("V.scopes(cx, {d});\n", .{k});
+    try em.out.text("V.scopes(cx, ");
+    try em.out.uint(k);
+    try em.out.text(");\n");
 }
 
 /// Whether control from block `from` to block `to` leaves one of `ranges`.
