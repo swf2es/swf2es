@@ -118,7 +118,7 @@ pub fn domainTraits(gpa: Allocator, first: i32) Allocator.Error![]const u8 {
                 writeText(w, dom, dom.nsUri.get(traits.memberNs.get(m))) catch break :write;
                 w.writeAll("::") catch break :write;
                 writeText(w, dom, traits.memberName.get(m)) catch break :write;
-                w.print(" {d} {d}", .{ binding & 7, binding >> 3 }) catch break :write;
+                w.print(" {d} {d}", .{ @backingInt(binding.kind), @as(u32, binding.id) }) catch break :write;
             }
         }
 

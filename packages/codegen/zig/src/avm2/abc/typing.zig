@@ -6,11 +6,11 @@
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
 const traits_ = @import("../link/traits.zig");
+const Binding = traits_.Binding;
 const Scope = traits_.Scope;
 const Scopes = traits_.Scopes;
 const TYPE_Any = traits_.TYPE_Any;
 const types = @import("../link/types.zig");
-const BIND_Ambiguous = types.BIND_Ambiguous;
 const code_ = @import("code.zig");
 const BodyDecoder = code_.BodyDecoder;
 const KNOWN = code_.KNOWN;
@@ -217,7 +217,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             const obj = bd.peek(n);
             const ty = bd.typeOf(obj);
             const found = try p.binding(bd, ty, a);
-            if (found == BIND_Ambiguous) {
+            if (found == Binding.ambiguous) {
                 return false;
             }
 
@@ -232,8 +232,8 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             const pushed = bd.popPush(n, itraits, if (itraits == TYPE_Any) 0 else NOT_NULL);
             // A name bound to a slot, as `new` of a script's class names one:
             // what the slot holds, constructed, with no lookup by name.
-            const kind = found & 7;
-            if (pushed and (kind == 2 or kind == 3) and n == b +% 1) {
+            const kind = found.kind;
+            if (pushed and (kind == .variable or kind == .constant) and n == b +% 1) {
                 // The constructor's signature, which the emitter coerces the
                 // arguments to; one that does not resolve fails no method here.
                 const init = if (itraits >= 0) domain.traits.init.get(@intCast(itraits)) else -1;
@@ -241,7 +241,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
                     _ = try domain.traits.sign(domain, @intCast(init));
                 }
 
-                return bd.emitOn(.ir_construct_slot, @bitCast(obj), @bitCast(obj), n, found >> 3, b, ctraits);
+                return bd.emitOn(.ir_construct_slot, @bitCast(obj), @bitCast(obj), n, @as(u32, found.id), b, ctraits);
             }
 
             return pushed;

@@ -30,6 +30,8 @@ const IdTable = table.IdTable;
 const hashBytes = table.hashBytes;
 const hashPair = table.hashPair;
 const traits_ = @import("traits.zig");
+const Binding = traits_.Binding;
+const BindingKind = traits_.BindingKind;
 const TraitsTable = traits_.TraitsTable;
 const TYPE_Any = traits_.TYPE_Any;
 const typenames = @import("typenames.zig");
@@ -388,7 +390,7 @@ pub const Domain = struct {
     memoType: Rows(i32) = .{},
     memoAbc: Rows(u32) = .{},
     memoName: Rows(u32) = .{},
-    memoBinding: Rows(u32) = .{},
+    memoBinding: Rows(traits_.Binding) = .{},
     /// Whether the memo was cleared since the Change began, which a
     /// rollback then cannot give back its rows from before.
     memoCleared: bool = false,
@@ -969,7 +971,7 @@ pub const Domain = struct {
         var t = type_;
         while (t >= 0) : (t = traits.base.get(@intCast(t))) {
             const b = types.getOwnBinding(self, index, @intCast(t), mn);
-            if (b == traits_.BIND_None) {
+            if (b == Binding.none) {
                 continue;
             }
 
@@ -1091,7 +1093,7 @@ pub const Domain = struct {
 
         const nsId = self.abcNs.get(index)[ns];
         const version = self.abcNsVersion.get(index)[ns];
-        try traits.add(gpa, t, nsId, self.nameOf(index, name), version, traits_.BKIND_Var);
+        try traits.add(gpa, t, nsId, self.nameOf(index, name), version, Binding.of(0, .variable));
         traits.slotCount.set(t, 1);
         traits.slotStart.set(t, traits.slotType.len);
         try traits.slotType.push(gpa, type_);
