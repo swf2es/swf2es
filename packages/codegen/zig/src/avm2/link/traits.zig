@@ -97,6 +97,11 @@ pub const Binding = packed struct(u32) {
     /// table holds.
     pub const ambiguous: Binding = @bitCast(@as(u32, 0xffffffff));
 
+    /// Its id as the tables index by it: a slot, or a dispatch id.
+    pub inline fn index(binding: Binding) u32 {
+        return binding.id;
+    }
+
     /// Kind `kind` at `id`, its top three bits dropped as `id << 3` in a
     /// u32 drops them.
     pub fn of(id: u32, kind: BindingKind) Binding {
@@ -862,8 +867,8 @@ test "int and uint defaults are numbers they hold exactly" {
 }
 
 test "an override meets accessors with accessors and methods with methods" {
-    try testing.expect(compatibleKind(BindingKind.method, BindingKind.method));
-    try testing.expect(!compatibleKind(BindingKind.method, BindingKind.get));
-    try testing.expect(compatibleKind(BindingKind.get, BindingKind.get_set));
-    try testing.expect(!compatibleKind(BindingKind.variable, BindingKind.variable));
+    try testing.expect(compatibleKind(.method, .method));
+    try testing.expect(!compatibleKind(.method, .get));
+    try testing.expect(compatibleKind(.get, .get_set));
+    try testing.expect(!compatibleKind(.variable, .variable));
 }

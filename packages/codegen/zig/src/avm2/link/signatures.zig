@@ -10,19 +10,18 @@ const overridden = @import("bindings.zig").overridden;
 const Domain = @import("domain.zig").Domain;
 const traits_ = @import("traits.zig");
 const Binding = traits_.Binding;
-const BindingKind = traits_.BindingKind;
 const TraitsTable = traits_.TraitsTable;
 const TYPE_Any = traits_.TYPE_Any;
 const resolveTypeId = @import("typenames.zig").resolveTypeId;
 
 fn hasGetter(binding: Binding) bool {
     const kind = binding.kind;
-    return kind == BindingKind.get or kind == BindingKind.get_set;
+    return kind == .get or kind == .get_set;
 }
 
 fn hasSetter(binding: Binding) bool {
     const kind = binding.kind;
-    return kind == BindingKind.set or kind == BindingKind.get_set;
+    return kind == .set or kind == .get_set;
 }
 
 /// As Traits::finishSlotsAndMethods: each slot's type, and each method's
@@ -111,7 +110,7 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
                 continue;
             }
 
-            const d = @as(u32, b.id) + @intFromBool(kind == .setter);
+            const d = b.index() + @intFromBool(kind == .setter);
             const baseBinding = overridden(traits, t, traits.nameNs, traits.nameNsVersion, traits.nameId, tag) orelse Binding.none;
             if (baseBinding != Binding.none) {
                 const bb = baseBinding;
@@ -229,9 +228,9 @@ pub fn checkInterfaces(traits: *const TraitsTable, dom: *const Domain, t: u32, i
                 return false;
             }
 
-            const iId = @as(u32, iBinding.id);
-            const cId = @as(u32, cBinding.id);
-            if (iKind == BindingKind.method) {
+            const iId = iBinding.index();
+            const cId = cBinding.index();
+            if (iKind == .method) {
                 const virt = traits.dispatch.get(ifcDispatch + iId);
                 const over = traits.dispatch.get(dispatch + cId);
                 if (virt >= 0 and !try checkOverride(traits, dom, t, @intCast(virt), over)) {

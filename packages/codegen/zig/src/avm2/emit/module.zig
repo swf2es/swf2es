@@ -20,7 +20,6 @@ const C = @import("../abc/constants.zig");
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
-const BindingKind = traits_.BindingKind;
 const method_ = @import("method.zig");
 const MethodEmitter = method_.MethodEmitter;
 const METHOD_SLOT = method_.METHOD_SLOT;
@@ -633,7 +632,7 @@ pub const ModuleEmitter = struct {
 
             table.readName(domain, self.index, i);
             const b = table.own(t, table.nameNs, table.nameId, table.nameVersion);
-            const slot = @as(u32, b.id);
+            const slot = b.index();
             try o.text(if (first) "[" else ", [");
             first = false;
             try o.uint(slot);
@@ -748,7 +747,7 @@ pub const ModuleEmitter = struct {
                 }
 
                 table.readName(domain, index, i);
-                const slot = @as(u32, table.own(v, table.nameNs, table.nameId, table.nameVersion).id);
+                const slot = table.own(v, table.nameNs, table.nameId, table.nameVersion).index();
                 if (slot < count) {
                     self.fillAbc.items[slot] = @intCast(index);
                     self.fillTrait.items[slot] = i;
@@ -864,7 +863,7 @@ pub const ModuleEmitter = struct {
             count += 1;
             try o.uint(@backingInt(kind));
             try o.text(", ");
-            try o.uint(@as(u32, b.id) + @as(u32, if (kind == .setter) 1 else 0));
+            try o.uint(b.index() + @as(u32, if (kind == .setter) 1 else 0));
             try o.text(", ");
             try self.metadataOf(i);
             try o.text("]");
@@ -1022,18 +1021,18 @@ pub const ModuleEmitter = struct {
             var m = table.memberStart.get(ifc);
             while (m < last) : (m += 1) {
                 const ns = table.memberNs.get(m);
-                if (table.memberBinding.get(m).kind != BindingKind.method or domain.nsType.get(ns) == .private) {
+                if (table.memberBinding.get(m).kind != .method or domain.nsType.get(ns) == .private) {
                     continue;
                 }
 
                 const name = table.memberName.get(m);
                 const version = table.memberVersion.get(m);
                 const b = table.find(@intCast(t), ns, name, version);
-                if (b.kind != BindingKind.method) {
+                if (b.kind != .method) {
                     continue;
                 }
 
-                const d = @as(u32, b.id);
+                const d = b.index();
                 if (inherited and
                     table.find(base, ns, name, version) == b and
                     d < baseMethods and

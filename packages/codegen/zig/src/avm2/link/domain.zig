@@ -31,7 +31,6 @@ const hashBytes = table.hashBytes;
 const hashPair = table.hashPair;
 const traits_ = @import("traits.zig");
 const Binding = traits_.Binding;
-const BindingKind = traits_.BindingKind;
 const TraitsTable = traits_.TraitsTable;
 const TYPE_Any = traits_.TYPE_Any;
 const typenames = @import("typenames.zig");
@@ -637,15 +636,13 @@ pub const Domain = struct {
         const typeCount = self.typeNs.len;
         const builtins = self.saveBuiltins();
         var diag: Diagnostics = .{};
-        const linked = if (classes.link(self, index, &diag)) true else |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            error.Verify => false,
-        };
-        if (!linked) {
-            // Recorded, not unwound: the ABC keeps its error for its readers.
-            if (abc.@"error" == 0) {
-                abc.@"error" = diag.code;
+        classes.link(self, index, &diag) catch |err| {
+            if (err == error.OutOfMemory) {
+                return error.OutOfMemory;
             }
+
+            // Recorded, not unwound: the ABC keeps its error for its readers.
+            abc.@"error" = diag.code;
 
             self.abcs.truncate(index);
             self.abcBase.truncate(index);
@@ -683,7 +680,7 @@ pub const Domain = struct {
             self.restoreBuiltins(builtins);
             self.clearBindingMemo();
             return false;
-        }
+        };
 
         try typenames.addClassNames(self, index);
         try self.addBindings(index);

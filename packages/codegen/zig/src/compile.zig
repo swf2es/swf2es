@@ -1106,7 +1106,8 @@ fn replayLog(dom: *Domain, gpa: Allocator, log: []const u8, at: u32) Allocator.E
             const place = try parseI32(gpa, fields[1]);
             const a = try parseI32(gpa, fields[2]);
             const b = try parseI32(gpa, fields[3]);
-            if (place < 0 or place >= seen.len or a < 0 or b < 0) {
+            // As replayEntry: no kind past verify, nor one read as its low byte.
+            if (kind < 0 or kind > @backingInt(domain_.LogKind.verify) or place < 0 or place >= seen.len or a < 0 or b < 0) {
                 ok = false;
                 break;
             }

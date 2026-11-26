@@ -12,7 +12,6 @@ const Value = @import("../abc/pool.zig").Value;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
-const BindingKind = traits_.BindingKind;
 const TraitsTable = traits_.TraitsTable;
 const TYPE_Any = traits_.TYPE_Any;
 const MethodEmitter = @import("method.zig").MethodEmitter;
@@ -172,7 +171,7 @@ pub fn aliasedMember(domain: *const Domain, ifc: u32, disp: u32) i32 {
     var m = traits.memberStart.get(ifc);
     while (m < last) : (m += 1) {
         const b = traits.memberBinding.get(m);
-        if (b.kind == BindingKind.method and @as(u32, b.id) == disp) {
+        if (b.kind == .method and b.index() == disp) {
             return if (domain.nsType.get(traits.memberNs.get(m)) == .private) -1 else @intCast(m);
         }
     }

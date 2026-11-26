@@ -241,7 +241,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
                     _ = try domain.traits.sign(domain, @intCast(init));
                 }
 
-                return bd.emitOn(.ir_construct_slot, @bitCast(obj), @bitCast(obj), n, @as(u32, found.id), b, ctraits);
+                return bd.emitOn(.ir_construct_slot, @bitCast(obj), @bitCast(obj), n, found.index(), b, ctraits);
             }
 
             return pushed;
