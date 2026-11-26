@@ -10,103 +10,74 @@ const std = @import("std");
 const memory = @import("../../memory.zig");
 const ConstantPool = @import("pool.zig").ConstantPool;
 
-/// How many rows each table of Lists holds.
-pub const Counts = struct {
-    paramTypes: u32 = 0,
-    optionalValue: u32 = 0,
-    optionalKind: u32 = 0,
-    metadataKey: u32 = 0,
-    metadataValue: u32 = 0,
-    interfaces: u32 = 0,
-    bodyMethod: u32 = 0,
-    bodyMaxStack: u32 = 0,
-    bodyLocalCount: u32 = 0,
-    bodyInitScopeDepth: u32 = 0,
-    bodyMaxScopeDepth: u32 = 0,
-    bodyCodeStart: u32 = 0,
-    bodyCodeLength: u32 = 0,
-    bodyExceptionStart: u32 = 0,
-    exceptionFrom: u32 = 0,
-    exceptionTo: u32 = 0,
-    exceptionTarget: u32 = 0,
-    exceptionType: u32 = 0,
-    exceptionName: u32 = 0,
-    bodyTraitStart: u32 = 0,
-    traitName: u32 = 0,
-    traitTag: u32 = 0,
-    traitId: u32 = 0,
-    traitIndex: u32 = 0,
-    traitValue: u32 = 0,
-    traitValueKind: u32 = 0,
-    traitMetadataStart: u32 = 0,
-    traitMetadata: u32 = 0,
+/// The ABC's tables that its parse grows across entries, whose sizes it
+/// does not write up front (each method's parameters, each owner's traits).
+const growing = [_][]const u8{
+    "paramTypes",
+    "optionalValue",
+    "optionalKind",
+    "metadataKey",
+    "metadataValue",
+    "interfaces",
+    "bodyMethod",
+    "bodyMaxStack",
+    "bodyLocalCount",
+    "bodyInitScopeDepth",
+    "bodyMaxScopeDepth",
+    "bodyCodeStart",
+    "bodyCodeLength",
+    "bodyExceptionStart",
+    "exceptionFrom",
+    "exceptionTo",
+    "exceptionTarget",
+    "exceptionType",
+    "exceptionName",
+    "bodyTraitStart",
+    "traitName",
+    "traitTag",
+    "traitId",
+    "traitIndex",
+    "traitValue",
+    "traitValueKind",
+    "traitMetadataStart",
+    "traitMetadata",
 };
 
-/// Lists' tables.
-pub const Items = struct {
-    paramTypes: []u32 = &.{},
-    optionalValue: []u32 = &.{},
-    optionalKind: []u8 = &.{},
-    metadataKey: []u32 = &.{},
-    metadataValue: []u32 = &.{},
-    interfaces: []u32 = &.{},
-    bodyMethod: []u32 = &.{},
-    bodyMaxStack: []u32 = &.{},
-    bodyLocalCount: []u32 = &.{},
-    bodyInitScopeDepth: []u32 = &.{},
-    bodyMaxScopeDepth: []u32 = &.{},
-    bodyCodeStart: []u32 = &.{},
-    bodyCodeLength: []u32 = &.{},
-    bodyExceptionStart: []u32 = &.{},
-    exceptionFrom: []u32 = &.{},
-    exceptionTo: []u32 = &.{},
-    exceptionTarget: []u32 = &.{},
-    exceptionType: []u32 = &.{},
-    exceptionName: []u32 = &.{},
-    bodyTraitStart: []u32 = &.{},
-    traitName: []u32 = &.{},
-    traitTag: []u8 = &.{},
-    traitId: []u32 = &.{},
-    traitIndex: []u32 = &.{},
-    traitValue: []u32 = &.{},
-    traitValueKind: []u8 = &.{},
-    traitMetadataStart: []u32 = &.{},
-    traitMetadata: []u32 = &.{},
-};
-
-/// The tables an ABC's parse grows across entries, whose sizes the ABC does
-/// not write up front (each method's parameters, each owner's traits): a
-/// first pass over what follows the pool only counts their rows, and the
-/// second fills them, allocated exact in the ABC's arena from those counts.
-/// The tables of a size the ABC writes first are allocated by the first
-/// pass and filled again, alike, by the second (zeroed).
+/// The growing tables, written by a parse that reads what follows the pool
+/// twice: the first pass only counts their rows, and the second fills
+/// them, each allocated exact in the ABC's arena from its count, so that
+/// the arena holds no more than they take. The tables of a size the ABC
+/// writes first are allocated by the first pass and filled again, alike,
+/// by the second (zeroed). A rejected ABC is not read a second time.
 pub const Lists = struct {
-    /// Where a pass keeps what only it needs, as each owner's methods.
-    scratch: std.mem.Allocator,
-    /// Whether this pass only counts.
-    counting: bool,
-    lens: Counts = .{},
-    items: Items = .{},
+    /// The ABC filled, null while the first pass counts.
+    filling: ?*Abc,
+    lens: [growing.len]u32 = @splat(0),
 
-    /// Lists for the first pass, which counts.
-    pub fn counter(scratch: std.mem.Allocator) Lists {
-        return .{ .scratch = scratch, .counting = true };
-    }
+    pub const counter: Lists = .{ .filling = null };
 
-    /// Lists for the second pass, of the rows `counts` holds, in `gpa`.
-    pub fn filler(gpa: std.mem.Allocator, scratch: std.mem.Allocator, counts: Counts) std.mem.Allocator.Error!Lists {
-        var self: Lists = .{ .scratch = scratch, .counting = false };
-        inline for (@typeInfo(Items).@"struct".field_names) |name| {
-            @field(self.items, name) = try gpa.alloc(@typeInfo(@TypeOf(@field(self.items, name))).pointer.child, @field(counts, name));
+    /// Lists for the second pass, the growing tables of `abc` allocated in
+    /// `gpa` as long as the first pass, `counted`, counted them.
+    pub fn filler(gpa: std.mem.Allocator, abc: *Abc, counted: *const Lists) std.mem.Allocator.Error!Lists {
+        inline for (growing, 0..) |name, k| {
+            @field(abc, name) = try gpa.alloc(@typeInfo(@FieldType(Abc, name)).pointer.child, counted.lens[k]);
         }
 
-        return self;
+        return .{ .filling = abc };
+    }
+
+    fn index(comptime name: []const u8) usize {
+        inline for (growing, 0..) |g, k| {
+            if (comptime std.mem.eql(u8, g, name)) return k;
+        }
+
+        @compileError("not a growing table: " ++ name);
     }
 
     /// A table of `rows` rows the ABC gives the count of first, zero: made by
     /// the first pass, and `made`, which it made, zeroed again for the second.
     pub fn zeroed(self: *const Lists, comptime T: type, gpa: std.mem.Allocator, made: []T, rows: u32) std.mem.Allocator.Error![]T {
-        if (self.counting) {
+        if (self.filling == null) {
             return memory.allocZeroed(gpa, T, rows);
         }
 
@@ -115,26 +86,28 @@ pub const Lists = struct {
         return made;
     }
 
-    /// Row `value` at the end of table `name`.
-    pub inline fn push(self: *Lists, comptime name: []const u8, value: @typeInfo(@FieldType(Items, name)).pointer.child) void {
-        const at = @field(self.lens, name);
-        if (!self.counting) {
-            @field(self.items, name)[at] = value;
+    /// Row `value` at the end of growing table `name`.
+    pub inline fn push(self: *Lists, comptime name: []const u8, value: @typeInfo(@FieldType(Abc, name)).pointer.child) void {
+        const k = comptime index(name);
+        if (self.filling) |abc| {
+            @field(abc, name)[self.lens[k]] = value;
         }
 
-        @field(self.lens, name) = at + 1;
+        self.lens[k] += 1;
     }
 
     pub inline fn len(self: *const Lists, comptime name: []const u8) u32 {
-        return @field(self.lens, name);
+        return self.lens[comptime index(name)];
     }
 
-    /// The tables filled, as the ABC's: each exactly as long as the first pass counted.
-    pub fn keep(self: *const Lists, abc: *Abc) void {
-        inline for (@typeInfo(Items).@"struct".field_names) |name| {
-            std.debug.assert(@field(self.lens, name) == @field(self.items, name).len);
-            @field(abc, name) = @field(self.items, name);
+    /// Whether the second pass filled each growing table to the length the first counted.
+    pub fn full(self: *const Lists) bool {
+        const abc = self.filling orelse return false;
+        inline for (growing, 0..) |name, k| {
+            if (@field(abc, name).len != self.lens[k]) return false;
         }
+
+        return true;
     }
 };
 

@@ -3,7 +3,6 @@
 // base class, which may live in another ABC, so they are checked when
 // classes are linked.
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
@@ -13,16 +12,17 @@ const Reader = @import("reader.zig").Reader;
 
 /// Read the traits of `owner`. Class traits may only name classes below
 /// `classesDefined`: avmplus defines classes one by one while parsing.
-pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefined: u32) Allocator.Error!bool {
+pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefined: u32) bool {
     const count = r.u30_();
     if (count > r.end - r.pos) {
         return abc.fail(C.kCorruptABCError);
     }
 
-    // Each trait's method, where it binds one, for the check after them all.
-    const methods = try lists.scratch.alloc(i64, count);
-    @memset(methods, -1);
-    for (methods) |*method| {
+    // As avmplus' makeMethodOf, a method belongs to at most one owner; a
+    // method owned already is an error only once every trait has read, as
+    // avmplus checks after them all, where a read's error comes first.
+    var owned = false;
+    for (0..count) |_| {
         const name = r.u30_();
         if (r.failed) {
             return abc.fail(C.kCorruptABCError);
@@ -85,7 +85,11 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
         }
 
         if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
-            method.* = index;
+            if (abc.methodOwner[index] != -1) {
+                owned = true;
+            } else {
+                abc.methodOwner[index] = owner;
+            }
         }
 
         lists.push("traitName", name);
@@ -96,15 +100,8 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
         lists.push("traitValueKind", valueKind);
     }
 
-    // As avmplus' makeMethodOf: a method belongs to at most one owner.
-    for (methods) |method| {
-        if (method >= 0) {
-            if (abc.methodOwner[@intCast(method)] != -1) {
-                return abc.fail(C.kCorruptABCError);
-            }
-
-            abc.methodOwner[@intCast(method)] = owner;
-        }
+    if (owned) {
+        return abc.fail(C.kCorruptABCError);
     }
 
     return true;

@@ -656,8 +656,9 @@ test("dropping other domains changes no module, and memory stops growing", {
   };
 
   // Memory grows by pages as more domain and ABC indices are given out:
-  // equal sessions are compared, once the free runs they leave have settled
-  // (two sessions, where one could leave it a page short of where it stays).
+  // equal sessions are compared, once the free runs they leave have settled:
+  // the first two sessions end one page (65,536 bytes) below the steady
+  // 2,949,120, which every session from the third keeps.
   const module = run();
   assert.equal(run(), module);
   assert.equal(run(), module);

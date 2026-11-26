@@ -87,7 +87,7 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Al
         lists.push("bodyTraitStart", lists.len("traitName"));
 
         // Every body has a traits list, empty unless the method needs an activation.
-        if (!try readTraits(abc, lists, r, abc.activationOwner(method), abc.classCount())) {
+        if (!readTraits(abc, lists, r, abc.activationOwner(method), abc.classCount())) {
             return false;
         }
     }

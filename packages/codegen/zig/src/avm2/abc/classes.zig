@@ -94,7 +94,7 @@ pub fn readInstances(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Alloc
         abc.instanceTraitStart[i] = lists.len("traitName");
 
         // No class is defined yet while instances are parsed.
-        if (!try readTraits(abc, lists, r, abc.instanceOwner(i), 0) or !bind(abc, init, abc.instanceOwner(i))) {
+        if (!readTraits(abc, lists, r, abc.instanceOwner(i), 0) or !bind(abc, init, abc.instanceOwner(i))) {
             return false;
         }
     }
@@ -120,7 +120,7 @@ pub fn readClasses(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocat
         abc.classTraitStart[i] = lists.len("traitName");
 
         // Class i's traits may name the classes before it.
-        if (!try readTraits(abc, lists, r, abc.classOwner(i), i) or !bind(abc, @intCast(init), abc.classOwner(i))) {
+        if (!readTraits(abc, lists, r, abc.classOwner(i), i) or !bind(abc, @intCast(init), abc.classOwner(i))) {
             return false;
         }
     }
@@ -153,7 +153,7 @@ pub fn readScripts(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocat
 
         abc.scriptInit[i] = method;
         abc.scriptTraitStart[i] = lists.len("traitName");
-        if (!try readTraits(abc, lists, r, abc.scriptOwner(i), abc.classCount())) {
+        if (!readTraits(abc, lists, r, abc.scriptOwner(i), abc.classCount())) {
             return false;
         }
 

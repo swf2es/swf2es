@@ -40,14 +40,18 @@ pub fn readAbc(gpa: Allocator, scratch: Allocator, data: []const u8, length: u32
     }
 
     // What follows the pool twice: once counting the growing tables' rows,
-    // then filling them, allocated exact from the counts, so that the arena
-    // holds no more than they take.
-    var counter: Lists = .counter(scratch);
+    // then, for an ABC the first pass accepts, filling them, allocated exact
+    // from the counts (Lists).
+    var counter: Lists = .counter;
     var again = r;
     try tables(gpa, abc, &counter, &again);
-    var lists: Lists = try .filler(gpa, scratch, counter.lens);
+    if (abc.@"error" != 0) {
+        return abc;
+    }
+
+    var lists: Lists = try .filler(gpa, abc, &counter);
     try tables(gpa, abc, &lists, &r);
-    lists.keep(abc);
+    std.debug.assert(abc.@"error" == 0 and lists.full());
     return abc;
 }
 
