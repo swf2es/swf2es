@@ -353,8 +353,8 @@ pub fn codeDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const 
         for (0..code.count) |i| {
             const opcode = code.opcode[i];
             try lines.next();
-            try w.print("  {d} {s} {d} {d} {d}", .{ code.offset[i], ops.opcodeNames[opcode], code.a[i], code.b[i], code.c[i] });
-            if (opcode == ops.OP_lookupswitch) {
+            try w.print("  {d} {s} {d} {d} {d}", .{ code.offset[i], opcode.name(), code.a[i], code.b[i], code.c[i] });
+            if (opcode == .lookupswitch) {
                 try w.writeAll(" [");
                 var j = code.c[i];
                 while (j <= code.c[i] + code.b[i]) : (j += 1) {
@@ -424,7 +424,8 @@ pub fn opcodeTable(gpa: Allocator) Error![]const u8 {
             try w.writeByte('\n');
         }
 
-        try w.print("{d} {s} {d} {d}", .{ op, ops.opcodeNames[op], ops.opcodeOperands[op], ops.opcodeFlags[op] });
+        const info = @as(ops.Op, @fromBackingInt(@intCast(op))).info();
+        try w.print("{d} {s} {d} {d}", .{ op, @as(ops.Op, @fromBackingInt(@intCast(op))).name(), @backingInt(info.operands), @as(u8, @bitCast(info.flags)) });
     }
 
     return out.written();

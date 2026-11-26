@@ -17,6 +17,7 @@ const objects = @import("objects.zig");
 const refs = @import("refs.zig");
 const structure = @import("structure.zig");
 const values = @import("values.zig");
+const IrOp = @import("../ir/ir.zig").Op;
 
 fn floatArithmetic(em: *const MethodEmitter, i: u32) bool {
     const ty = em.ir.type[i];
@@ -53,67 +54,67 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
     }
 
     switch (op) {
-        ops.OP_pushbyte, ops.OP_pushshort => {
+        .pushbyte, .pushshort => {
             try em.assign(i, false);
             try out.int(@as(i32, @bitCast(a)));
         },
-        ops.OP_pushint => {
+        .pushint => {
             try em.assign(i, false);
             try out.int(em.abc.pool.ints[a]);
         },
-        ops.OP_pushuint => {
+        .pushuint => {
             try em.assign(i, false);
             try out.uint(em.abc.pool.uints[a]);
         },
-        ops.OP_pushfloat => {
+        .pushfloat => {
             try em.assign(i, false);
             try out.text("rt.float(");
             try out.double(em.abc.pool.floats[a]);
             try out.text(")");
         },
-        ops.OP_pushdouble => {
+        .pushdouble => {
             try em.assign(i, false);
             try out.double(em.abc.pool.doubles[a]);
         },
-        ops.OP_pushnan => {
+        .pushnan => {
             try em.assign(i, false);
             try out.text("NaN");
         },
-        ops.OP_pushstring => {
+        .pushstring => {
             try em.assign(i, false);
             try refs.poolString(em, a);
         },
-        ops.OP_pushtrue => {
+        .pushtrue => {
             try em.assign(i, false);
             try out.text("true");
         },
-        ops.OP_pushfalse => {
+        .pushfalse => {
             try em.assign(i, false);
             try out.text("false");
         },
-        ops.OP_pushnull => {
+        .pushnull => {
             try em.assign(i, false);
             try out.text("null");
         },
-        ops.OP_pushnamespace => {
+        .pushnamespace => {
             try em.assign(i, false);
             try out.text("rt.namespace(N[");
             try out.uint(a);
             try out.text("])");
         },
-        ops.OP_pushundefined => {
+        .pushundefined => {
             try em.assign(i, false);
             try out.text("void 0");
         },
-        ops.OP_getlocal, ops.OP_setlocal, ops.OP_dup => {
+        .getlocal, .setlocal, .dup => {
             if (em.copies_(i, ir.src[i])) {
                 return;
             }
 
             try move(em, i, ir.src[i]);
         },
-        ops.OP_kill => try em.reset(ir.dst[i]),
-        ops.OP_swap => {
+        .kill => try em.reset(ir.dst[i]),
+        .swap => {
             // Through a temporary, not [a, b] = [b, a]: destructuring is an
             // array and the iterator protocol, which V8 counts against inlining.
             const x = ir.src[i];
@@ -127,17 +128,17 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
             try em.regName(x);
             try out.text(" = w; }");
         },
-        ops.OP_debugfile => {
+        .debugfile => {
             em.file = @bitCast(a);
             return;
         },
-        ops.OP_debugline => {
+        .debugline => {
             em.line = a;
             try em.mark();
             return;
         },
-        ops.OP_pop, ops.OP_debug => return,
-        ir_.IR_Coerce => {
+        .pop, .debug => return,
+        .ir_coerce => {
             const s = ir.src[i];
             if (ir.dst[i] == s and try values.keeps(em, ir.c[i], em.regType[@intCast(s)])) {
                 em.kept = true;
@@ -147,7 +148,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
             try em.assign(i, true);
             try values.convert(em, "", s, ir.c[i], em.regType[@intCast(s)], em.unboxedTarget(i));
         },
-        ir_.IR_CheckNull => {
+        .ir_check_null => {
             // A register checked since it was last written is not null.
             const src = ir.src[i];
             const copy = em.copyOf[@intCast(src)];
@@ -167,7 +168,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
             var next = i + 1;
             while (next < em.blockLast and
                 ir.pc[next] == ir.pc[i] and
-                ir.op[next] == ir_.IR_Coerce and
+                ir.op[next] == .ir_coerce and
                 ir.dst[next] == ir.src[next] and
                 try values.keeps(em, ir.c[next], em.regType[@intCast(ir.src[next])]))
             {
@@ -190,7 +191,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
 
             try em.checkedRead(src);
         },
-        ops.OP_add => {
+        .add => {
             try em.assign(i, false);
             if ((values.isNumeric(em, em.src(i, 0)) and values.isNumeric(em, em.src(i, 1))) or values.concatenates(em, i)) {
                 try values.binary(em, i, " + ");
@@ -198,7 +199,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
                 try values.call2(em, "rt.add(", i);
             }
         },
-        ops.OP_subtract => {
+        .subtract => {
             try em.assign(i, false);
             if (floatArithmetic(em, i)) {
                 try values.call2(em, "rt.subtract(", i);
@@ -206,7 +207,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
                 try values.binary(em, i, " - ");
             }
         },
-        ops.OP_multiply => {
+        .multiply => {
             try em.assign(i, false);
             if (floatArithmetic(em, i)) {
                 try values.call2(em, "rt.multiply(", i);
@@ -216,7 +217,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
                 try values.binary(em, i, " * ");
             }
         },
-        ops.OP_divide => {
+        .divide => {
             try em.assign(i, false);
             if (floatArithmetic(em, i)) {
                 try values.call2(em, "rt.divide(", i);
@@ -224,7 +225,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
                 try values.binary(em, i, " / ");
             }
         },
-        ops.OP_modulo => {
+        .modulo => {
             try em.assign(i, false);
             if (floatArithmetic(em, i)) {
                 try values.call2(em, "rt.modulo(", i);
@@ -232,42 +233,42 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
                 try values.binary(em, i, " % ");
             }
         },
-        ops.OP_add_i => {
+        .add_i => {
             try em.assign(i, false);
             try values.binaryInt(em, i, " + ");
         },
-        ops.OP_subtract_i => {
+        .subtract_i => {
             try em.assign(i, false);
             try values.binaryInt(em, i, " - ");
         },
-        ops.OP_multiply_i => {
+        .multiply_i => {
             // int multiplication wraps as Math.imul does, not as a double product.
             try em.assign(i, false);
             try values.call2(em, "Math.imul(", i);
         },
-        ops.OP_bitand, ops.OP_bitor, ops.OP_bitxor, ops.OP_lshift, ops.OP_rshift, ops.OP_urshift => {
+        .bitand, .bitor, .bitxor, .lshift, .rshift, .urshift => {
             try em.assign(i, false);
             try values.binary(em, i, switch (op) {
-                ops.OP_bitand => " & ",
-                ops.OP_bitor => " | ",
-                ops.OP_bitxor => " ^ ",
-                ops.OP_lshift => " << ",
-                ops.OP_rshift => " >> ",
+                .bitand => " & ",
+                .bitor => " | ",
+                .bitxor => " ^ ",
+                .lshift => " << ",
+                .rshift => " >> ",
                 else => " >>> ",
             });
         },
-        ops.OP_bitnot => {
+        .bitnot => {
             try em.assign(i, false);
             try out.text("~");
             try em.reg(ir.src[i]);
         },
-        ops.OP_unplus => {
+        .unplus => {
             try em.assign(i, false);
             try out.text("rt.toNumeric(");
             try em.reg(ir.src[i]);
             try out.text(")");
         },
-        ops.OP_negate => {
+        .negate => {
             try em.assign(i, false);
             if (floatArithmetic(em, i)) {
                 try out.text("rt.negate(");
@@ -278,14 +279,14 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
                 try em.reg(ir.src[i]);
             }
         },
-        ops.OP_negate_i => {
+        .negate_i => {
             try em.assign(i, false);
             try out.text("-");
             try em.reg(ir.src[i]);
             try out.text(" | 0");
         },
-        ops.OP_increment, ops.OP_decrement, ops.OP_inclocal, ops.OP_declocal => {
-            const up = op == ops.OP_increment or op == ops.OP_inclocal;
+        .increment, .decrement, .inclocal, .declocal => {
+            const up = op == .increment or op == .inclocal;
             try em.assign(i, false);
             if (floatArithmetic(em, i)) {
                 try out.text(if (up) "rt.increment(" else "rt.decrement(");
@@ -296,75 +297,75 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
                 try out.text(if (up) " + 1" else " - 1");
             }
         },
-        ops.OP_increment_i, ops.OP_decrement_i, ops.OP_inclocal_i, ops.OP_declocal_i => {
+        .increment_i, .decrement_i, .inclocal_i, .declocal_i => {
             try em.assign(i, false);
             try em.reg(ir.src[i]);
-            try out.text(if (op == ops.OP_increment_i or op == ops.OP_inclocal_i) " + 1 | 0" else " - 1 | 0");
+            try out.text(if (op == .increment_i or op == .inclocal_i) " + 1 | 0" else " - 1 | 0");
         },
-        ops.OP_not => {
+        .not => {
             try em.assign(i, false);
             try out.text("!");
             try em.reg(ir.src[i]);
         },
-        ops.OP_typeof => {
+        .typeof => {
             try em.assign(i, false);
             try out.text("rt.typeOf(");
             try em.reg(ir.src[i]);
             try out.text(")");
         },
-        ops.OP_equals, ops.OP_strictequals, ops.OP_lessthan, ops.OP_lessequals, ops.OP_greaterthan, ops.OP_greaterequals => {
+        .equals, .strictequals, .lessthan, .lessequals, .greaterthan, .greaterequals => {
             try em.assign(i, false);
             try values.compare(em, i, op, false);
         },
-        ops.OP_convert_i,
-        ops.OP_coerce_i,
-        ops.OP_convert_u,
-        ops.OP_coerce_u,
-        ops.OP_convert_f,
-        ops.OP_convert_d,
-        ops.OP_coerce_d,
-        ops.OP_convert_b,
-        ops.OP_coerce_b,
-        ops.OP_convert_s,
-        ops.OP_coerce_s,
-        ops.OP_coerce_a,
-        ops.OP_coerce_o,
-        ops.OP_coerce,
-        ops.OP_convert_o,
+        .convert_i,
+        .coerce_i,
+        .convert_u,
+        .coerce_u,
+        .convert_f,
+        .convert_d,
+        .coerce_d,
+        .convert_b,
+        .coerce_b,
+        .convert_s,
+        .coerce_s,
+        .coerce_a,
+        .coerce_o,
+        .coerce,
+        .convert_o,
         => {
             // A conversion that changes nothing, in place, is no code.
             const s = ir.src[i];
-            if (ir.dst[i] == s and try values.keeps(em, values.conversionType(em, @truncate(op), i), em.regType[@intCast(s)])) {
+            if (ir.dst[i] == s and try values.keeps(em, values.conversionType(em, op, i), em.regType[@intCast(s)])) {
                 em.kept = true;
                 return;
             }
 
             try em.assign(i, true);
-            try values.conversion(em, i, @truncate(op), em.unboxedTarget(i));
+            try values.conversion(em, i, op, em.unboxedTarget(i));
         },
-        ops.OP_jump => try em.goto(a),
-        ops.OP_iftrue, ops.OP_iffalse => {
-            try out.text(if (op == ops.OP_iftrue) "if (" else "if (!");
+        .jump => try em.goto(a),
+        .iftrue, .iffalse => {
+            try out.text(if (op == .iftrue) "if (" else "if (!");
             try em.reg(ir.src[i]);
             try out.text(") { ");
             try em.goto(a);
             try em.space();
             try out.text("}");
         },
-        ops.OP_ifeq,
-        ops.OP_ifne,
-        ops.OP_ifstricteq,
-        ops.OP_ifstrictne,
-        ops.OP_iflt,
-        ops.OP_ifle,
-        ops.OP_ifgt,
-        ops.OP_ifge,
-        ops.OP_ifnlt,
-        ops.OP_ifnle,
-        ops.OP_ifngt,
-        ops.OP_ifnge,
-        => try values.branch(em, i, @truncate(op)),
-        ops.OP_lookupswitch => {
+        .ifeq,
+        .ifne,
+        .ifstricteq,
+        .ifstrictne,
+        .iflt,
+        .ifle,
+        .ifgt,
+        .ifge,
+        .ifnlt,
+        .ifnle,
+        .ifngt,
+        .ifnge,
+        => try values.branch(em, i, op),
+        .lookupswitch => {
             // An index out of range, or not an int, takes the default.
             try out.text("switch (");
             try em.reg(ir.src[i]);
@@ -385,12 +386,12 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
             try em.space();
             try out.text("}");
         },
-        ops.OP_returnvoid => try out.text("return"),
-        ops.OP_returnvalue => {
+        .returnvoid => try out.text("return"),
+        .returnvalue => {
             try out.text("return ");
             try em.reg(ir.src[i]);
         },
-        ops.OP_throw => {
+        .throw => {
             try out.text("throw ");
             try em.reg(ir.src[i]);
         },
@@ -406,12 +407,12 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
                 }
 
                 try move(em, i, ir.src[i]);
-            } else if (op >= ops.OP_setlocal0 and op < ops.OP_setlocal0 + 4) {
+            } else if (ir_.opcodeIs(op, isSetLocalN)) {
                 try move(em, i, ir.src[i]);
             } else {
                 // An instruction not lowered yet fails where it runs.
                 try out.text("throw rt.unsupported(\"");
-                try out.text(if (op < 256) ops.opcodeNames[op] else "ir");
+                try out.text(ir_.opcodeName(op));
                 try out.text("\")");
             }
         },
@@ -425,7 +426,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
     // of a block written in place: no empty statement after it.
     const written = out.written();
     const last = if (written.len == 0) 0 else written[written.len - 1];
-    if (!(structure.conditional(op) or op == ops.OP_jump or op == ops.OP_lookupswitch or op == ops.OP_swap)) {
+    if (!(structure.conditional(op) or op == .jump or op == .lookupswitch or op == .swap)) {
         try out.text(";\n");
     } else if (last != '\n') {
         try out.text(if (last == '}' or last == ';') "\n" else ";\n");
@@ -442,34 +443,38 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
 /// it does that can throw or be seen: before it, only the runtime's
 /// methods, the module's tables and other registers. The check can then be
 /// made where it reads it.
-fn readsFirst(op: u16) bool {
+fn readsFirst(op: IrOp) bool {
     return switch (op) {
-        ops.OP_getslot,
-        ops.OP_setslot,
-        ir_.IR_CallGetter,
-        ir_.IR_CallSetter,
-        ops.OP_callmethod,
-        ir_.IR_CallInterface,
-        ops.OP_getproperty,
-        ops.OP_setproperty,
-        ops.OP_initproperty,
-        ops.OP_deleteproperty,
-        ops.OP_callproperty,
-        ops.OP_callproplex,
-        ops.OP_callpropvoid,
-        ops.OP_constructprop,
-        ir_.IR_ConstructSlot,
-        ops.OP_callsuper,
-        ops.OP_callsupervoid,
-        ir_.IR_CallSuper,
-        ops.OP_getsuper,
-        ops.OP_setsuper,
-        ops.OP_callstatic,
-        ops.OP_constructsuper,
-        ops.OP_getdescendants,
-        ops.OP_in,
-        ops.OP_checkfilter,
+        .getslot,
+        .setslot,
+        .ir_call_getter,
+        .ir_call_setter,
+        .callmethod,
+        .ir_call_interface,
+        .getproperty,
+        .setproperty,
+        .initproperty,
+        .deleteproperty,
+        .callproperty,
+        .callproplex,
+        .callpropvoid,
+        .constructprop,
+        .ir_construct_slot,
+        .callsuper,
+        .callsupervoid,
+        .ir_call_super,
+        .getsuper,
+        .setsuper,
+        .callstatic,
+        .constructsuper,
+        .getdescendants,
+        .in,
+        .checkfilter,
         => true,
         else => false,
     };
+}
+
+fn isSetLocalN(op: ops.Op) bool {
+    return op.setLocalN() != null;
 }

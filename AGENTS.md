@@ -375,6 +375,11 @@ of its own.
   rejects it with avmplus' error (`src/avm2/abc/constants.zig`), so that
   rejections match avmshell; a panic on malformed input is a bug, found by
   the fuzzers.
+- In per-instruction code (the decoder, the verifier, the emitters' walks),
+  prefer helpers that return a bool to ones that return an optional or a
+  union, unless a measurement says otherwise: LLVM may pass an optional
+  through memory in wasm, which costs a load and a larger frame at every
+  call (`ir.opcodeIs` against `ir.opcode`).
 - Each file's tests are at its end, run natively by `zig build test`
   (`node packages/codegen/zig/build.ts --update` runs them). The 0xAA
   build (`dist-test/testing-poison.wasm`) fills freed and rolled-back

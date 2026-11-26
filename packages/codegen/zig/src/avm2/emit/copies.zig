@@ -9,6 +9,7 @@ const ops = @import("../abc/opcodes.zig");
 const ir_ = @import("../ir/ir.zig");
 const MethodEmitter = @import("method.zig").MethodEmitter;
 const structure = @import("structure.zig");
+const IrOp = @import("../ir/ir.zig").Op;
 
 /// A fact's constant: CONSTANT - the instruction that pushed it.
 pub const CONSTANT: i32 = -2;
@@ -18,21 +19,21 @@ pub const NONE: i32 = -1;
 const UNSEEN: i32 = std.math.minInt(i32);
 
 /// Whether op pushes a constant, which a stack register can be a copy of.
-pub fn pushesConstant(op: u16) bool {
+pub fn pushesConstant(op: IrOp) bool {
     return switch (op) {
-        ops.OP_pushbyte, ops.OP_pushshort, ops.OP_pushint, ops.OP_pushuint, ops.OP_pushdouble, ops.OP_pushfloat, ops.OP_pushnan, ops.OP_pushstring, ops.OP_pushtrue, ops.OP_pushfalse, ops.OP_pushnull, ops.OP_pushundefined => true,
+        .pushbyte, .pushshort, .pushint, .pushuint, .pushdouble, .pushfloat, .pushnan, .pushstring, .pushtrue, .pushfalse, .pushnull, .pushundefined => true,
         else => false,
     };
 }
 
 /// Whether op is a getlocal, which makes its stack register a copy.
-pub fn getsLocal(op: u16) bool {
-    return op == ops.OP_getlocal or (op >= ops.OP_getlocal0 and op < ops.OP_getlocal0 + 4);
+pub fn getsLocal(op: IrOp) bool {
+    return op == .getlocal or ir_.opcodeIs(op, isGetLocalN);
 }
 
 /// Whether op is a setlocal, which takes its stack register.
-pub fn setsLocal(op: u16) bool {
-    return op == ops.OP_setlocal or (op >= ops.OP_setlocal0 and op < ops.OP_setlocal0 + 4);
+pub fn setsLocal(op: IrOp) bool {
+    return op == .setlocal or ir_.opcodeIs(op, isSetLocalN);
 }
 
 fn grow(em: *MethodEmitter, comptime T: type, table: *[]T, n: usize) Error!void {
@@ -117,9 +118,9 @@ fn walk(em: *MethodEmitter, k: u32) Error!bool {
     var i = ir.blockFirst[k];
     while (i < last) : (i += 1) {
         const op = ir.op[i];
-        if (structure.conditional(op) or op == ops.OP_jump) {
+        if (structure.conditional(op) or op == .jump) {
             back = join(em, ir.a[i], k) or back;
-        } else if (op == ops.OP_lookupswitch) {
+        } else if (op == .lookupswitch) {
             back = join(em, ir.a[i], k) or back;
             var c: u32 = 0;
             while (c <= @as(u32, @bitCast(ir.c[i]))) : (c += 1) {
@@ -130,18 +131,18 @@ fn walk(em: *MethodEmitter, k: u32) Error!bool {
         const dst = ir.dst[i];
         const s = ir.src[i];
         switch (op) {
-            ops.OP_swap => {
+            .swap => {
                 kill(em, s);
                 kill(em, s + 1);
                 continue;
             },
-            ops.OP_hasnext2 => {
+            .hasnext2 => {
                 kill(em, @bitCast(ir.a[i]));
                 kill(em, @bitCast(ir.b[i]));
                 kill(em, dst);
                 continue;
             },
-            ops.OP_popscope => {
+            .popscope => {
                 kill(em, s);
                 continue;
             },
@@ -192,21 +193,21 @@ fn sourceOf(em: *MethodEmitter, i: u32) i32 {
         return CONSTANT - @as(i32, @intCast(i));
     }
 
-    if (dst >= stack and (getsLocal(op) or op == ops.OP_dup or op == ops.OP_getscopeobject)) {
+    if (dst >= stack and (getsLocal(op) or op == .dup or op == .getscopeobject)) {
         return root(em, s);
     }
 
-    if (op == ir_.IR_Nip) {
+    if (op == .ir_nip) {
         return root(em, s + @as(i32, @intCast(ir.srcCount[i])) - 1);
     }
 
     // The global object, from no scope chain: the method's own first scope.
-    if ((op == ops.OP_getglobalscope or op == ir_.IR_GetGlobalScope) and ir.outerSize == 0) {
+    if ((op == .getglobalscope or op == .ir_get_global_scope) and ir.outerSize == 0) {
         return root(em, @intCast(ir.localCount));
     }
 
     // A scope stays as long as its block does: of a local or scope only.
-    if (op == ops.OP_pushscope or op == ops.OP_pushwith) {
+    if (op == .pushscope or op == .pushwith) {
         const from = root(em, s);
         return if (from >= 0 and from < stack) from else NONE;
     }
@@ -279,4 +280,12 @@ fn join(em: *MethodEmitter, t: u32, k: u32) bool {
 
     em.dirty[t] = 1;
     return t <= k;
+}
+
+fn isGetLocalN(op: ops.Op) bool {
+    return op.getLocalN() != null;
+}
+
+fn isSetLocalN(op: ops.Op) bool {
+    return op.setLocalN() != null;
 }

@@ -17,7 +17,6 @@ const BodyDecoder = code_.BodyDecoder;
 const NOT_NULL = code_.NOT_NULL;
 const START = code_.START;
 const C = @import("constants.zig");
-const ops = @import("opcodes.zig");
 
 /// Save the current state as known target t's entry state.
 pub fn saveEntry(bd: *BodyDecoder, t: u32) Error!void {
@@ -111,7 +110,7 @@ fn head(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!Head
 
     const t: u32 = @intCast(to);
     const isNew = bd.known[t] == 0;
-    if (to <= from and isNew and bd.byteAt(t) != ops.OP_label) {
+    if (to <= from and isNew and bd.opAt(t) != .label) {
         bd.code.fail(C.kInvalidBranchTargetError);
         return .failed;
     }

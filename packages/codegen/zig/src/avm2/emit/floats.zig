@@ -2,7 +2,6 @@
 // JavaScript's own (assembly/avm2/emit/floats.ts).
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
-const ops = @import("../abc/opcodes.zig");
 const MethodEmitter = @import("method.zig").MethodEmitter;
 
 /// Keep a local unboxed only when every read and write knows its float identity.
@@ -45,7 +44,7 @@ pub fn floatLocals(em: *MethodEmitter) Error!void {
                 }
             }
 
-            if (ir.op[i] == ops.OP_hasnext2) {
+            if (ir.op[i] == .hasnext2) {
                 em.unboxed[ir.a[i]] = 0;
                 em.unboxed[ir.b[i]] = 0;
             }
@@ -76,12 +75,12 @@ pub fn floatOperation(em: *MethodEmitter, i: u32) Error!bool {
 
     const op = em.ir.op[i];
     const operator: []const u8 = switch (op) {
-        ops.OP_add => " + ",
-        ops.OP_subtract => " - ",
-        ops.OP_multiply => " * ",
-        ops.OP_divide => " / ",
-        ops.OP_modulo => " % ",
-        ops.OP_negate, ops.OP_increment, ops.OP_decrement, ops.OP_inclocal, ops.OP_declocal, ops.OP_unplus => "",
+        .add => " + ",
+        .subtract => " - ",
+        .multiply => " * ",
+        .divide => " / ",
+        .modulo => " % ",
+        .negate, .increment, .decrement, .inclocal, .declocal, .unplus => "",
         else => return false,
     };
 
@@ -93,7 +92,7 @@ pub fn floatOperation(em: *MethodEmitter, i: u32) Error!bool {
     }
 
     try out.text("Math.fround(");
-    if (op == ops.OP_negate) {
+    if (op == .negate) {
         try out.text("-");
     }
 
@@ -103,8 +102,8 @@ pub fn floatOperation(em: *MethodEmitter, i: u32) Error!bool {
         try em.numberReg(em.ir.src[i] + 1);
     } else {
         switch (op) {
-            ops.OP_increment, ops.OP_inclocal => try out.text(" + 1"),
-            ops.OP_decrement, ops.OP_declocal => try out.text(" - 1"),
+            .increment, .inclocal => try out.text(" + 1"),
+            .decrement, .declocal => try out.text(" - 1"),
             else => {},
         }
     }

@@ -16,6 +16,7 @@ const traits_ = @import("../avm2/link/traits.zig");
 const MethodEmitter = @import("../avm2/emit/method.zig").MethodEmitter;
 const ModuleEmitter = @import("../avm2/emit/module.zig").ModuleEmitter;
 const stack_names = @import("../avm2/emit/stack-names.zig");
+const IrOp = @import("../avm2/ir/ir.zig").Op;
 
 /// The domain's binding of `name` in the namespace of type `type` (NS_*) and
 /// URI `uri`, visible at `version` from application domain `appDomain`:
@@ -369,7 +370,7 @@ pub fn domainCheckIr(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
                     return std.fmt.allocPrint(gpa, "body {d} B{d} row {d} ({s}): pc {d} outside {d}..{d}", where ++ .{ ir.pc[i], ir.blockPc[k], end });
                 }
 
-                const branches = (op >= 0x0c and op <= 0x1a) or op == 0x10;
+                const branches = ir_.opcodeIs(op, ops.Op.isBranch);
                 if (branches and ir.a[i] >= ir.blockCount) {
                     return std.fmt.allocPrint(gpa, "body {d} B{d} row {d} ({s}): target B{d} of {d}", where ++ .{ ir.a[i], ir.blockCount });
                 }
@@ -389,8 +390,8 @@ pub fn domainCheckIr(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
             }
 
             // A block ends in a jump, switch, return or throw, or falls into the next.
-            const lastOp: u16 = if (last > first) ir.op[last - 1] else 0;
-            const terminal = lastOp == 0x10 or lastOp == 0x1b or lastOp == 0x03 or lastOp == 0x47 or lastOp == 0x48;
+            const lastOp: IrOp = if (last > first) ir.op[last - 1] else @fromBackingInt(0);
+            const terminal = ir_.opcodeIs(lastOp, isTerminal);
             if (!terminal and k + 1 == ir.blockCount) {
                 return std.fmt.allocPrint(gpa, "body {d} B{d}: falls off the end after {s}", .{ body, k, irName(lastOp) });
             }
@@ -486,9 +487,9 @@ fn irLine(w: *std.Io.Writer, dom: *const Domain, ir: *const Ir, i: u32) std.Io.W
         }
 
         try w.writeByte(']');
-    } else if (op == 0x10 or (op >= 0x0c and op <= 0x1a)) {
+    } else if (ir_.opcodeIs(op, ops.Op.isBranch)) {
         try w.print(" B{d}", .{ir.a[i]});
-    } else if (op == ir_.IR_Coerce) {
+    } else if (op == .ir_coerce) {
         try w.writeByte(' ');
         try writeType(w, dom, ir.c[i], 0);
     } else if (ir.a[i] != 0 or ir.b[i] != 0 or ir.c[i] != 0) {
@@ -515,23 +516,23 @@ fn register(w: *std.Io.Writer, ir: *const Ir, r: i32) std.Io.Writer.Error!void {
     return w.print("s{d}", .{r - local - scopes});
 }
 
-fn irName(op: u16) []const u8 {
-    if (op < 256) {
-        return ops.opcodeNames[op];
+fn irName(op: IrOp) []const u8 {
+    if (ir_.opcode(op)) |o| {
+        return o.name();
     }
 
     return switch (op) {
-        ir_.IR_Coerce => "coerce",
-        ir_.IR_CheckNull => "checknull",
-        ir_.IR_CallGetter => "callgetter",
-        ir_.IR_CallSetter => "callsetter",
-        ir_.IR_CallInterface => "callinterface",
-        ir_.IR_CallSuper => "callsuperid",
-        ir_.IR_FindPropGlobal => "findpropglobal",
-        ir_.IR_FindPropGlobalStrict => "findpropglobalstrict",
-        ir_.IR_GetGlobalScope => "getglobalscope",
-        ir_.IR_Nip => "nip",
-        ir_.IR_ConstructSlot => "constructslot",
+        .ir_coerce => "coerce",
+        .ir_check_null => "checknull",
+        .ir_call_getter => "callgetter",
+        .ir_call_setter => "callsetter",
+        .ir_call_interface => "callinterface",
+        .ir_call_super => "callsuperid",
+        .ir_find_prop_global => "findpropglobal",
+        .ir_find_prop_global_strict => "findpropglobalstrict",
+        .ir_get_global_scope => "getglobalscope",
+        .ir_nip => "nip",
+        .ir_construct_slot => "constructslot",
         else => "ir?",
     };
 }
@@ -1469,4 +1470,8 @@ test "bytes restore does not adopt stay out of the domain's arena" {
     try testing.expectEqual(mark, arena.mark());
     try testing.expectEqual(0, try domain_.changed(dom, &arena, lifetime.restore, .{ &arena, 1, &link_user }));
     try testing.expect(dom.abcs.get(1) != &lifetime.no_abc);
+}
+
+fn isTerminal(op: ops.Op) bool {
+    return op.info().flags.terminal;
 }

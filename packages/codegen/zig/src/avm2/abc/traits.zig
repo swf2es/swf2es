@@ -2,7 +2,6 @@
 // Name clashes, overrides and slot layout (Traits::verifyBindings) need the
 // base class, which may live in another ABC, so they are checked when
 // classes are linked.
-const std = @import("std");
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
@@ -41,7 +40,7 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
         var id: u32 = 0;
         var index: u32 = 0;
         var value: u32 = 0;
-        var valueKind: C.Constant = @fromBackingInt(@intCast(0));
+        var valueKind: C.Constant = .none;
         switch (kind) {
             .slot, .constant => {
                 id = r.u30_();

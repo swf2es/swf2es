@@ -5,12 +5,11 @@
 // coercions.
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
-const ops = @import("../abc/opcodes.zig");
-const ir_ = @import("../ir/ir.zig");
 const traits_ = @import("../link/traits.zig");
 const TYPE_Any = traits_.TYPE_Any;
 const MethodEmitter = @import("method.zig").MethodEmitter;
 const refs = @import("refs.zig");
+const IrOp = @import("../ir/ir.zig").Op;
 
 /// No type: a conversion, convert_s or convert_o, that always calls the runtime.
 pub const CONVERTS: i32 = -2;
@@ -18,14 +17,14 @@ pub const CONVERTS: i32 = -2;
 /// The comparison `op` of instruction i's two operands, negated if `not`:
 /// JavaScript's own operator where the types make it AS3's, else the
 /// runtime's (values.ts tells which are).
-pub fn compare(em: *MethodEmitter, i: u32, op: u16, not: bool) Error!void {
+pub fn compare(em: *MethodEmitter, i: u32, op: IrOp, not: bool) Error!void {
     const out = &em.out;
     const a = em.src(i, 0);
     const b = em.src(i, 1);
     const af = em.builtinOf(a) == traits_.BUILTIN_Float;
     const bf = em.builtinOf(b) == traits_.BUILTIN_Float;
     const numeric = (af or isNumeric(em, a)) and (bf or isNumeric(em, b));
-    if (op == ops.OP_strictequals and numeric and af != bf) {
+    if (op == .strictequals and numeric and af != bf) {
         return out.text(if (not) "true" else "false");
     }
 
@@ -34,23 +33,23 @@ pub fn compare(em: *MethodEmitter, i: u32, op: u16, not: bool) Error!void {
     var js: []const u8 = "";
     var runtime: []const u8 = "";
     switch (op) {
-        ops.OP_equals => {
+        .equals => {
             js = if (numeric or strings or objects) " == " else "";
             runtime = "rt.equals(";
         },
-        ops.OP_strictequals => {
+        .strictequals => {
             js = if ((af and bf) or (isPrimitive(em, a) and isPrimitive(em, b)) or objects) " === " else "";
             runtime = "rt.strictEquals(";
         },
-        ops.OP_lessthan => {
+        .lessthan => {
             js = if (numeric) " < " else "";
             runtime = "rt.lessThan(";
         },
-        ops.OP_lessequals => {
+        .lessequals => {
             js = if (numeric) " <= " else "";
             runtime = "rt.lessEquals(";
         },
-        ops.OP_greaterthan => {
+        .greaterthan => {
             js = if (numeric) " > " else "";
             runtime = "rt.greaterThan(";
         },
@@ -132,8 +131,8 @@ pub fn wraps(em: *MethodEmitter, i: u32) bool {
     }
 
     return switch (ir.op[next]) {
-        ops.OP_convert_i, ops.OP_coerce_i, ops.OP_convert_u, ops.OP_coerce_u => true,
-        ir_.IR_Coerce => blk: {
+        .convert_i, .coerce_i, .convert_u, .coerce_u => true,
+        .ir_coerce => blk: {
             const bt = em.domain.builtin(ir.c[next]);
             break :blk bt == traits_.BUILTIN_Int or bt == traits_.BUILTIN_Uint;
         },
@@ -172,22 +171,22 @@ pub fn call2(em: *MethodEmitter, function: []const u8, i: u32) Error!void {
 }
 
 /// A conditional branch comparing two values; the `n` forms are true when the comparison is not.
-pub fn branch(em: *MethodEmitter, i: u32, op: u8) Error!void {
+pub fn branch(em: *MethodEmitter, i: u32, op: IrOp) Error!void {
     const out = &em.out;
     try out.text("if (");
     switch (op) {
-        ops.OP_ifeq => try compare(em, i, ops.OP_equals, false),
-        ops.OP_ifne => try compare(em, i, ops.OP_equals, true),
-        ops.OP_ifstricteq => try compare(em, i, ops.OP_strictequals, false),
-        ops.OP_ifstrictne => try compare(em, i, ops.OP_strictequals, true),
-        ops.OP_iflt => try compare(em, i, ops.OP_lessthan, false),
-        ops.OP_ifle => try compare(em, i, ops.OP_lessequals, false),
-        ops.OP_ifgt => try compare(em, i, ops.OP_greaterthan, false),
-        ops.OP_ifge => try compare(em, i, ops.OP_greaterequals, false),
-        ops.OP_ifnlt => try compare(em, i, ops.OP_lessthan, true),
-        ops.OP_ifnle => try compare(em, i, ops.OP_lessequals, true),
-        ops.OP_ifngt => try compare(em, i, ops.OP_greaterthan, true),
-        else => try compare(em, i, ops.OP_greaterequals, true),
+        .ifeq => try compare(em, i, .equals, false),
+        .ifne => try compare(em, i, .equals, true),
+        .ifstricteq => try compare(em, i, .strictequals, false),
+        .ifstrictne => try compare(em, i, .strictequals, true),
+        .iflt => try compare(em, i, .lessthan, false),
+        .ifle => try compare(em, i, .lessequals, false),
+        .ifgt => try compare(em, i, .greaterthan, false),
+        .ifge => try compare(em, i, .greaterequals, false),
+        .ifnlt => try compare(em, i, .lessthan, true),
+        .ifnle => try compare(em, i, .lessequals, true),
+        .ifngt => try compare(em, i, .greaterthan, true),
+        else => try compare(em, i, .greaterequals, true),
     }
 
     try out.text(") { ");
@@ -197,18 +196,18 @@ pub fn branch(em: *MethodEmitter, i: u32, op: u8) Error!void {
 }
 
 /// The type a conversion instruction gives, or CONVERTS for one that always calls the runtime.
-pub fn conversionType(em: *MethodEmitter, op: u8, i: u32) i32 {
+pub fn conversionType(em: *MethodEmitter, op: IrOp, i: u32) i32 {
     const domain = em.domain;
     return switch (op) {
-        ops.OP_convert_i, ops.OP_coerce_i => domain.intType,
-        ops.OP_convert_u, ops.OP_coerce_u => domain.uintType,
-        ops.OP_convert_f => domain.floatType,
-        ops.OP_convert_d, ops.OP_coerce_d => domain.numberType,
-        ops.OP_convert_b, ops.OP_coerce_b => domain.booleanType,
-        ops.OP_coerce_s => domain.stringType,
-        ops.OP_coerce_o => domain.objectType(),
-        ops.OP_coerce => em.ir.c[i],
-        ops.OP_coerce_a => TYPE_Any,
+        .convert_i, .coerce_i => domain.intType,
+        .convert_u, .coerce_u => domain.uintType,
+        .convert_f => domain.floatType,
+        .convert_d, .coerce_d => domain.numberType,
+        .convert_b, .coerce_b => domain.booleanType,
+        .coerce_s => domain.stringType,
+        .coerce_o => domain.objectType(),
+        .coerce => em.ir.c[i],
+        .coerce_a => TYPE_Any,
         else => CONVERTS,
     };
 }
@@ -247,30 +246,30 @@ fn nullStays(em: *MethodEmitter, ty: i32, from: i32) bool {
 }
 
 /// The conversion instructions: the value of src as the type they give.
-pub fn conversion(em: *MethodEmitter, i: u32, op: u8, unboxed: bool) Error!void {
+pub fn conversion(em: *MethodEmitter, i: u32, op: IrOp, unboxed: bool) Error!void {
     const domain = em.domain;
     const s = em.ir.src[i];
     const from = em.regType[@intCast(s)];
     switch (op) {
-        ops.OP_convert_i, ops.OP_coerce_i => try convert(em, "", s, domain.intType, from, false),
-        ops.OP_convert_u, ops.OP_coerce_u => try convert(em, "", s, domain.uintType, from, false),
-        ops.OP_convert_f => try convert(em, "", s, domain.floatType, from, unboxed),
-        ops.OP_convert_d, ops.OP_coerce_d => try convert(em, "", s, domain.numberType, from, false),
-        ops.OP_convert_b, ops.OP_coerce_b => try convert(em, "", s, domain.booleanType, from, false),
-        ops.OP_convert_s => {
+        .convert_i, .coerce_i => try convert(em, "", s, domain.intType, from, false),
+        .convert_u, .coerce_u => try convert(em, "", s, domain.uintType, from, false),
+        .convert_f => try convert(em, "", s, domain.floatType, from, unboxed),
+        .convert_d, .coerce_d => try convert(em, "", s, domain.numberType, from, false),
+        .convert_b, .coerce_b => try convert(em, "", s, domain.booleanType, from, false),
+        .convert_s => {
             // Unlike coerce_s, null and undefined become "null" and "undefined".
             try em.out.text("rt.toString(");
             try em.reg(s);
             try em.out.text(")");
         },
-        ops.OP_coerce_s => try convert(em, "", s, domain.stringType, from, false),
-        ops.OP_convert_o => {
+        .coerce_s => try convert(em, "", s, domain.stringType, from, false),
+        .convert_o => {
             try em.out.text("rt.toObject(");
             try em.reg(s);
             try em.out.text(")");
         },
-        ops.OP_coerce_o => try convert(em, "", s, domain.objectType(), from, false),
-        ops.OP_coerce => try convert(em, "", s, em.ir.c[i], from, unboxed),
+        .coerce_o => try convert(em, "", s, domain.objectType(), from, false),
+        .coerce => try convert(em, "", s, em.ir.c[i], from, unboxed),
         else => try em.reg(s),
     }
 }
