@@ -105,13 +105,13 @@ fn head(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!Head
     }
 
     if (to < 0 or to >= bd.length) {
-        return bd.fail(C.kInvalidBranchTargetError);
+        return bd.fail(.kInvalidBranchTargetError);
     }
 
     const t: u32 = @intCast(to);
     const isNew = bd.known[t] == 0;
     if (to <= from and isNew and bd.opAt(t) != .label) {
-        return bd.fail(C.kInvalidBranchTargetError);
+        return bd.fail(.kInvalidBranchTargetError);
     }
 
     if (isNew) {
@@ -177,7 +177,7 @@ pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!void {
         }
 
         if (bd.maxStack < 1) {
-            return bd.fail(C.kStackOverflowError);
+            return bd.fail(.kStackOverflowError);
         }
 
         const to = abc.exceptionTarget[h];
@@ -236,10 +236,10 @@ fn restoreCurrent(bd: *BodyDecoder) void {
 /// Whether the depths arriving match the target's; avmplus' messages name the arriving first.
 fn sameDepths(bd: *BodyDecoder, targetStack: u32, targetScope: u32, stack: u32, scope: u32) Rejected!void {
     if (stack != targetStack) {
-        return bd.failWith(C.kStackDepthUnbalancedError, stack, targetStack);
+        return bd.failWith(.kStackDepthUnbalancedError, stack, targetStack);
     }
 
     if (scope != targetScope) {
-        return bd.failWith(C.kScopeDepthUnbalancedError, scope, targetScope);
+        return bd.failWith(.kScopeDepthUnbalancedError, scope, targetScope);
     }
 }

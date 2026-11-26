@@ -52,7 +52,7 @@ pub fn propertyDepth(bd: *BodyDecoder, mn: u32, depth: u32) Rejected!u32 {
 pub fn binding(bd: *BodyDecoder, ty: TypeId, mn: u32) Error!Binding {
     const b = try types.getBinding(bd.domain, bd.index, ty, mn);
     if (b == Binding.ambiguous) {
-        return bd.fail(C.kAmbiguousBindingError);
+        return bd.fail(.kAmbiguousBindingError);
     }
 
     return b;
@@ -74,7 +74,7 @@ pub fn readBinding(bd: *BodyDecoder, ty: TypeId, b: Binding) Error!TypeId {
 pub fn typeName(bd: *BodyDecoder, mn: u32) Error!TypeId {
     const pool = &bd.abc.pool;
     if (mn == 0 or mn >= pool.multinameCount()) {
-        return bd.fail(C.kCpoolIndexRangeError);
+        return bd.fail(.kCpoolIndexRangeError);
     }
 
     var diag: Diagnostics = .{};
@@ -92,7 +92,7 @@ pub fn coerceArgs(bd: *BodyDecoder, m: u32, argc: u32) Error!void {
     const count = traits.paramCount.get(m);
     const required = count - traits.optionalCount.get(m);
     if (argc < required or (argc > count and !domain.allowsExtraArgs(m))) {
-        return bd.fail(C.kWrongArgumentCountError);
+        return bd.fail(.kWrongArgumentCountError);
     }
 
     const start = traits.paramStart.get(m);
@@ -109,7 +109,7 @@ pub fn coerceArgs(bd: *BodyDecoder, m: u32, argc: u32) Error!void {
 pub fn coerceSuper(bd: *BodyDecoder, i: u32) Error!TypeId {
     const base = if (bd.declarer != .none) bd.domain.traits.base.get(bd.declarer.index()) else .none;
     if (base == .none) {
-        return bd.fail(C.kIllegalSuperCallError);
+        return bd.fail(.kIllegalSuperCallError);
     }
 
     try bd.coerce(i, base.toType());
@@ -124,14 +124,14 @@ pub fn slot(bd: *BodyDecoder, ty: TypeId, at: u32) Error!TypeId {
     const domain = bd.domain;
     const traits = &domain.traits;
     if (!ty.isTraits() or traits.abc.get(ty.index()) != bd.index or !traits.allowEarlyBinding(ty.index())) {
-        return bd.fail(C.kIllegalEarlyBindingError);
+        return bd.fail(.kIllegalEarlyBindingError);
     }
 
     const t = ty.index();
     var diag: Diagnostics = .{};
     traits.resolve(domain, t, &diag) catch |err| return bd.linkFailed(err, &diag);
     if (at >= traits.slotCount.get(t)) {
-        return bd.fail(C.kSlotExceedsCountError);
+        return bd.fail(.kSlotExceedsCountError);
     }
 
     return traits.slotType.get(traits.slotStart.get(t) + at);
@@ -147,7 +147,7 @@ pub fn globalScope(bd: *BodyDecoder) Rejected!TypeId {
     }
 
     if (bd.scope == 0) {
-        return bd.failWith(C.kGetScopeObjectBoundsError, 0, 0);
+        return bd.failWith(.kGetScopeObjectBoundsError, 0, 0);
     }
 
     const i = bd.localCount;
@@ -558,7 +558,7 @@ pub fn callStatic(bd: *BodyDecoder, m: u32, argc: u32) Error!void {
     traits.sign(domain, global, &diag) catch |err| return bd.linkFailed(err, &diag);
 
     if (traits.receiverType.get(global) == .any) {
-        return bd.fail(C.kDanglingFunctionError);
+        return bd.fail(.kDanglingFunctionError);
     }
 
     try bd.checkNull(bd.peek(argc +% 1));
@@ -587,7 +587,7 @@ pub fn callSuper(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!void {
         traits.resolve(domain, base.index(), &diag) catch |err| return bd.linkFailed(err, &diag);
         m = traits.dispatch.get(traits.dispatchStart.get(base.index()) + b.index());
         if (m < 0) {
-            return bd.fail(C.kCorruptABCError);
+            return bd.fail(.kCorruptABCError);
         }
 
         traits.sign(domain, @intCast(m), &diag) catch |err| return bd.linkFailed(err, &diag);

@@ -47,8 +47,8 @@ const IrOp = @import("../ir/ir.zig").Op;
 /// case offsets start in `cases`.
 pub const Code = struct {
     gpa: Allocator,
-    /// 0, or the VerifyError number avmplus would throw; then the lists are incomplete.
-    @"error": i32 = 0,
+    /// none, or the VerifyError avmplus would throw; then the lists are incomplete.
+    @"error": C.VerifyError = .none,
     /// The numbers avmplus' message for `error` names, where `numbered`.
     errorA: u32 = 0,
     errorB: u32 = 0,
@@ -65,16 +65,16 @@ pub const Code = struct {
     cases: []i32 = &.{},
     caseCount: u32 = 0,
 
-    pub fn fail(self: *Code, err: i32) void {
-        if (self.@"error" == 0) {
+    pub fn fail(self: *Code, err: C.VerifyError) void {
+        if (self.@"error" == .none) {
             self.@"error" = err;
             self.numbered = false;
         }
     }
 
     /// fail, with the two numbers its message names.
-    pub fn failWith(self: *Code, err: i32, a: u32, b: u32) void {
-        if (self.@"error" == 0) {
+    pub fn failWith(self: *Code, err: C.VerifyError, a: u32, b: u32) void {
+        if (self.@"error" == .none) {
             self.@"error" = err;
             self.errorA = a;
             self.errorB = b;
@@ -370,7 +370,7 @@ pub const BodyDecoder = struct {
     pub fn decode(self: *BodyDecoder, body: u32, outer: ?*const Scope) Allocator.Error!*Code {
         const abc = self.abc;
         const code = &self.code;
-        code.@"error" = 0;
+        code.@"error" = .none;
         code.errorA = 0;
         code.errorB = 0;
         code.numbered = false;
@@ -448,7 +448,7 @@ pub const BodyDecoder = struct {
         }
 
         if (self.overlap) {
-            return self.fail(C.kInvalidBranchTargetError);
+            return self.fail(.kInvalidBranchTargetError);
         }
 
         if (self.typed) {
@@ -547,7 +547,7 @@ pub const BodyDecoder = struct {
         const scope = @as(i64, abc.bodyMaxScopeDepth[body]) - abc.bodyInitScopeDepth[body];
         const frame = @as(i64, self.localCount) + scope + self.maxStack;
         if (scope < 0 or frame > 0x7fffffff / 8) {
-            return self.fail(C.kCorruptABCError);
+            return self.fail(.kCorruptABCError);
         }
 
         self.maxScope = @intCast(scope);
@@ -559,7 +559,7 @@ pub const BodyDecoder = struct {
         const abc = self.abc;
         const params = abc.methodParamStart[self.method + 1] - abc.methodParamStart[self.method];
         if (self.localCount < params +% 1) {
-            return self.fail(C.kCorruptABCError);
+            return self.fail(.kCorruptABCError);
         }
 
         if (self.methodFlags.need_rest or self.methodFlags.need_arguments) {
@@ -569,7 +569,7 @@ pub const BodyDecoder = struct {
 
     pub fn checkLocal(self: *BodyDecoder, register: u32) Rejected!void {
         if (register >= self.localCount) {
-            return self.failWith(C.kInvalidRegisterError, register, 0);
+            return self.failWith(.kInvalidRegisterError, register, 0);
         }
     }
 
@@ -605,11 +605,11 @@ pub const BodyDecoder = struct {
             }
 
             if (name != 0 and !isBinding(&abc.pool, name)) {
-                return self.fail(C.kCorruptABCError);
+                return self.fail(.kCorruptABCError);
             }
 
             if (to < from or target < to or target >= self.length) {
-                return self.fail(C.kIllegalExceptionHandlerError);
+                return self.fail(.kIllegalExceptionHandlerError);
             }
 
             if (i == 0 or from < self.tryFrom) {
@@ -814,7 +814,7 @@ pub const BodyDecoder = struct {
             const flags = self.valueFlags[i];
             const entryFlags = self.entryFlags[at + i];
             if (flags.with != entryFlags.with) {
-                return self.fail(C.kCannotMergeTypesError);
+                return self.fail(.kCannotMergeTypesError);
             }
 
             const entryType = self.entryType[at + i];
@@ -849,7 +849,7 @@ pub const BodyDecoder = struct {
 
         while (true) {
             if (pc >= self.length) {
-                return self.fail(C.kCannotFallOffMethodError);
+                return self.fail(.kCannotFallOffMethodError);
             }
 
             const opcode = self.opAt(pc);
@@ -859,7 +859,7 @@ pub const BodyDecoder = struct {
                 (!self.abc.hasFloatSupport() and
                     (opcode == .pushfloat or opcode == .convert_f or opcode == .unplus)))
             {
-                return self.failWith(C.kIllegalOpcodeError, @backingInt(opcode), pc);
+                return self.failWith(.kIllegalOpcodeError, @backingInt(opcode), pc);
             }
 
             if (pc != start and (opcode == .label or self.known[pc] != 0)) {
@@ -973,19 +973,19 @@ pub const BodyDecoder = struct {
         }
 
         if (wide & 0xc0000000 != 0) {
-            return self.fail(C.kCorruptABCError);
+            return self.fail(.kCorruptABCError);
         }
 
         const codeEnd = self.start + self.length;
         if (r.failed or r.pos > codeEnd) {
-            return self.fail(C.kLastInstExceedsCodeSizeError);
+            return self.fail(.kLastInstExceedsCodeSizeError);
         }
 
         if (opcode == .lookupswitch) {
             c = code.caseCount;
             const caseCount = @as(u64, b) + 1;
             if (@as(u64, r.pos) + caseCount * 3 > codeEnd) {
-                return self.fail(C.kLastInstExceedsCodeSizeError);
+                return self.fail(.kLastInstExceedsCodeSizeError);
             }
 
             var i: u64 = 0;
@@ -1065,7 +1065,7 @@ pub const BodyDecoder = struct {
     /// As Verifier::peekType: the value `n` from the top must be exactly `type`.
     pub fn peekType(self: *BodyDecoder, n: u32, ty: TypeId) Rejected!void {
         if (self.typeOf(self.peek(n)) != ty) {
-            return self.fail(C.kIllegalOperandTypeError);
+            return self.fail(.kIllegalOperandTypeError);
         }
     }
 
@@ -1079,12 +1079,12 @@ pub const BodyDecoder = struct {
 
     pub fn checkString(self: *BodyDecoder, index: u32) Rejected!void {
         if (index == 0 or index >= self.abc.pool.stringCount()) {
-            return self.fail(C.kCpoolIndexRangeError);
+            return self.fail(.kCpoolIndexRangeError);
         }
     }
 
     /// Reject the body with VerifyError `err`.
-    pub fn fail(self: *BodyDecoder, err: i32) Rejected {
+    pub fn fail(self: *BodyDecoder, err: C.VerifyError) Rejected {
         self.code.fail(err);
         return error.Verify;
     }
@@ -1099,7 +1099,7 @@ pub const BodyDecoder = struct {
     }
 
     /// fail, with the numbers its message names.
-    pub fn failWith(self: *BodyDecoder, err: i32, a: u32, b: u32) Rejected {
+    pub fn failWith(self: *BodyDecoder, err: C.VerifyError, a: u32, b: u32) Rejected {
         self.code.failWith(err, a, b);
         return error.Verify;
     }
@@ -1234,7 +1234,7 @@ pub const Verifier = struct {
                 }
 
                 const b: u32 = @intCast(body);
-                self.results[b] = (try decoder.decode(b, scope)).@"error";
+                self.results[b] = (try decoder.decode(b, scope)).@"error".number();
                 self.spent += @max(@as(u64, abc.bodyCode[b].len), BODY_COST);
                 try self.queue.appendSlice(self.gpa, decoder.captured.items);
             }

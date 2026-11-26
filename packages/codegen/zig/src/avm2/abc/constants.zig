@@ -1,7 +1,7 @@
 // Constants of the ABC format and avmplus' VerifyError numbers. The kinds
 // and flags are Zig types whose values are the ABC's bytes; the VerifyError
 // numbers keep avmplus' names, so the files that use them read like
-// avmplus': C.kCorruptABCError.
+// avmplus': .kCorruptABCError, a VerifyError.
 
 /// A constant's kind (avmplus core/ActionBlockConstants.h): of a default
 /// value, a namespace or a multiname, one number space as in avmplus.
@@ -112,55 +112,75 @@ pub const TraitTag = packed struct(u8) {
     _: u1 = 0,
 };
 
-// VerifyError numbers avmplus reports (core/ErrorConstants.h), so a rejected
-// ABC fails the same way it does in avmshell. 1008 is a ReferenceError.
-pub const kAmbiguousBindingError: i32 = 1008;
-pub const kIllegalOpcodeError: i32 = 1011;
-pub const kLastInstExceedsCodeSizeError: i32 = 1012;
-pub const kFindVarWithNoScopeError: i32 = 1013;
-pub const kClassNotFoundError: i32 = 1014;
-pub const kIllegalSetDxns: i32 = 1015;
-pub const kScopeStackOverflowError: i32 = 1017;
-pub const kScopeStackUnderflowError: i32 = 1018;
-pub const kGetScopeObjectBoundsError: i32 = 1019;
-pub const kCannotFallOffMethodError: i32 = 1020;
-pub const kInvalidBranchTargetError: i32 = 1021;
-pub const kIllegalVoidError: i32 = 1022;
-pub const kStackOverflowError: i32 = 1023;
-pub const kStackUnderflowError: i32 = 1024;
-pub const kInvalidRegisterError: i32 = 1025;
-pub const kSlotExceedsCountError: i32 = 1026;
-pub const kMethodInfoExceedsCountError: i32 = 1027;
-pub const kStackDepthUnbalancedError: i32 = 1030;
-pub const kScopeDepthUnbalancedError: i32 = 1031;
-pub const kCpoolIndexRangeError: i32 = 1032;
-pub const kCpoolEntryWrongTypeError: i32 = 1033;
-pub const kIllegalSuperCallError: i32 = 1035;
-pub const kInvalidMagicError: i32 = 1042;
-pub const kInvalidCodeLengthError: i32 = 1043;
-pub const kUnsupportedTraitsKindError: i32 = 1045;
-pub const kIllegalEarlyBindingError: i32 = 1051;
-pub const kIllegalOverrideError: i32 = 1053;
-pub const kIllegalExceptionHandlerError: i32 = 1054;
-pub const kIllegalSlotError: i32 = 1057;
-pub const kIllegalOperandTypeError: i32 = 1058;
-pub const kClassInfoOrderError: i32 = 1059;
-pub const kClassInfoExceedsCountError: i32 = 1060;
-pub const kWrongArgumentCountError: i32 = 1063;
-pub const kCannotMergeTypesError: i32 = 1068;
-pub const kAlreadyBoundError: i32 = 1071;
-pub const kZeroDispIdError: i32 = 1072;
-pub const kIllegalOpMultinameError: i32 = 1078;
-pub const kIllegalNativeMethodError: i32 = 1079;
-pub const kIllegalNamespaceError: i32 = 1080;
-pub const kIllegalDefaultValue: i32 = 1102;
-pub const kCannotExtendFinalClass: i32 = 1103;
-pub const kCorruptABCError: i32 = 1107;
-pub const kDanglingFunctionError: i32 = 1109;
-pub const kCannotExtendError: i32 = 1110;
-pub const kCannotImplementError: i32 = 1111;
-pub const kInvalidNewActivationError: i32 = 1113;
-pub const kNoGlobalScopeError: i32 = 1114;
-pub const kDuplicateMethodBodyError: i32 = 1121;
-pub const kIllegalInterfaceMethodBodyError: i32 = 1122;
-pub const kInvalidHasNextError: i32 = 1124;
+/// The VerifyError numbers avmplus reports, so that a rejected ABC fails
+/// the way it does in avmshell; 1008 is a ReferenceError. The tags keep
+/// avmplus' names from core/ErrorConstants.h verbatim, not snake_case, on
+/// purpose: each greps one to one with avmplus and its error tables.
+/// `none`, 0, no error, is the one tag of our own. Non-exhaustive, as saved
+/// domains, journals and the exports carry the number back: never switch
+/// over it exhaustively.
+pub const VerifyError = enum(i32) {
+    none = 0,
+    kAmbiguousBindingError = 1008,
+    kIllegalOpcodeError = 1011,
+    kLastInstExceedsCodeSizeError = 1012,
+    kFindVarWithNoScopeError = 1013,
+    kClassNotFoundError = 1014,
+    kIllegalSetDxns = 1015,
+    kScopeStackOverflowError = 1017,
+    kScopeStackUnderflowError = 1018,
+    kGetScopeObjectBoundsError = 1019,
+    kCannotFallOffMethodError = 1020,
+    kInvalidBranchTargetError = 1021,
+    kIllegalVoidError = 1022,
+    kStackOverflowError = 1023,
+    kStackUnderflowError = 1024,
+    kInvalidRegisterError = 1025,
+    kSlotExceedsCountError = 1026,
+    kMethodInfoExceedsCountError = 1027,
+    kStackDepthUnbalancedError = 1030,
+    kScopeDepthUnbalancedError = 1031,
+    kCpoolIndexRangeError = 1032,
+    kCpoolEntryWrongTypeError = 1033,
+    kIllegalSuperCallError = 1035,
+    kInvalidMagicError = 1042,
+    kInvalidCodeLengthError = 1043,
+    kUnsupportedTraitsKindError = 1045,
+    kIllegalEarlyBindingError = 1051,
+    kIllegalOverrideError = 1053,
+    kIllegalExceptionHandlerError = 1054,
+    kIllegalSlotError = 1057,
+    kIllegalOperandTypeError = 1058,
+    kClassInfoOrderError = 1059,
+    kClassInfoExceedsCountError = 1060,
+    kWrongArgumentCountError = 1063,
+    kCannotMergeTypesError = 1068,
+    kAlreadyBoundError = 1071,
+    kZeroDispIdError = 1072,
+    kIllegalOpMultinameError = 1078,
+    kIllegalNativeMethodError = 1079,
+    kIllegalNamespaceError = 1080,
+    kIllegalDefaultValue = 1102,
+    kCannotExtendFinalClass = 1103,
+    kCorruptABCError = 1107,
+    kDanglingFunctionError = 1109,
+    kCannotExtendError = 1110,
+    kCannotImplementError = 1111,
+    kInvalidNewActivationError = 1113,
+    kNoGlobalScopeError = 1114,
+    kDuplicateMethodBodyError = 1121,
+    kIllegalInterfaceMethodBodyError = 1122,
+    kInvalidHasNextError = 1124,
+    _,
+
+    /// As the result rows (with -1 for a body nothing runs) and the exports
+    /// carry it.
+    pub fn number(e: VerifyError) i32 {
+        return @backingInt(e);
+    }
+
+    /// A result row's, a save's or a journal's number.
+    pub fn of(n: i32) VerifyError {
+        return @fromBackingInt(n);
+    }
+};

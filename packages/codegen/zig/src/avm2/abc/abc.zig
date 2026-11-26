@@ -113,8 +113,8 @@ pub const Lists = struct {
 };
 
 pub const Abc = struct {
-    /// 0, or the VerifyError number avmplus would throw; then the tables are incomplete.
-    @"error": i32 = 0,
+    /// none, or the VerifyError avmplus would throw; then the tables are incomplete.
+    @"error": C.VerifyError = .none,
     /// Byte length of the ABC block.
     length: u32 = 0,
     /// Bytes its padded input and parsed tables take in the domain arena.

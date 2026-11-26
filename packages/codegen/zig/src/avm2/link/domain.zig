@@ -286,14 +286,14 @@ pub fn addAbc(dom: *Domain, arena: *memory.Arena, bytes: []const u8, builtin: bo
     const mark = arena.mark();
     const abc, const buffer = try parseOwned(arena, dom.scratch, bytes, builtin);
     const err = abc.@"error";
-    if (err != 0) {
+    if (err != .none) {
         // The error read first: the ABC is in what is given back.
         arena.restore(mark);
-        return err;
+        return err.number();
     }
 
     _ = try dom.attach(abc, buffer, appDomain);
-    return abc.@"error";
+    return abc.@"error".number();
 }
 
 /// A log entry as it was before a truncation (Domain.keepTruncated).
@@ -1234,17 +1234,17 @@ pub const Domain = struct {
             return;
         }
 
-        const illegal = if (type_ == .any) C.kCorruptABCError else C.kIllegalDefaultValue;
+        const illegal: C.VerifyError = if (type_ == .any) .kCorruptABCError else .kIllegalDefaultValue;
         if (kind == .float and !hasFloats) {
             return diag.fail(illegal);
         }
 
         const constant = self.abcs.get(index).pool.value(kind, value) catch |err| return diag.fail(switch (err) {
             error.IllegalKind => illegal,
-            error.OutOfRange => C.kCpoolIndexRangeError,
+            error.OutOfRange => .kCpoolIndexRangeError,
         });
         if (!traits_.legalDefault(self.builtin(type_), constant)) {
-            return diag.fail(C.kIllegalDefaultValue);
+            return diag.fail(.kIllegalDefaultValue);
         }
     }
 

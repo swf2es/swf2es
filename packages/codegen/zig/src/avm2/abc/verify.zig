@@ -89,13 +89,13 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: Op) Error!void {
         (opcode == .getlex or opcode == .findpropstrict or opcode == .findproperty) and
         bd.scope + bd.outer.size == 0)
     {
-        return bd.fail(C.kFindVarWithNoScopeError);
+        return bd.fail(.kFindVarWithNoScopeError);
     }
 
     // Operands that index the pool or the method tables, checked before the stack.
     if (stack.multiname) {
         if (a == 0 or a >= pool.multinameCount()) {
-            return bd.fail(C.kCpoolIndexRangeError);
+            return bd.fail(.kCpoolIndexRangeError);
         }
 
         pops += runtimeParts(pool, a);
@@ -112,12 +112,12 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: Op) Error!void {
         .newarray => pops = a,
         .callstatic => {
             if (a >= bd.abc.methodCount() or !callable(bd, a)) {
-                return bd.fail(C.kCorruptABCError);
+                return bd.fail(.kCorruptABCError);
             }
         },
         .dxns => {
             if (!bd.methodFlags.sets_dxns) {
-                return bd.fail(C.kIllegalSetDxns);
+                return bd.fail(.kIllegalSetDxns);
             }
 
             if (bd.emitPass) {
@@ -167,7 +167,7 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: Op) Error!void {
         },
         .popscope => {
             if (bd.scope == 0) {
-                return bd.fail(C.kScopeStackUnderflowError);
+                return bd.fail(.kScopeStackUnderflowError);
             }
 
             bd.scope -= 1;
@@ -179,18 +179,18 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: Op) Error!void {
         },
         .setglobalslot => {
             if (bd.typed and bd.scope == 0 and bd.outer.size == 0) {
-                return bd.fail(C.kNoGlobalScopeError);
+                return bd.fail(.kNoGlobalScopeError);
             }
         },
         else => {},
     }
 
     if (bd.stack < pops) {
-        return bd.fail(C.kStackUnderflowError);
+        return bd.fail(.kStackUnderflowError);
     }
 
     if (bd.stack - pops + checkPushes > bd.maxStack) {
-        return bd.fail(C.kStackOverflowError);
+        return bd.fail(.kStackOverflowError);
     }
 
     const scopeBefore = bd.scope;
@@ -223,36 +223,36 @@ fn verifySpecial(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32) Rejected
             try bd.checkLocal(a);
             try bd.checkLocal(b);
             if (a == b) {
-                return bd.fail(C.kInvalidHasNextError);
+                return bd.fail(.kInvalidHasNextError);
             }
         },
         .pushstring => try bd.checkString(a),
-        .pushint => if (a == 0 or a >= pool.ints.len) return bd.fail(C.kCpoolIndexRangeError),
-        .pushuint => if (a == 0 or a >= pool.uints.len) return bd.fail(C.kCpoolIndexRangeError),
-        .pushfloat => if (a == 0 or a >= pool.floats.len) return bd.fail(C.kCpoolIndexRangeError),
-        .pushdouble => if (a == 0 or a >= pool.doubles.len) return bd.fail(C.kCpoolIndexRangeError),
-        .pushnamespace => if (a == 0 or a >= pool.nsCount()) return bd.fail(C.kCpoolIndexRangeError),
-        .dxnslate => if (!bd.methodFlags.sets_dxns) return bd.fail(C.kIllegalSetDxns),
-        .getlex => if (runtimeParts(pool, a) != 0) return bd.fail(C.kIllegalOpMultinameError),
-        .finddef => if (!code_.isBinding(pool, a)) return bd.fail(C.kIllegalOpMultinameError),
+        .pushint => if (a == 0 or a >= pool.ints.len) return bd.fail(.kCpoolIndexRangeError),
+        .pushuint => if (a == 0 or a >= pool.uints.len) return bd.fail(.kCpoolIndexRangeError),
+        .pushfloat => if (a == 0 or a >= pool.floats.len) return bd.fail(.kCpoolIndexRangeError),
+        .pushdouble => if (a == 0 or a >= pool.doubles.len) return bd.fail(.kCpoolIndexRangeError),
+        .pushnamespace => if (a == 0 or a >= pool.nsCount()) return bd.fail(.kCpoolIndexRangeError),
+        .dxnslate => if (!bd.methodFlags.sets_dxns) return bd.fail(.kIllegalSetDxns),
+        .getlex => if (runtimeParts(pool, a) != 0) return bd.fail(.kIllegalOpMultinameError),
+        .finddef => if (!code_.isBinding(pool, a)) return bd.fail(.kIllegalOpMultinameError),
         .callproperty, .callproplex, .callpropvoid, .constructprop, .callsuper, .callsupervoid, .getsuper, .setsuper => {
             if (isAttribute(pool, a)) {
-                return bd.fail(C.kIllegalOpMultinameError);
+                return bd.fail(.kIllegalOpMultinameError);
             }
         },
-        .newfunction => if (a >= abc.methodCount()) return bd.fail(C.kMethodInfoExceedsCountError),
-        .newclass => if (a >= abc.classCount()) return bd.fail(C.kClassInfoExceedsCountError),
-        .newactivation => if (!bd.methodFlags.need_activation) return bd.fail(C.kInvalidNewActivationError),
-        .newcatch => if (a >= bd.handlerCount) return bd.fail(C.kInvalidNewActivationError),
+        .newfunction => if (a >= abc.methodCount()) return bd.fail(.kMethodInfoExceedsCountError),
+        .newclass => if (a >= abc.classCount()) return bd.fail(.kClassInfoExceedsCountError),
+        .newactivation => if (!bd.methodFlags.need_activation) return bd.fail(.kInvalidNewActivationError),
+        .newcatch => if (a >= bd.handlerCount) return bd.fail(.kInvalidNewActivationError),
         .pushscope, .pushwith => {
             if (bd.scope + 1 > bd.maxScope) {
-                return bd.fail(C.kScopeStackOverflowError);
+                return bd.fail(.kScopeStackOverflowError);
             }
 
             bd.scope += 1;
         },
         // The verifier reads the index as the operand's first byte.
-        .getscopeobject => if (bd.byteAt(pc + 1) >= bd.scope) return bd.failWith(C.kGetScopeObjectBoundsError, bd.byteAt(pc + 1), 0),
+        .getscopeobject => if (bd.byteAt(pc + 1) >= bd.scope) return bd.failWith(.kGetScopeObjectBoundsError, bd.byteAt(pc + 1), 0),
         else => {},
     }
 }
