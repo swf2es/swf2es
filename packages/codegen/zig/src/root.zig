@@ -446,6 +446,8 @@ test {
         @import("avm2/link/types.zig"),
         @import("avm2/link/signatures.zig"),
         @import("avm2/link/lifetime.zig"),
+        @import("avm2/link/rebuild.zig"),
+        @import("avm2/link/saved.zig"),
         @import("avm2/ir/ir.zig"),
         @import("avm2/abc/code.zig"),
         @import("avm2/abc/targets.zig"),
