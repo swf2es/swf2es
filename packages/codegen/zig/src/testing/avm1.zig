@@ -21,7 +21,7 @@ const Region = regions.Region;
 
 pub const Error = output.Error;
 
-/// "0x96", as testing/abc.ts's hex writes a byte.
+/// "0x96": a byte as the node tests expect it.
 fn writeHex(w: *Writer, b: u8) Writer.Error!void {
     try w.print("0x{x:0>2}", .{b});
 }
@@ -49,13 +49,9 @@ pub fn opcodes(gpa: Allocator) Error![]const u8 {
     return out.written();
 }
 
-/// An opcode's name, its hex for one Flash does not know, as opcodeNames has it.
+/// An opcode's name, its hex for one Flash does not know.
 fn writeName(w: *Writer, op: Op) Writer.Error!void {
-    if (op.known()) {
-        try w.writeAll(op.name());
-    } else {
-        try writeHex(w, @backingInt(op));
-    }
+    try w.writeAll(op.name());
 }
 
 /// A block's actions and regions, analyzed as avm1Dump and avm1Check take them.

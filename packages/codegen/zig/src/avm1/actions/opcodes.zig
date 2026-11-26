@@ -114,7 +114,8 @@ pub const Op = enum(u8) {
         return tables.known[@backingInt(op)];
     }
 
-    /// The action's name as the specification spells it: "MBStringLength".
+    /// The action's name as the specification spells it, "MBStringLength",
+    /// or its hex ("0x01") for one Flash does not know, as AVM2's Op.name.
     pub fn name(op: Op) []const u8 {
         return tables.names[@backingInt(op)];
     }
@@ -203,7 +204,11 @@ fn specName(comptime tag: []const u8) []const u8 {
 
 const tables: Tables = blk: {
     @setEvalBranchQuota(100000);
-    var t: Tables = .{ .names = @splat(""), .known = @splat(false) };
+    var t: Tables = .{ .names = undefined, .known = @splat(false) };
+    for (0..256) |b| {
+        t.names[b] = std.fmt.comptimePrint("0x{x:0>2}", .{b});
+    }
+
     for (std.enums.values(Op)) |op| {
         t.names[@backingInt(op)] = specName(@tagName(op));
         t.known[@backingInt(op)] = true;
@@ -219,6 +224,7 @@ test "opcodes, their names and which are known" {
     try std.testing.expectEqualStrings("BitURShift", Op.bit_u_r_shift.name());
     try std.testing.expectEqualStrings("GetUrl2", Op.get_url2.name());
     try std.testing.expect(!@as(Op, @fromBackingInt(@intCast(0x01))).known());
+    try std.testing.expectEqualStrings("0x01", @as(Op, @fromBackingInt(@intCast(0x01))).name());
     try std.testing.expectEqual(100, std.enums.values(Op).len);
     try std.testing.expectEqual(@as(u16, 0x1ff), @as(u16, @bitCast(FunctionFlags{
         .preload_this = true,
