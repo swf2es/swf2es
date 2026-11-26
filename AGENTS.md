@@ -384,7 +384,11 @@ of its own.
   call (`ir.opcodeIs` against `ir.opcode`). Tiny accessors on those paths
   are `inline fn` (`Binding.index`, `TypeRef.index`, `TypeId.index`): LLVM
   may put one out of line once it has enough callers, which cost the
-  verifier 1–2% in the compile bench.
+  verifier 1–2% in the compile bench. Iterators (`struct` with `pub fn
+  next(self: *It) ?T`) are welcome off those paths; on them, keep one only
+  where the compile bench stays level (`TraitsTable.findFrom`, which every
+  early-bound name goes through, stays a hand loop: walking `bases()` there
+  cost conformance 1–1.7%).
 - Each file's tests are at its end, run natively by `zig build test`
   (`node packages/codegen/zig/build.ts --update` runs them). The 0xAA
   build (`dist-test/testing-poison.wasm`) fills freed and rolled-back
