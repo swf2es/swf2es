@@ -8,6 +8,7 @@ const Error = Allocator.Error;
 const output = @import("../../output.zig");
 const Output = output.Output;
 const C = @import("../abc/constants.zig");
+const Value = @import("../abc/pool.zig").Value;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
@@ -117,12 +118,12 @@ fn className_(e: *MethodEmitter, t: u32) Error!void {
     const abc = domain.abcs.get(index);
     const pool = &abc.pool;
     var mn = abc.instanceName[traits.owner.get(t)];
-    if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+    if (pool.mnKind[mn] == .type_name) {
         mn = pool.mnA[mn];
     }
 
     var ns = pool.mnA[mn];
-    if (pool.mnKind[mn] == C.CONSTANT_Multiname) {
+    if (pool.mnKind[mn] == .multiname) {
         ns = domain_.firstMember(pool, ns);
     }
 
@@ -227,12 +228,12 @@ pub fn className(e: *MethodEmitter, traits: *const TraitsTable, t: u32) Error![]
     const abc = domain.abcs.get(index);
     const pool = &abc.pool;
     var mn = abc.instanceName[traits.owner.get(t)];
-    if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+    if (pool.mnKind[mn] == .type_name) {
         mn = pool.mnA[mn];
     }
 
     var ns = pool.mnA[mn];
-    if (pool.mnKind[mn] == C.CONSTANT_Multiname) {
+    if (pool.mnKind[mn] == .multiname) {
         ns = domain_.firstMember(pool, ns);
     }
 
@@ -242,15 +243,15 @@ pub fn className(e: *MethodEmitter, traits: *const TraitsTable, t: u32) Error![]
 /// Pool string `index` as a JavaScript string literal.
 pub fn poolString(e: *MethodEmitter, index: u32) Error!void {
     const pool = &e.abc.pool;
-    try e.out.string(e.data[pool.stringStart[index]..][0..pool.stringLength[index]]);
+    try e.out.string(pool.string(e.data, index));
 }
 
 /// A constant of default-value kind `kind`, index `value`, for a slot or
 /// parameter of `type`; value 0 is the type's own default.
-pub fn constant(e: *MethodEmitter, value: u32, kind: u8, type_: i32) Error!void {
+pub fn constant(e: *MethodEmitter, value: u32, kind: C.Constant, type_: i32) Error!void {
     const out = &e.out;
     const pool = &e.abc.pool;
-    if (kind == C.CONSTANT_Float and e.abc.hasFloatSupport()) {
+    if (kind == .float and e.abc.hasFloatSupport()) {
         const bt = e.domain.builtin(type_);
         const numeric = bt == traits_.BUILTIN_Int or bt == traits_.BUILTIN_Uint or bt == traits_.BUILTIN_Number;
         if (!numeric) {
@@ -269,25 +270,28 @@ pub fn constant(e: *MethodEmitter, value: u32, kind: u8, type_: i32) Error!void 
         return defaultOf(e, type_);
     }
 
-    if (type_ >= 0 and type_ == e.domain.floatType and kind != C.CONSTANT_Float) {
+    if (type_ >= 0 and type_ == e.domain.floatType and kind != .float) {
         try out.text("rt.float(");
         try constant(e, value, kind, TYPE_Any);
         try out.text(")");
         return;
     }
 
-    switch (kind) {
-        0x03 => try out.int(pool.ints[value]),
-        0x04 => try out.uint(pool.uints[value]),
-        0x06 => try out.double(pool.doubles[value]),
-        0x01 => try poolString(e, value),
-        0x0a => try out.text("false"),
-        0x0b => try out.text("true"),
-        0x0c => try out.text("null"),
-        else => {
-            // A namespace, as the Namespace object it is to AS3.
+    // Linking checked the value (Domain.checkDefault); one it did not
+    // check is written as a namespace, never a trap.
+    switch (pool.value(kind, value) catch Value{ .namespace = value }) {
+        .int => |n| try out.int(n),
+        .uint => |n| try out.uint(n),
+        .double => |n| try out.double(n),
+        // Taken above: only an ABC with float support has floats past entry 0.
+        .float => |n| try out.double(n),
+        .string => |i| try poolString(e, i),
+        .boolean => |b| try out.text(if (b) "true" else "false"),
+        .null => try out.text("null"),
+        .namespace => |i| {
+            // As the Namespace object it is to AS3.
             try out.text("rt.namespace(N[");
-            try out.uint(value);
+            try out.uint(i);
             try out.text("])");
         },
     }

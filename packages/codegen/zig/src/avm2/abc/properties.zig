@@ -1,5 +1,5 @@
 // How a method's code reaches properties, as avmplus' Verifier types and
-// binds them (assembly/avm2/abc/properties.ts): finding a property's object
+// binds them: finding a property's object
 // along the scope chain, getting, setting and calling it, early where the
 // receiver's type binds the name and late otherwise, and the super calls
 // and properties.
@@ -179,8 +179,14 @@ pub fn globalScope(bd: *BodyDecoder) i32 {
 
 /// As Verifier::emitFindProperty: the scope object a name is found on, from
 /// the innermost scope out, stopping at a with scope, then the scripts that
-/// define it; else an Object, after the runtime name parts are popped
-/// (properties.ts tells why the global lookup first asks local scopes).
+/// define it; else an Object, after the runtime name parts are popped.
+///
+/// Where no scope binds it statically, avmplus' JIT and interpreter both
+/// search again at run time (CodegenLIR turns findpropglobal back into
+/// findproperty), and MethodEnv::findproperty asks each local scope's
+/// traits at run time: a subclass instance, or an object as `this`, may
+/// bind a name its type does not. So the global lookup first asks the
+/// local scopes whose type may be narrower at run time (globalSearch).
 pub fn findProperty(bd: *BodyDecoder, opcode: u8, mn: u32) Error!bool {
     const domain = bd.domain;
     const outer = bd.outer;
@@ -271,7 +277,10 @@ pub fn findProperty(bd: *BodyDecoder, opcode: u8, mn: u32) Error!bool {
 
 /// For a name no scope binds statically: 1 + the first local scope that
 /// MethodEnv::findproperty asks by its traits at run time, if one may bind
-/// more than its type says, else 0 (properties.ts tells which may).
+/// more than its type says, else 0. A class method's first scope keeps its
+/// class's type (the Scope's extra), and with no outer scopes the first is
+/// the global object, looked up last; a function's `this` is any object.
+/// A class, script, activation or catch scope is of exactly its type.
 fn globalSearch(bd: *BodyDecoder) u32 {
     const traits = &bd.domain.traits;
     const outer = bd.outer;
@@ -439,7 +448,9 @@ pub fn setProperty(bd: *BodyDecoder, opcode: u8, mn: u32) Error!bool {
     }
 
     // An instance's const initialized anywhere but in its declarer's
-    // initializer is written as setproperty writes it (properties.ts tells why).
+    // initializer is written as setproperty writes it: ReferenceError 1074.
+    // A global's is left to initproperty: a SWF loaded again into the one
+    // domain initializes its classes on the first load's global.
     const late = kind == 3 and opcode == ops.OP_initproperty and ty >= 0 and domain.traits.kind.get(@intCast(ty)) == traits_.TRAITS_Instance;
     const write = if (late) ops.OP_setproperty else opcode;
     return bd.emitOn(write, -1, @bitCast(obj), n, mn, 0, 0);

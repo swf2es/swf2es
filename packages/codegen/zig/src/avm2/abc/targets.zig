@@ -1,5 +1,5 @@
 // Where a body's control flow goes, as Verifier::checkTarget and mergeState
-// follow it (assembly/avm2/abc/targets.ts): branch, fall-through and handler
+// follow it: branch, fall-through and handler
 // targets, each the frame state it is entered with, every path into it of
 // the same depths and its values merged, and the targets whose entry state
 // changed walked again.
@@ -7,8 +7,8 @@
 // A backward edge makes its target a loop header, whose handlers are
 // reached from it (throwsAt). A handler's target is past its range
 // (checkHandlers rejects one before its end), so after the instruction
-// that throws: never a backward edge, never a loop header. The recursion
-// is at most target, throwsAt, target, as in AssemblyScript.
+// that throws: never a backward edge, never a loop header. So the
+// recursion is at most target, throwsAt, target, whatever the input.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Error = Allocator.Error;

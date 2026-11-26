@@ -1,13 +1,14 @@
 // method_info and metadata_info, checked like avmplus' parseMethodInfos and
-// parseMetadataInfos (assembly/avm2/abc/methods.ts).
+// parseMetadataInfos.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
-const Diagnostics = abc_.Diagnostics;
-const Error = abc_.Error;
+const errors = @import("errors.zig");
+const Diagnostics = errors.Diagnostics;
+const Error = errors.Error;
 const C = @import("constants.zig");
 const Reader = @import("reader.zig").Reader;
 
@@ -19,7 +20,7 @@ pub fn readMethods(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *
 
     abc.methodReturnType = try lists.zeroed(u32, gpa, abc.methodReturnType, count);
     abc.methodName = try lists.zeroed(u32, gpa, abc.methodName, count);
-    abc.methodFlags = try lists.zeroed(u8, gpa, abc.methodFlags, count);
+    abc.methodFlags = try lists.zeroed(C.MethodFlags, gpa, abc.methodFlags, count);
     abc.methodParamStart = try lists.zeroed(u32, gpa, abc.methodParamStart, count + 1);
     abc.methodOptionalStart = try lists.zeroed(u32, gpa, abc.methodOptionalStart, count + 1);
     abc.methodOwner = try lists.zeroed(i32, gpa, abc.methodOwner, count);
@@ -36,23 +37,23 @@ pub fn readMethods(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *
         }
 
         abc.methodName[i] = r.u30_();
-        const flags: u8 = @truncate(r.u8_());
+        const flags = r.byteAs(C.MethodFlags);
         if (r.failed) {
             return diag.fail(C.kCorruptABCError);
         }
 
-        if (flags & C.METHOD_Native != 0 and !abc.builtin) {
+        if (flags.native and !abc.builtin) {
             return diag.fail(C.kIllegalNativeMethodError);
         }
 
         abc.methodFlags[i] = flags;
         abc.methodOptionalStart[i] = lists.len("optionalValue");
-        if (flags & C.METHOD_HasOptional != 0) {
+        if (flags.has_optional) {
             const optionalCount = r.u30_();
             j = 0;
             while (j < optionalCount and !r.failed) : (j += 1) {
                 lists.push("optionalValue", r.u30_());
-                lists.push("optionalKind", @truncate(r.u8_()));
+                lists.push("optionalKind", r.byteAs(C.Constant));
             }
 
             if (optionalCount == 0 or optionalCount > paramCount) {
@@ -61,7 +62,7 @@ pub fn readMethods(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *
         }
 
         // Parameter names are debug information; skip them.
-        if (flags & C.METHOD_HasParamNames != 0) {
+        if (flags.has_param_names) {
             j = 0;
             while (j < paramCount and !r.failed) : (j += 1) {
                 _ = r.u30_();

@@ -1,11 +1,13 @@
-// The ABC block parsed (assembly/avm2/abc/parse.ts).
+// The ABC block parsed: the constant pool, then each section in the
+// order avmplus' AbcParser reads them.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
-const Diagnostics = abc_.Diagnostics;
-const Error = abc_.Error;
+const errors = @import("errors.zig");
+const Diagnostics = errors.Diagnostics;
+const Error = errors.Error;
 const readMethodBodies = @import("bodies.zig").readMethodBodies;
 const classes = @import("classes.zig");
 const C = @import("constants.zig");

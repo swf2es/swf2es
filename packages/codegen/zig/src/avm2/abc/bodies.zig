@@ -1,5 +1,4 @@
-// method_body_info, checked like avmplus' parseMethodBodies
-// (assembly/avm2/abc/bodies.ts). Stack, local and scope sizes, exception
+// method_body_info, checked like avmplus' parseMethodBodies. Stack, local and scope sizes, exception
 // ranges and catch types are checked when the method is verified.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -7,8 +6,9 @@ const memory = @import("../../memory.zig");
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
-const Diagnostics = abc_.Diagnostics;
-const Error = abc_.Error;
+const errors = @import("errors.zig");
+const Diagnostics = errors.Diagnostics;
+const Error = errors.Error;
 const C = @import("constants.zig");
 const Reader = @import("reader.zig").Reader;
 const readTraits = @import("traits.zig").readTraits;
@@ -69,7 +69,7 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, di
         }
 
         const owner = abc.methodOwner[method];
-        if (owner >= 0 and @as(u32, @intCast(owner)) < abc.classCount() and abc.instanceFlags[@intCast(owner)] & C.INSTANCE_Interface != 0) {
+        if (owner >= 0 and @as(u32, @intCast(owner)) < abc.classCount() and abc.instanceFlags[@intCast(owner)].interface) {
             return diag.fail(C.kIllegalInterfaceMethodBodyError);
         }
 
@@ -83,8 +83,7 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, di
         lists.push("bodyLocalCount", localCount);
         lists.push("bodyInitScopeDepth", initScopeDepth);
         lists.push("bodyMaxScopeDepth", maxScopeDepth);
-        lists.push("bodyCodeStart", codeStart);
-        lists.push("bodyCodeLength", codeLength);
+        lists.push("bodyCode", .{ .start = codeStart, .len = codeLength });
         lists.push("bodyExceptionStart", exceptionStart);
         lists.push("bodyTraitStart", lists.len("traitName"));
 

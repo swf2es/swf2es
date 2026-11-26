@@ -60,10 +60,10 @@ pub fn stackName(dom: *Domain, gpa: Allocator, index: u32, m: u32) Allocator.Err
         if (declaring) {
             var i = traits.first.get(tu);
             while (i < traits.end.get(tu)) : (i += 1) {
-                const tk = abc.traitTag[i] & 0x0f;
-                if ((tk == C.TRAIT_Method or tk == C.TRAIT_Getter or tk == C.TRAIT_Setter) and abc.traitIndex[i] == local) {
+                const tk = abc.traitTag[i].kind;
+                if (tk.bindsMethod() and abc.traitIndex[i] == local) {
                     traits.readName(dom, index, i);
-                    try ascii(gpa, &out, if (tk == C.TRAIT_Getter) "/get " else if (tk == C.TRAIT_Setter) "/set " else "/");
+                    try ascii(gpa, &out, if (tk == .getter) "/get " else if (tk == .setter) "/set " else "/");
                     try shown(dom, gpa, &out, traits.nameNs, traits.nameId);
                     return out.items;
                 }
@@ -100,12 +100,12 @@ fn className(dom: *Domain, gpa: Allocator, out: *Units, index: u32, owner: u32) 
     const abc = dom.abcs.get(index);
     const pool = &abc.pool;
     var mn = abc.instanceName[owner];
-    if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+    if (pool.mnKind[mn] == .type_name) {
         mn = pool.mnA[mn];
     }
 
     var ns = pool.mnA[mn];
-    if (pool.mnKind[mn] == C.CONSTANT_Multiname) {
+    if (pool.mnKind[mn] == .multiname) {
         ns = domain_.firstMember(pool, ns);
     }
 

@@ -16,6 +16,7 @@ const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
 const Rows = memory.Rows;
 const C = @import("../abc/constants.zig");
+const Value = @import("../abc/pool.zig").Value;
 const domain_ = @import("domain.zig");
 const Domain = domain_.Domain;
 const signatures = @import("signatures.zig");
@@ -431,13 +432,13 @@ pub const TraitsTable = struct {
         const pool = &abc.pool;
         const versions = dom.abcNsVersion.get(index);
         var mn = abc.traitName[i];
-        if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+        if (pool.mnKind[mn] == .type_name) {
             mn = pool.mnA[mn];
         }
 
         var ns = pool.mnA[mn];
         var version = versions[ns];
-        if (pool.mnKind[mn] == C.CONSTANT_Multiname) {
+        if (pool.mnKind[mn] == .multiname) {
             const set = ns;
             const last = pool.nsSetStart[set + 1];
             ns = domain_.firstMember(pool, set);
@@ -738,67 +739,44 @@ fn toU32(x: f64) f64 {
     return @floatFromInt(@as(u32, @intFromFloat(std.math.clamp(@trunc(x), 0.0, 4294967295.0))));
 }
 
-/// As PoolObject::isLegalDefaultValue and getLegalDefaultValue: whether a
-/// default value of constant kind `kind` suits a slot or parameter of
-/// builtin type `bt`; the value itself matters only for int and uint.
-pub fn legalDefault(bt: u8, kind: u8, number: f64) bool {
+/// As PoolObject::isLegalDefaultValue and getLegalDefaultValue: whether
+/// default value `value` suits a slot or parameter of builtin type `bt`;
+/// a number's value matters only for int and uint.
+pub fn legalDefault(bt: u8, value: Value) bool {
     if (bt == BUILTIN_Any) {
         return true;
     }
 
-    const isNumber = kind == C.CONSTANT_Int or
-        kind == C.CONSTANT_UInt or
-        kind == C.CONSTANT_Double or
-        kind == C.CONSTANT_Float;
-    const isNamespace = kind == C.CONSTANT_Namespace or
-        kind == C.CONSTANT_PackageNamespace or
-        kind == C.CONSTANT_PackageInternalNs or
-        kind == C.CONSTANT_ProtectedNamespace or
-        kind == C.CONSTANT_ExplicitNamespace or
-        kind == C.CONSTANT_StaticProtectedNs or
-        kind == C.CONSTANT_PrivateNs;
+    const number: ?f64 = switch (value) {
+        .int => |n| @floatFromInt(n),
+        .uint => |n| @floatFromInt(n),
+        .double => |n| n,
+        .float => |n| n,
+        .string, .boolean, .null, .namespace => null,
+    };
     return switch (bt) {
         BUILTIN_Object => true,
-        BUILTIN_Float, BUILTIN_Number => isNumber,
-        BUILTIN_Boolean => kind == C.CONSTANT_True or kind == C.CONSTANT_False,
-        BUILTIN_Int => isNumber and number == toI32(number) and number >= -2147483648 and number <= 2147483647,
-        BUILTIN_Uint => isNumber and number == toU32(number) and number >= 0 and number <= 4294967295,
-        BUILTIN_String => kind == C.CONSTANT_Null or kind == C.CONSTANT_Utf8,
-        BUILTIN_Namespace => kind == C.CONSTANT_Null or isNamespace,
-        else => kind == C.CONSTANT_Null,
+        BUILTIN_Float, BUILTIN_Number => number != null,
+        BUILTIN_Boolean => value == .boolean,
+        BUILTIN_Int => if (number) |n| n == toI32(n) and n >= -2147483648 and n <= 2147483647 else false,
+        BUILTIN_Uint => if (number) |n| n == toU32(n) and n >= 0 and n <= 4294967295 else false,
+        BUILTIN_String => value == .null or value == .string,
+        BUILTIN_Namespace => value == .null or value == .namespace,
+        else => value == .null,
     };
-}
-
-/// Whether `kind` names a constant a default value may be.
-pub fn isDefaultKind(kind: u8) bool {
-    return kind == C.CONSTANT_Int or
-        kind == C.CONSTANT_UInt or
-        kind == C.CONSTANT_Double or
-        kind == C.CONSTANT_Float or
-        kind == C.CONSTANT_Utf8 or
-        kind == C.CONSTANT_True or
-        kind == C.CONSTANT_False or
-        kind == C.CONSTANT_Null or
-        kind == C.CONSTANT_Namespace or
-        kind == C.CONSTANT_PackageNamespace or
-        kind == C.CONSTANT_PackageInternalNs or
-        kind == C.CONSTANT_ProtectedNamespace or
-        kind == C.CONSTANT_ExplicitNamespace or
-        kind == C.CONSTANT_StaticProtectedNs or
-        kind == C.CONSTANT_PrivateNs;
 }
 
 const testing = std.testing;
 
 test "int and uint defaults are numbers they hold exactly" {
-    try testing.expect(legalDefault(BUILTIN_Int, C.CONSTANT_Double, -2147483648));
-    try testing.expect(!legalDefault(BUILTIN_Int, C.CONSTANT_Double, 2147483648));
-    try testing.expect(!legalDefault(BUILTIN_Int, C.CONSTANT_Double, 1.5));
-    try testing.expect(!legalDefault(BUILTIN_Int, C.CONSTANT_Double, std.math.nan(f64)));
-    try testing.expect(legalDefault(BUILTIN_Uint, C.CONSTANT_Double, 4294967295));
-    try testing.expect(!legalDefault(BUILTIN_Uint, C.CONSTANT_Double, -1));
-    try testing.expect(legalDefault(BUILTIN_String, C.CONSTANT_Null, 0));
-    try testing.expect(!legalDefault(BUILTIN_Boolean, C.CONSTANT_Null, 0));
+    try testing.expect(legalDefault(BUILTIN_Int, .{ .double = -2147483648 }));
+    try testing.expect(!legalDefault(BUILTIN_Int, .{ .double = 2147483648 }));
+    try testing.expect(!legalDefault(BUILTIN_Int, .{ .double = 1.5 }));
+    try testing.expect(!legalDefault(BUILTIN_Int, .{ .double = std.math.nan(f64) }));
+    try testing.expect(legalDefault(BUILTIN_Uint, .{ .double = 4294967295 }));
+    try testing.expect(!legalDefault(BUILTIN_Uint, .{ .double = -1 }));
+    try testing.expect(legalDefault(BUILTIN_String, .null));
+    try testing.expect(!legalDefault(BUILTIN_Boolean, .null));
 }
 
 test "an override meets accessors with accessors and methods with methods" {

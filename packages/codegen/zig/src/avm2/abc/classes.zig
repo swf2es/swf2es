@@ -1,14 +1,15 @@
 // instance_info, class_info and script_info, checked like avmplus'
-// parseInstanceInfos, parseClassInfos and parseScriptInfos
-// (assembly/avm2/abc/classes.ts).
+// parseInstanceInfos, parseClassInfos and parseScriptInfos.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
-const Diagnostics = abc_.Diagnostics;
-const Error = abc_.Error;
+const errors = @import("errors.zig");
+const Diagnostics = errors.Diagnostics;
+const Error = errors.Error;
+const Rejected = errors.Rejected;
 const C = @import("constants.zig");
 const Reader = @import("reader.zig").Reader;
 const traits = @import("traits.zig");
@@ -23,7 +24,7 @@ pub fn readInstances(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag:
 
     abc.instanceName = try lists.zeroed(u32, gpa, abc.instanceName, count);
     abc.instanceSuper = try lists.zeroed(u32, gpa, abc.instanceSuper, count);
-    abc.instanceFlags = try lists.zeroed(u8, gpa, abc.instanceFlags, count);
+    abc.instanceFlags = try lists.zeroed(C.InstanceFlags, gpa, abc.instanceFlags, count);
     abc.instanceProtectedNs = try lists.zeroed(u32, gpa, abc.instanceProtectedNs, count);
     abc.instanceInterfaceStart = try lists.zeroed(u32, gpa, abc.instanceInterfaceStart, count + 1);
     abc.instanceInit = try lists.zeroed(u32, gpa, abc.instanceInit, count);
@@ -47,9 +48,9 @@ pub fn readInstances(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag:
             return diag.fail(if (r.failed) C.kCorruptABCError else C.kCpoolIndexRangeError);
         }
 
-        const flags: u8 = @truncate(r.u8_());
+        const flags = r.byteAs(C.InstanceFlags);
         var protectedNs: u32 = 0;
-        if (flags & C.INSTANCE_ProtectedNs != 0) {
+        if (flags.protected_ns) {
             protectedNs = r.u30_();
             if (protectedNs >= pool.nsCount()) {
                 return diag.fail(if (r.failed) C.kCorruptABCError else C.kCpoolIndexRangeError);
@@ -154,7 +155,7 @@ pub fn readScripts(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *
 }
 
 /// A method index.
-fn readMethodIndex(abc: *const Abc, r: *Reader, diag: *Diagnostics) error{Verify}!u32 {
+fn readMethodIndex(abc: *const Abc, r: *Reader, diag: *Diagnostics) Rejected!u32 {
     const method = r.u30_();
     if (r.failed) {
         return diag.fail(C.kCorruptABCError);
@@ -168,7 +169,7 @@ fn readMethodIndex(abc: *const Abc, r: *Reader, diag: *Diagnostics) error{Verify
 }
 
 /// Bind an instance or class initializer to its owner.
-fn bind(abc: *Abc, method: u32, owner: i32, diag: *Diagnostics) error{Verify}!void {
+fn bind(abc: *Abc, method: u32, owner: i32, diag: *Diagnostics) Rejected!void {
     if (abc.methodOwner[method] != -1) {
         return diag.fail(C.kAlreadyBoundError);
     }

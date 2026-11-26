@@ -1,5 +1,5 @@
-// Decodes and verifies a method body the way avmplus' Verifier walks it
-// (assembly/avm2/abc/code.ts): from the entry along fall-through, branches
+// Decodes and verifies a method body the way avmplus' Verifier walks it:
+// from the entry along fall-through, branches
 // and the exception handlers that a reachable instruction can trigger.
 // Unreachable bytes are never read, as in Flash.
 //
@@ -108,8 +108,9 @@ const INSIDE: u8 = 2;
 pub const NOT_NULL: u8 = 1;
 pub const WITH: u8 = 2;
 /// Neither null nor undefined, as a null check of the same local found it
-/// since it was last set, on every path here (code.ts tells why it differs
-/// from NOT_NULL).
+/// since it was last set, on every path here: the verifier still does not
+/// know it not null, as avmplus' marks only the stack value it checked, but
+/// no check of it needs code.
 pub const CHECKED: u8 = 4;
 pub const KNOWN: u8 = NOT_NULL | CHECKED;
 
@@ -180,7 +181,7 @@ pub const BodyDecoder = struct {
 
     // The method being verified and the frame state of the block being decoded.
     method: u32 = 0,
-    methodFlags: u8 = 0,
+    methodFlags: C.MethodFlags = .{},
     maxStack: u32 = 0,
     localCount: u32 = 0,
     maxScope: u32 = 0,
@@ -212,7 +213,9 @@ pub const BodyDecoder = struct {
     localWrites: []u32 = &.{},
     /// Each handler's exception type and catch scope type.
     handlerType: std.ArrayList(i32) = .empty,
-    /// Bumped whenever a local may have changed (code.ts tells what it saves).
+    /// Bumped whenever a local may have changed: a local set, or the frame
+    /// loaded whole. A handler edge whose locals are the same as at the last
+    /// merge into it, at the version of handlerMerged, changes nothing there.
     localsVersion: u64 = 1,
     handlerMerged: []u64 = &.{},
     handlerScope: std.ArrayList(i32) = .empty,
@@ -289,8 +292,8 @@ pub const BodyDecoder = struct {
         self.captured.clearRetainingCapacity();
         self.claims.clearRetainingCapacity();
 
-        self.start = abc.bodyCodeStart[body];
-        self.length = abc.bodyCodeLength[body];
+        self.start = abc.bodyCode[body].start;
+        self.length = abc.bodyCode[body].len;
         self.handlerFirst = abc.bodyExceptionStart[body];
         self.handlerCount = abc.bodyExceptionStart[body + 1] - self.handlerFirst;
         if (self.handlerMerged.len < self.handlerCount) {
@@ -477,7 +480,7 @@ pub const BodyDecoder = struct {
             return false;
         }
 
-        if (self.methodFlags & (C.METHOD_NeedRest | C.METHOD_NeedArguments) != 0) {
+        if (self.methodFlags.need_rest or self.methodFlags.need_arguments) {
             return self.checkLocal(params + 1);
         }
 
@@ -579,7 +582,7 @@ pub const BodyDecoder = struct {
         }
 
         var firstLocal = count + 1;
-        if (self.methodFlags & (C.METHOD_NeedRest | C.METHOD_NeedArguments) != 0) {
+        if (self.methodFlags.need_rest or self.methodFlags.need_arguments) {
             self.setValue(firstLocal, domain.arrayType, NOT_NULL);
             firstLocal += 1;
         }
@@ -1045,42 +1048,30 @@ pub const BodyDecoder = struct {
 /// As avmplus' Multiname::isBinding for a catch variable: a QName or Multiname
 /// with a name, not an attribute or runtime name. A TypeName stands for its base.
 pub fn isBinding(pool: *const ConstantPool, index: u32) bool {
-    var mn = index;
-    if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
-        mn = pool.mnA[mn];
-    }
-
-    const kind = pool.mnKind[mn];
-    if (kind == C.CONSTANT_Qname) {
-        return pool.mnA[mn] != 0 and pool.mnB[mn] != 0;
-    }
-
-    return kind == C.CONSTANT_Multiname and pool.mnB[mn] != 0;
+    return switch (pool.baseName(index)) {
+        .qname => |q| !q.attribute and q.ns != 0 and q.name != 0,
+        .multiname => |m| !m.attribute and m.name != 0,
+        else => false,
+    };
 }
 
 /// A multiname's MN_* parts, as avmplus' Multiname flags.
 pub fn nameParts(pool: *const ConstantPool, index: u32) u8 {
-    var kind = pool.mnKind[index];
-    if (kind == C.CONSTANT_TypeName) {
-        kind = pool.mnKind[pool.mnA[index]];
-    }
-
-    return switch (kind) {
-        C.CONSTANT_Qname => MN_QName,
-        C.CONSTANT_QnameA => MN_QName | MN_Attr,
-        C.CONSTANT_RTQname => MN_QName | MN_Rtns,
-        C.CONSTANT_RTQnameA => MN_QName | MN_Rtns | MN_Attr,
-        C.CONSTANT_RTQnameL => MN_QName | MN_Rtns | MN_Rtname,
-        C.CONSTANT_RTQnameLA => MN_QName | MN_Rtns | MN_Rtname | MN_Attr,
-        C.CONSTANT_MultinameL => MN_Rtname,
-        C.CONSTANT_MultinameLA => MN_Rtname | MN_Attr,
-        C.CONSTANT_MultinameA => MN_Attr,
-        else => 0,
+    const mn = pool.baseName(index);
+    const attr: u8 = if (mn.isAttribute()) MN_Attr else 0;
+    return attr | switch (mn) {
+        .qname => MN_QName,
+        .rtqname => MN_QName | MN_Rtns,
+        .rtqname_late => MN_QName | MN_Rtns | MN_Rtname,
+        .multiname_late => MN_Rtname,
+        .multiname, .type_name, .none => 0,
     };
 }
 
 /// Verify, with types, every method of ABC `index` that its scripts can
-/// run (code.ts tells the order). The result is each body's VerifyError, 0
+/// run: each script's initializer and methods, then each class's and
+/// function's methods once creating them captured their scope chain, as
+/// avmplus verifies each before it first runs. The result is each body's VerifyError, 0
 /// if it verified, or -1 if nothing could run it.
 pub fn verifyMethods(domain: *Domain, index: u32) Error![]i32 {
     var verifier = try Verifier.init(domain, domain.scratch, index);
@@ -1088,8 +1079,13 @@ pub fn verifyMethods(domain: *Domain, index: u32) Error![]i32 {
     return verifier.results;
 }
 
-/// verifyMethods a part at a time (code.ts tells why): run until it
-/// returns true, with nothing else decoding in between.
+/// verifyMethods a part at a time, so that the host gets control back
+/// between parts of a large ABC: run until it returns true, with nothing
+/// else decoding in between. The parts verify what verifyMethods does, in
+/// its order, however they are cut. init counts the ABC as verified and
+/// logs LOG_Verify at once, as verifyMethods does, so one left before it
+/// is done leaves both, and what it resolved, in the domain (compile.zig's
+/// abandon).
 pub const Verifier = struct {
     domain: *Domain,
     /// Where its results and queue are, which a module written a part at a
@@ -1156,7 +1152,7 @@ pub const Verifier = struct {
 
                 const b: u32 = @intCast(body);
                 self.results[b] = (try decoder.decode(b, scope)).@"error";
-                self.spent += @max(@as(u64, abc.bodyCodeLength[b]), BODY_COST);
+                self.spent += @max(@as(u64, abc.bodyCode[b].len), BODY_COST);
                 try self.queue.appendSlice(self.gpa, decoder.captured.items);
             }
 
@@ -1208,8 +1204,10 @@ pub const Verifier = struct {
     }
 };
 
-/// The garbage, roughly, in bytes, that verifying a byte of a body's code
-/// makes, as measured on large ABCs (AssemblyScript's).
+/// What verifying a byte of a body's code weighs against the budget of a
+/// module written a part at a time: about the garbage, in bytes, it once
+/// made, measured on large ABCs. Kept, so that the parts fall where they
+/// always did.
 pub const VERIFY_COST: u64 = 5;
 
 /// What a body counts for in Verifier.run's budget at least.
@@ -1262,10 +1260,8 @@ fn settleContests(domain: *Domain, index: u32) Error!bool {
 }
 
 /// The one decoder of a call, made for ABC `index`: its scratch kept from
-/// one use to the next within the call, as AssemblyScript keeps its one
-/// decoder (whose scratch outlives calls there, which garbage collection
-/// between calls makes cheap; here the call's arena gives it back). The
-/// domain holds it for the call: each Change starts without one.
+/// one use to the next within the call, and given back with the call's
+/// arena. The domain holds it for the call: each Change starts without one.
 pub fn bodyDecoder(domain: *Domain, index: u32) Error!*BodyDecoder {
     const abc = domain.abcs.get(index);
     const data = domain.abcBuffer.get(index);

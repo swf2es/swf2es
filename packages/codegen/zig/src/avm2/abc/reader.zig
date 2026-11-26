@@ -1,5 +1,5 @@
 // Reads the primitive types of the ABC format (AVM2 overview, chapter 4.1),
-// as assembly/avm2/abc/reader.ts does.
+// as avmplus' AbcParser reads them.
 //
 // The input must be followed by PADDING readable bytes, as avmplus pads its
 // buffer, so a variable-length read checks the bounds once before and once
@@ -33,6 +33,16 @@ pub const Reader = struct {
 
         self.pos = p + 1;
         return self.data[p];
+    }
+
+    /// A byte as T: a kind, which may be one T does not name (a
+    /// non-exhaustive enum), or flags (a packed struct of a byte).
+    pub inline fn byteAs(self: *Reader, comptime T: type) T {
+        const b: u8 = @truncate(self.u8_());
+        return switch (@typeInfo(T)) {
+            .@"enum" => @fromBackingInt(@intCast(b)),
+            else => @bitCast(b),
+        };
     }
 
     pub inline fn u16_(self: *Reader) u32 {

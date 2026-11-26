@@ -310,7 +310,7 @@ pub const ModuleEmitter = struct {
         const o = self.out();
         const pool = &self.domain.abcs.get(self.index).pool;
         const kind = pool.mnKind[i];
-        if (kind == C.CONSTANT_TypeName) {
+        if (kind == .type_name) {
             try o.text("rt.typeName(N, V, S, ");
             try o.uint(pool.mnA[i]);
             try o.text(", ");
@@ -320,15 +320,15 @@ pub const ModuleEmitter = struct {
         }
 
         try o.text("mn(");
-        try o.uint(kind);
+        try o.uint(@backingInt(kind));
         try o.text(", ");
         switch (kind) {
-            C.CONSTANT_Qname, C.CONSTANT_QnameA => {
+            .qname, .qname_a => {
                 try o.text("[");
                 try o.uint(pool.mnA[i]);
                 try o.text("]");
             },
-            C.CONSTANT_Multiname, C.CONSTANT_MultinameA, C.CONSTANT_MultinameL, C.CONSTANT_MultinameLA => {
+            .multiname, .multiname_a, .multiname_l, .multiname_la => {
                 try o.text("S[");
                 try o.uint(pool.mnA[i]);
                 try o.text("]");
@@ -338,7 +338,7 @@ pub const ModuleEmitter = struct {
 
         try o.text(", ");
         const hasName = switch (kind) {
-            C.CONSTANT_Qname, C.CONSTANT_QnameA, C.CONSTANT_RTQname, C.CONSTANT_RTQnameA, C.CONSTANT_Multiname, C.CONSTANT_MultinameA => true,
+            .qname, .qname_a, .rtqname, .rtqname_a, .multiname, .multiname_a => true,
             else => false,
         };
         const name = if (hasName) pool.mnB[i] else 0;
@@ -381,7 +381,7 @@ pub const ModuleEmitter = struct {
             try o.text(if (m != 0) ",\n    " else "\n    ");
             const global = start + m;
             const body = abc.methodBody[m];
-            if (abc.methodFlags[m] & C.METHOD_Native != 0) {
+            if (abc.methodFlags[m].native) {
                 try o.text("rt.native(");
                 try self.nativeName(global);
                 try self.nativeArity(global);
@@ -585,11 +585,11 @@ pub const ModuleEmitter = struct {
         // The trait that binds the method names it.
         var i = table.first.get(tu);
         while (i < table.end.get(tu)) : (i += 1) {
-            const tk = abc.traitTag[i] & 0x0f;
-            if ((tk == C.TRAIT_Method or tk == C.TRAIT_Getter or tk == C.TRAIT_Setter) and abc.traitIndex[i] == local) {
+            const tk = abc.traitTag[i].kind;
+            if (tk.bindsMethod() and abc.traitIndex[i] == local) {
                 switch (tk) {
-                    C.TRAIT_Getter => try text.appendSlice(gpa, &[_]u16{ 'g', 'e', 't', ':' }),
-                    C.TRAIT_Setter => try text.appendSlice(gpa, &[_]u16{ 's', 'e', 't', ':' }),
+                    .getter => try text.appendSlice(gpa, &[_]u16{ 'g', 'e', 't', ':' }),
+                    .setter => try text.appendSlice(gpa, &[_]u16{ 's', 'e', 't', ':' }),
                     else => {},
                 }
 
@@ -625,8 +625,8 @@ pub const ModuleEmitter = struct {
         const base = table.base.get(t);
         var i = table.first.get(t);
         while (i < table.end.get(t)) : (i += 1) {
-            const kind = abc.traitTag[i] & 0x0f;
-            if (kind != C.TRAIT_Slot and kind != C.TRAIT_Const and kind != C.TRAIT_Class) {
+            const kind = abc.traitTag[i].kind;
+            if (!kind.bindsSlot()) {
                 continue;
             }
 
@@ -638,7 +638,7 @@ pub const ModuleEmitter = struct {
             try o.uint(slot);
             try o.text(", ");
             const ty = table.slotType.get(slotStart + slot);
-            if (kind == C.TRAIT_Class) {
+            if (kind == .class) {
                 try o.text("null");
             } else {
                 try refs.constant(&self.methods, abc.traitValue[i], abc.traitValueKind[i], ty);
@@ -741,8 +741,8 @@ pub const ModuleEmitter = struct {
             const abc = domain.abcs.get(index);
             var i = table.first.get(v);
             while (i < table.end.get(v)) : (i += 1) {
-                const kind = abc.traitTag[i] & 0x0f;
-                if (kind != C.TRAIT_Slot and kind != C.TRAIT_Const and kind != C.TRAIT_Class) {
+                const kind = abc.traitTag[i].kind;
+                if (!kind.bindsSlot()) {
                     continue;
                 }
 
@@ -803,10 +803,10 @@ pub const ModuleEmitter = struct {
         const table = &domain.traits;
         const abc = domain.abcs.get(@intCast(index));
         const i = self.fillTrait.items[s];
-        const kind = abc.traitTag[i] & 0x0f;
+        const kind = abc.traitTag[i].kind;
         const value = abc.traitValue[i];
         const valueKind = abc.traitValueKind[i];
-        if (kind == C.TRAIT_Class) {
+        if (kind == .class) {
             try o.text("null");
         } else if (value == 0 or (@as(u32, @intCast(index)) == self.index and literal(valueKind))) {
             try refs.constant(&self.methods, value, valueKind, table.slotType.get(table.slotStart.get(t) + s));
@@ -856,14 +856,14 @@ pub const ModuleEmitter = struct {
                 continue;
             }
 
-            const kind = abc.traitTag[i] & 0x0f;
+            const kind = abc.traitTag[i].kind;
             table.readName(self.domain, self.index, i);
             const b = table.own(t, table.nameNs, table.nameId, table.nameVersion);
             try o.text(if (count != 0) ", [" else ", meta: [[");
             count += 1;
-            try o.uint(kind);
+            try o.uint(@backingInt(kind));
             try o.text(", ");
-            try o.uint((b >> 3) + @as(u32, if (kind == C.TRAIT_Setter) 1 else 0));
+            try o.uint((b >> 3) + @as(u32, if (kind == .setter) 1 else 0));
             try o.text(", ");
             try self.metadataOf(i);
             try o.text("]");
@@ -957,11 +957,11 @@ pub const ModuleEmitter = struct {
 
             const flags = abc.instanceFlags[i];
             try o.text("], final: ");
-            try o.text(if (flags & C.INSTANCE_Final != 0) "true" else "false");
+            try o.text(if (flags.final) "true" else "false");
             try o.text(", interface: ");
-            try o.text(if (flags & C.INSTANCE_Interface != 0) "true" else "false");
+            try o.text(if (flags.interface) "true" else "false");
             try o.text(", sealed: ");
-            try o.text(if (flags & 1 != 0) "true" else "false");
+            try o.text(if (flags.sealed) "true" else "false");
             try o.text(", protectedNs: ");
             try o.uint(abc.instanceProtectedNs[i]);
             try o.text(",\n      instance: ");
@@ -974,7 +974,7 @@ pub const ModuleEmitter = struct {
             try o.text("], cinit: F[");
             try o.uint(abc.classInit[i]);
             try o.text("]");
-            if (flags & C.INSTANCE_Interface == 0) {
+            if (!flags.interface) {
                 try self.aliases(instance);
             }
 
@@ -1081,7 +1081,7 @@ pub const ModuleEmitter = struct {
             const t = scripts_[s];
             var k = table.first.get(t);
             while (k < table.end.get(t)) : (k += 1) {
-                if ((abc.traitTag[k] & 0x0f) == C.TRAIT_Class and abc.traitIndex[k] == i) {
+                if (abc.traitTag[k].kind == .class and abc.traitIndex[k] == i) {
                     return @intCast(k);
                 }
             }
@@ -1121,9 +1121,9 @@ pub const ModuleEmitter = struct {
 };
 
 /// Whether constant() writes a value of `kind` as a literal, not a namespace the runtime makes.
-fn literal(kind: u8) bool {
+fn literal(kind: C.Constant) bool {
     return switch (kind) {
-        0x01, 0x03, 0x04, 0x06, 0x0a, 0x0b, 0x0c => true,
+        .utf8, .int, .uint, .double, .false, .true, .null => true,
         else => false,
     };
 }

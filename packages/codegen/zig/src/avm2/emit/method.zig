@@ -298,7 +298,7 @@ pub const MethodEmitter = struct {
         try self.parameters(count);
 
         const flags = self.abc.methodFlags[m];
-        if (flags & C.METHOD_NeedRest != 0) {
+        if (flags.need_rest) {
             try out.text(if (count != 0) ", ...rest" else "...rest");
         }
 
@@ -314,7 +314,7 @@ pub const MethodEmitter = struct {
         try self.prologue(m, global, flags);
         // A method that sets the default XML namespace gives its caller's
         // back when it returns or throws.
-        const dxns = (flags & C.METHOD_SetsDxns) != 0;
+        const dxns = flags.sets_dxns;
         if (dxns) {
             try out.text("const $dxns = rt.enterDxns();\ntry {\n");
         }
@@ -539,7 +539,7 @@ pub const MethodEmitter = struct {
     }
 
     /// Declare the registers: `this`, the parameters, coerced, with defaults, then the rest.
-    fn prologue(self: *MethodEmitter, m: u32, global: u32, flags: u8) Error!void {
+    fn prologue(self: *MethodEmitter, m: u32, global: u32, flags: C.MethodFlags) Error!void {
         const out = &self.out;
         const ir = self.ir;
         const traits = &self.domain.traits;
@@ -574,12 +574,12 @@ pub const MethodEmitter = struct {
         }
 
         var local = count + 1;
-        if (flags & C.METHOD_NeedRest != 0) {
+        if (flags.need_rest) {
             try out.text(", l");
             try out.uint(local);
             local += 1;
             try out.text(" = rt.array(rest)");
-        } else if (flags & C.METHOD_NeedArguments != 0) {
+        } else if (flags.need_arguments) {
             // With the function itself and its receiver, for arguments.callee.
             try out.text(", l");
             try out.uint(local);

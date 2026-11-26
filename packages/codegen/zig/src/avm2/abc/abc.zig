@@ -1,14 +1,16 @@
 // A parsed ABC block (AVM2 overview 4.2) as flat tables indexed like the
-// ABC's own arrays (assembly/avm2/abc/abc.ts). Variable-length parts live in
-// shared tables: entry i of a table owns items [start[i], start[i + 1]).
-// Fixed tables are exact slices, zero where nothing was read, as
-// AssemblyScript's StaticArrays are; the growing ones are counted, then
+// ABC's own arrays. Variable-length parts live in shared tables: entry i of
+// a table owns items [start[i], start[i + 1]). Fixed tables are exact
+// slices, zero where nothing was read; the growing ones are counted, then
 // allocated exact and filled (Lists). A table the parse did not reach is
-// empty, but those AssemblyScript starts with one entry (the start
-// tables), which `init` gives each ABC of its own.
+// empty, but a start table keeps its one entry, which `init` gives each
+// ABC of its own: start[n] ends the last of n entries, so a section never
+// read is one of no entries.
 const std = @import("std");
 const memory = @import("../../memory.zig");
+const C = @import("constants.zig");
 const ConstantPool = @import("pool.zig").ConstantPool;
+const Range = @import("pool.zig").Range;
 
 /// The ABC's tables that its parse grows across entries, whose sizes it
 /// does not write up front (each method's parameters, each owner's traits).
@@ -24,8 +26,7 @@ const growing = [_][]const u8{
     "bodyLocalCount",
     "bodyInitScopeDepth",
     "bodyMaxScopeDepth",
-    "bodyCodeStart",
-    "bodyCodeLength",
+    "bodyCode",
     "bodyExceptionStart",
     "exceptionFrom",
     "exceptionTo",
@@ -82,7 +83,7 @@ pub const Lists = struct {
         }
 
         std.debug.assert(made.len == rows);
-        @memset(made, 0);
+        @memset(std.mem.sliceAsBytes(made), 0);
         return made;
     }
 
@@ -111,26 +112,6 @@ pub const Lists = struct {
     }
 };
 
-/// How an ABC's parse stops early: avmplus rejects it with a VerifyError,
-/// whose number Diagnostics holds, or memory runs out.
-pub const Error = error{Verify} || std.mem.Allocator.Error;
-
-/// Why a parse that returned Error.Verify stopped: the number of the
-/// VerifyError avmplus would throw, the first, as avmplus stops at its
-/// first throw.
-pub const Diagnostics = struct {
-    code: i32 = 0,
-
-    /// Error.Verify, the ABC rejected with VerifyError `code`.
-    pub fn fail(self: *Diagnostics, code: i32) error{Verify} {
-        if (self.code == 0) {
-            self.code = code;
-        }
-
-        return error.Verify;
-    }
-};
-
 pub const Abc = struct {
     /// 0, or the VerifyError number avmplus would throw; then the tables are incomplete.
     @"error": i32 = 0,
@@ -151,12 +132,12 @@ pub const Abc = struct {
     methodReturnType: []u32 = &.{},
     /// String index of the method's debug name; not checked by avmplus.
     methodName: []u32 = &.{},
-    methodFlags: []u8 = &.{},
+    methodFlags: []C.MethodFlags = &.{},
     methodParamStart: []u32 = &.{},
     paramTypes: []u32 = &.{},
     methodOptionalStart: []u32 = &.{},
     optionalValue: []u32 = &.{},
-    optionalKind: []u8 = &.{},
+    optionalKind: []C.Constant = &.{},
     /// The owner (see instanceOwner .. activationOwner) a method is bound to, or -1.
     methodOwner: []i32 = &.{},
 
@@ -171,7 +152,7 @@ pub const Abc = struct {
     instanceName: []u32 = &.{},
     /// Multiname of the base class; 0 if there is none.
     instanceSuper: []u32 = &.{},
-    instanceFlags: []u8 = &.{},
+    instanceFlags: []C.InstanceFlags = &.{},
     /// Namespace index; 0 if the class has no protected namespace.
     instanceProtectedNs: []u32 = &.{},
     instanceInterfaceStart: []u32 = &.{},
@@ -190,9 +171,8 @@ pub const Abc = struct {
     bodyLocalCount: []u32 = &.{},
     bodyInitScopeDepth: []u32 = &.{},
     bodyMaxScopeDepth: []u32 = &.{},
-    /// Offset of the bytecode from the start of the ABC.
-    bodyCodeStart: []u32 = &.{},
-    bodyCodeLength: []u32 = &.{},
+    /// Each body's bytecode in the ABC.
+    bodyCode: []Range = &.{},
     bodyExceptionStart: []u32 = &.{},
     exceptionFrom: []u32 = &.{},
     exceptionTo: []u32 = &.{},
@@ -207,14 +187,14 @@ pub const Abc = struct {
     // traits_info of every instance, class, script and method activation, in that order.
     traitName: []u32 = &.{},
     /// Kind in the low 4 bits, attributes in the high 4.
-    traitTag: []u8 = &.{},
+    traitTag: []C.TraitTag = &.{},
     /// Slot id, or disp id for methods.
     traitId: []u32 = &.{},
     /// Type multiname (slots), class index or method index.
     traitIndex: []u32 = &.{},
     /// Constant pool index of a slot's default value; 0 if none.
     traitValue: []u32 = &.{},
-    traitValueKind: []u8 = &.{},
+    traitValueKind: []C.Constant = &.{},
     traitMetadataStart: []u32 = &.{},
     traitMetadata: []u32 = &.{},
     instanceTraitStart: []u32 = &.{},
@@ -261,7 +241,8 @@ pub const Abc = struct {
         return @bitCast(i);
     }
 
-    // Wrapped, as AssemblyScript's u32 sums cast to i32 are.
+    // Wrapped: on a hostile count the sum passes 2^32 and is read as the
+    // i32 it wraps to, an owner no trait has.
 
     pub inline fn classOwner(self: *const Abc, i: u32) i32 {
         return @bitCast(self.classCount() +% i);
@@ -274,6 +255,11 @@ pub const Abc = struct {
     /// The owner of method m's activation traits.
     pub inline fn activationOwner(self: *const Abc, m: u32) i32 {
         return @bitCast(2 *% self.classCount() +% self.scriptCount() +% m);
+    }
+
+    /// Trait `t`'s kind.
+    pub inline fn traitKind(self: *const Abc, t: u32) C.TraitKind {
+        return self.traitTag[t].kind;
     }
 
     pub inline fn bodyCount(self: *const Abc) u32 {

@@ -794,8 +794,8 @@ fn name(em: *MethodEmitter, a: u32, from: i32) Error!void {
     const out = &em.out;
     const kind = em.abc.pool.mnKind[a];
     const parts: i32 = switch (kind) {
-        C.CONSTANT_RTQnameL, C.CONSTANT_RTQnameLA => 2,
-        C.CONSTANT_RTQname, C.CONSTANT_RTQnameA, C.CONSTANT_MultinameL, C.CONSTANT_MultinameLA => 1,
+        .rtqname_l, .rtqname_la => 2,
+        .rtqname, .rtqname_a, .multiname_l, .multiname_la => 1,
         else => 0,
     };
     if (parts == 0) {
@@ -807,7 +807,7 @@ fn name(em: *MethodEmitter, a: u32, from: i32) Error!void {
 
     // The name of a string the code holds is the same each time: made once, in T.
     const copy = em.copyOf[u(from)];
-    if ((kind == C.CONSTANT_MultinameL or kind == C.CONSTANT_MultinameLA) and
+    if ((kind == .multiname_l or kind == .multiname_la) and
         from != em.pendingNull and
         copy <= CONSTANT and
         em.ir.op[u(CONSTANT - copy)] == ops.OP_pushstring)
@@ -927,13 +927,13 @@ fn maybeStringLength(em: *MethodEmitter, a: u32, r: i32) bool {
     const domain = em.domain;
     const pool = &em.abc.pool;
     const kind = pool.mnKind[a];
-    if (kind == C.CONSTANT_Qname) {
+    if (kind == .qname) {
         const ns = domain.abcNs.get(em.index)[pool.mnA[a]];
         const uri = domain.nsUri.get(ns);
         if (domain.nsType.get(ns) != domain_.NS_Public or (uri != domain_.URI_None and domain.stringLength.get(uri) != 0)) {
             return false;
         }
-    } else if (kind != C.CONSTANT_Multiname or !domain.hasPublicNamespace(em.index, a)) {
+    } else if (kind != .multiname or !domain.hasPublicNamespace(em.index, a)) {
         return false;
     }
 
@@ -986,15 +986,15 @@ fn storedType(em: *MethodEmitter, kind: Kind, src: i32) Error!i32 {
 fn interpretedKey(em: *MethodEmitter, a: u32, r: i32) bool {
     const kind = em.abc.pool.mnKind[a];
     return em.staticInit and
-        (kind == C.CONSTANT_MultinameLA or
-            (kind == C.CONSTANT_MultinameL and !em.domain.hasPublicNamespace(em.index, a))) and
+        (kind == .multiname_la or
+            (kind == .multiname_l and !em.domain.hasPublicNamespace(em.index, a))) and
         em.builtinOf(r) != traits_.BUILTIN_String;
 }
 
 /// Whether multiname `a` is a runtime name alone, not an attribute, whose
 /// name in register r is a number: an element's index.
 fn indexed(em: *MethodEmitter, a: u32, r: i32) bool {
-    return em.abc.pool.mnKind[a] == C.CONSTANT_MultinameL and values.isNumber(em, r);
+    return em.abc.pool.mnKind[a] == .multiname_l and values.isNumber(em, r);
 }
 
 /// Whether multiname `a` is a runtime name alone, not an attribute, whose
@@ -1002,7 +1002,7 @@ fn indexed(em: *MethodEmitter, a: u32, r: i32) bool {
 /// time, outside an initializer avmplus interprets (objects.ts tells why).
 fn keyed(em: *MethodEmitter, a: u32, r: i32) bool {
     return !em.staticInit and
-        em.abc.pool.mnKind[a] == C.CONSTANT_MultinameL and
+        em.abc.pool.mnKind[a] == .multiname_l and
         !values.isNumber(em, r) and
         em.builtinOf(r) != traits_.BUILTIN_String;
 }

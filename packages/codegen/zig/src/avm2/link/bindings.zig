@@ -59,9 +59,9 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
         const version = traits.nameVersion;
         const name = traits.nameId;
         const tag = abc.traitTag[i];
-        const kind = tag & 0x0f;
+        const kind = tag.kind;
         switch (kind) {
-            C.TRAIT_Slot, C.TRAIT_Const, C.TRAIT_Class => {
+            .slot, .constant, .class => {
                 // As SlotIdCalcer: explicit ids only where slots may bind early.
                 const id = abc.traitId[i];
                 var slot: u32 = undefined;
@@ -92,10 +92,10 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
                     return C.kIllegalSlotError;
                 }
 
-                const bkind = if (kind == C.TRAIT_Slot) traits_.BKIND_Var else traits_.BKIND_Const;
+                const bkind = if (kind == .slot) traits_.BKIND_Var else traits_.BKIND_Const;
                 try traits.add(gpa, t, nsId, name, version, ((slot -% 1) << 3) | bkind);
             },
-            C.TRAIT_Method => {
+            .method => {
                 const baseBinding = overridden(traits, t, nsId, nsVersion, name, tag);
                 if (baseBinding < 0) {
                     return C.kIllegalOverrideError;
@@ -110,7 +110,7 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
                     return C.kCorruptABCError;
                 }
             },
-            C.TRAIT_Getter, C.TRAIT_Setter => {
+            .getter, .setter => {
                 // The other accessor of the pair may be defined here already.
                 var baseBinding: i64 = traits.own(t, nsId, name, version);
                 if (baseBinding == BIND_None) {
@@ -120,8 +120,8 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
                     }
                 }
 
-                const us = if (kind == C.TRAIT_Getter) BKIND_Get else BKIND_Set;
-                const them = if (kind == C.TRAIT_Getter) BKIND_Set else BKIND_Get;
+                const us = if (kind == .getter) BKIND_Get else BKIND_Set;
+                const them = if (kind == .getter) BKIND_Set else BKIND_Get;
                 const bb: u32 = @truncate(@as(u64, @bitCast(baseBinding)));
                 const baseKind = bb & 7;
                 if (baseBinding == BIND_None) {
@@ -185,7 +185,7 @@ fn bindInterfaces(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!vo
 /// `name` in `ns` meets, or -1 if the trait may not meet it that way:
 /// overriding something of another kind, or with the override attribute
 /// set where nothing is overridden, or not set where something is.
-pub fn overridden(traits: *const TraitsTable, t: u32, ns: u32, version: u8, name: u32, tag: u8) i64 {
+pub fn overridden(traits: *const TraitsTable, t: u32, ns: u32, version: u8, name: u32, tag: C.TraitTag) i64 {
     const base = traits.base.get(t);
     var binding = BIND_None;
     if (base >= 0) {
@@ -196,9 +196,9 @@ pub fn overridden(traits: *const TraitsTable, t: u32, ns: u32, version: u8, name
     }
 
     const baseKind = binding & 7;
-    const kind = tag & 0x0f;
-    const desired = if (kind == C.TRAIT_Method) BKIND_Method else if (kind == C.TRAIT_Getter) BKIND_Get else BKIND_Set;
-    const legal = if (kind == C.TRAIT_Method) LEGAL_Method else LEGAL_Accessor;
+    const kind = tag.kind;
+    const desired = if (kind == .method) BKIND_Method else if (kind == .getter) BKIND_Get else BKIND_Set;
+    const legal = if (kind == .method) LEGAL_Method else LEGAL_Accessor;
     if ((legal >> @intCast(baseKind)) & 1 == 0) {
         return -1;
     }
@@ -206,7 +206,7 @@ pub fn overridden(traits: *const TraitsTable, t: u32, ns: u32, version: u8, name
     // Overriding is required exactly where the base has a binding of traits kind.
     const required = baseKind == desired or
         (baseKind == BKIND_GetSet and (desired == BKIND_Get or desired == BKIND_Set));
-    if (required != ((tag & C.ATTR_Override) != 0)) {
+    if (required != tag.override) {
         return -1;
     }
 

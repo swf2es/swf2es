@@ -1,5 +1,5 @@
 // One instruction's checks, as Verifier::verifyBlock makes them and in its
-// order (assembly/avm2/abc/verify.ts): the operands that index the constant
+// order: the operands that index the constant
 // pool and the method's tables, the stack and scope depths, and what only
 // some opcodes check; then its types (typing.zig), and for an instruction
 // that wrote no IR of its own, the generic row the second pass writes.
@@ -113,7 +113,7 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: u8) Error!bool {
             }
         },
         ops.OP_dxns => {
-            if (bd.methodFlags & C.METHOD_SetsDxns == 0) {
+            if (!bd.methodFlags.sets_dxns) {
                 return bd.fail(C.kIllegalSetDxns);
             }
 
@@ -242,7 +242,7 @@ fn verifySpecial(bd: *BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32) bool {
         ops.OP_pushfloat => if (a == 0 or a >= pool.floats.len) bd.fail(C.kCpoolIndexRangeError) else true,
         ops.OP_pushdouble => if (a == 0 or a >= pool.doubles.len) bd.fail(C.kCpoolIndexRangeError) else true,
         ops.OP_pushnamespace => if (a == 0 or a >= pool.nsCount()) bd.fail(C.kCpoolIndexRangeError) else true,
-        ops.OP_dxnslate => if (bd.methodFlags & C.METHOD_SetsDxns != 0) true else bd.fail(C.kIllegalSetDxns),
+        ops.OP_dxnslate => if (bd.methodFlags.sets_dxns) true else bd.fail(C.kIllegalSetDxns),
         ops.OP_getlex => if (runtimeParts(pool, a) != 0) bd.fail(C.kIllegalOpMultinameError) else true,
         ops.OP_finddef => if (code_.isBinding(pool, a)) true else bd.fail(C.kIllegalOpMultinameError),
         ops.OP_callproperty, ops.OP_callproplex, ops.OP_callpropvoid, ops.OP_constructprop, ops.OP_callsuper, ops.OP_callsupervoid, ops.OP_getsuper, ops.OP_setsuper => {
@@ -250,7 +250,7 @@ fn verifySpecial(bd: *BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32) bool {
         },
         ops.OP_newfunction => if (a >= abc.methodCount()) bd.fail(C.kMethodInfoExceedsCountError) else true,
         ops.OP_newclass => if (a >= abc.classCount()) bd.fail(C.kClassInfoExceedsCountError) else true,
-        ops.OP_newactivation => if (bd.methodFlags & C.METHOD_NeedActivation != 0) true else bd.fail(C.kInvalidNewActivationError),
+        ops.OP_newactivation => if (bd.methodFlags.need_activation) true else bd.fail(C.kInvalidNewActivationError),
         ops.OP_newcatch => if (a >= bd.handlerCount) bd.fail(C.kInvalidNewActivationError) else true,
         ops.OP_pushscope, ops.OP_pushwith => {
             if (bd.scope + 1 > bd.maxScope) {
@@ -267,7 +267,9 @@ fn verifySpecial(bd: *BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32) bool {
 }
 
 /// Whether method `m` of the ABC may be called statically: without types
-/// any may; with them, as avmplus' AbcEnv (verify.ts tells which).
+/// any may, as the structural checks cannot tell; with them, as avmplus'
+/// AbcEnv, one bound to a traits by a method, getter or setter, or a
+/// class's or its instances' initializer.
 fn callable(bd: *BodyDecoder, m: u32) bool {
     if (!bd.typed) {
         return true;
@@ -279,15 +281,13 @@ fn callable(bd: *BodyDecoder, m: u32) bool {
 
 /// Values a multiname takes from the stack: a runtime namespace, a runtime name, or both.
 fn runtimeParts(pool: *const ConstantPool, index: u32) u32 {
-    const kind = pool.mnKind[index];
-    if (kind == C.CONSTANT_RTQname or kind == C.CONSTANT_RTQnameA or kind == C.CONSTANT_MultinameL or kind == C.CONSTANT_MultinameLA) {
-        return 1;
-    }
-
-    return if (kind == C.CONSTANT_RTQnameL or kind == C.CONSTANT_RTQnameLA) 2 else 0;
+    return switch (pool.multiname(index)) {
+        .rtqname, .multiname_late => 1,
+        .rtqname_late => 2,
+        .none, .qname, .multiname, .type_name => 0,
+    };
 }
 
 fn isAttribute(pool: *const ConstantPool, index: u32) bool {
-    const kind = pool.mnKind[index];
-    return kind == C.CONSTANT_QnameA or kind == C.CONSTANT_RTQnameA or kind == C.CONSTANT_RTQnameLA or kind == C.CONSTANT_MultinameA or kind == C.CONSTANT_MultinameLA;
+    return pool.multiname(index).isAttribute();
 }

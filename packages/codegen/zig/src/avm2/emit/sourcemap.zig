@@ -105,7 +105,7 @@ pub const SourceMap = struct {
             }
 
             const at: u32 = @intCast(f);
-            try path(out, data[pool.stringStart[at]..][0..pool.stringLength[at]]);
+            try path(out, pool.string(data, at));
         }
 
         try out.text("],\"names\":[],\"mappings\":\"");

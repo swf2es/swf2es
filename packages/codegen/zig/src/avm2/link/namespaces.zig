@@ -33,14 +33,14 @@ pub fn addNamespaces(dom: *Domain, abc: *const Abc, base: [*]const u8, strings: 
     var highestMark: i32 = -1;
     for (1..@max(count, 1)) |i| {
         const index = pool.nsName[i];
-        const mark = if (index != 0) versionMark(base, pool.stringStart[index], pool.stringLength[index]) else -1;
+        const mark = if (index != 0) versionMark(base, pool.strings[index].start, pool.strings[index].len) else -1;
         marks[i] = mark;
         if (mark > highestMark) {
             highestMark = mark;
         }
 
         if (abc.builtin and mark >= 0 and namespaceType(pool.nsKind[i]) == domain_.NS_Public) {
-            const uri = try dom.internString(base[pool.stringStart[index]..][0 .. pool.stringLength[index] - 3]);
+            const uri = try dom.internString(base[pool.strings[index].start..][0 .. pool.strings[index].len - 3]);
             try dom.put(dom.versioned.at(uri), 1);
         }
     }
@@ -53,7 +53,7 @@ pub fn addNamespaces(dom: *Domain, abc: *const Abc, base: [*]const u8, strings: 
         var uri = if (index != 0) strings[index] else domain_.URI_None;
         var version = domain_.API_AllVersions;
         if (mark >= 0) {
-            uri = try dom.internString(base[pool.stringStart[index]..][0 .. pool.stringLength[index] - 3]);
+            uri = try dom.internString(base[pool.strings[index].start..][0 .. pool.strings[index].len - 3]);
             version = @intCast(mark);
         }
 
@@ -109,13 +109,13 @@ fn isAir(version: u8) bool {
     return version != domain_.API_FP_10_0 and version != 5 and version != 7;
 }
 
-pub fn namespaceType(kind: u8) u8 {
+pub fn namespaceType(kind: C.Constant) u8 {
     return switch (kind) {
-        C.CONSTANT_PackageInternalNs => domain_.NS_PackageInternal,
-        C.CONSTANT_ProtectedNamespace => domain_.NS_Protected,
-        C.CONSTANT_ExplicitNamespace => domain_.NS_Explicit,
-        C.CONSTANT_StaticProtectedNs => domain_.NS_StaticProtected,
-        C.CONSTANT_PrivateNs => domain_.NS_Private,
+        .package_internal_ns => domain_.NS_PackageInternal,
+        .protected_namespace => domain_.NS_Protected,
+        .explicit_namespace => domain_.NS_Explicit,
+        .static_protected_ns => domain_.NS_StaticProtected,
+        .private_ns => domain_.NS_Private,
         else => domain_.NS_Public,
     };
 }

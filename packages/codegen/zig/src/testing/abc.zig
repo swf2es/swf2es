@@ -1,8 +1,7 @@
-// The test build's look at ABCs, for the node tests, as
-// assembly/testing/abc.ts writes it: the reader, the constant pool, an
-// ABC's tables as the parser reads them, and AVM2's opcode table. Strings
-// are written as output.writeDecoded writes them, so the wrapper reads the
-// string AssemblyScript made of each.
+// The test build's look at ABCs, for the node tests: the reader, the
+// constant pool, an ABC's tables as the parser reads them, and AVM2's
+// opcode table. Strings are written as output.writeDecoded writes them, so
+// the wrapper reads each as the JavaScript string it decodes to.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
@@ -14,7 +13,7 @@ const ops = @import("../avm2/abc/opcodes.zig");
 const readAbc = @import("../avm2/abc/parse.zig").readAbc;
 const readConstantPool = @import("../avm2/abc/pool.zig").readConstantPool;
 const ConstantPool = @import("../avm2/abc/pool.zig").ConstantPool;
-const Diagnostics = @import("../avm2/abc/abc.zig").Diagnostics;
+const Diagnostics = @import("../avm2/abc/errors.zig").Diagnostics;
 const reader = @import("../avm2/abc/reader.zig");
 const Reader = reader.Reader;
 const Rows = memory.Rows;
@@ -31,7 +30,7 @@ pub const S32: u8 = 5;
 pub const D64: u8 = 6;
 pub const UTF8: u8 = 7;
 
-/// `bytes` followed by PADDING zero bytes, as AssemblyScript's padded() copies them.
+/// `bytes` followed by the PADDING zero bytes the reader may read past them.
 pub fn padded(gpa: Allocator, bytes: []const u8) Allocator.Error![]u8 {
     const data = try memory.allocZeroed(gpa, u8, @intCast(bytes.len + reader.PADDING));
     @memcpy(data[0..bytes.len], bytes);
@@ -68,9 +67,15 @@ pub fn readAll(gpa: Allocator, bytes: []const u8, kinds: []const u8) Allocator.E
     return values;
 }
 
-/// "0x16", as abc.ts's hex writes a byte.
-fn writeHex(w: *Writer, b: u8) Writer.Error!void {
-    try w.print("0x{x:0>2}", .{b});
+/// "0x16": a byte as the node tests expect it; a kind or flags as the
+/// byte the ABC has.
+fn writeHex(w: *Writer, b: anytype) Writer.Error!void {
+    const byte: u8 = switch (@typeInfo(@TypeOf(b))) {
+        .@"enum" => @backingInt(b),
+        .@"struct" => @bitCast(b),
+        else => b,
+    };
+    try w.print("0x{x:0>2}", .{byte});
 }
 
 /// The constant pool of a whole ABC block, one entry a line: "int 1 -5",
@@ -81,7 +86,7 @@ pub fn poolDump(gpa: Allocator, bytes: []const u8) Error![]const u8 {
     var r: Reader = .init(data, 0, bytes.len);
     const minor = r.u16_();
     const major = r.u16_();
-    var pool: ConstantPool = .{};
+    var pool: ConstantPool = try .init(gpa);
     var diag: Diagnostics = .{};
     readConstantPool(gpa, gpa, &r, major == 47 and minor >= 16, &pool, &diag) catch |err| switch (err) {
         error.Verify => {},
@@ -106,9 +111,9 @@ pub fn poolDump(gpa: Allocator, bytes: []const u8) Error![]const u8 {
         try output.writeF64(w, pool.floats[i]);
         try w.writeByte('\n');
     }
-    for (1..pool.stringStart.len) |i| {
+    for (1..pool.strings.len) |i| {
         try w.print("string {d} ", .{i});
-        try output.writeDecoded(w, data[pool.stringStart[i]..][0..pool.stringLength[i]]);
+        try output.writeDecoded(w, pool.string(data, @intCast(i)));
         try w.writeByte('\n');
     }
     for (1..pool.nsKind.len) |i| {
@@ -118,8 +123,8 @@ pub fn poolDump(gpa: Allocator, bytes: []const u8) Error![]const u8 {
     }
     for (1..pool.nsSetCount()) |i| {
         try w.print("nsset {d} ", .{i});
-        // Past the members read, as when a later set failed, AssemblyScript
-        // read past its table; nothing is written here.
+        // A set past the members read, as when a later set failed, ends at
+        // the table's end: nothing is written past it.
         const end = @min(pool.nsSetStart[i + 1], pool.nsSetMembers.len);
         var j = pool.nsSetStart[i];
         while (j < end) : (j += 1) {
@@ -220,7 +225,7 @@ pub fn abcDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const u
         try lines.next();
         try w.print("body {d} method={d} stack={d} locals={d}", .{ b, method, abc.bodyMaxStack[b], abc.bodyLocalCount[b] });
         try w.print(" scope={d}..{d}", .{ abc.bodyInitScopeDepth[b], abc.bodyMaxScopeDepth[b] });
-        try w.print(" code={d}+{d}", .{ abc.bodyCodeStart[b], abc.bodyCodeLength[b] });
+        try w.print(" code={d}+{d}", .{ abc.bodyCode[b].start, abc.bodyCode[b].len });
         const start = abc.bodyExceptionStart[b];
         const end = abc.bodyExceptionStart[b + 1];
         if (end > start) {
@@ -268,7 +273,7 @@ fn dumpTraits(lines: *Lines, abc: *const Abc, owner: []const u8, index: u32, sta
     const w = lines.w;
     var t = start;
     while (t < end) : (t += 1) {
-        const tag = abc.traitTag[t];
+        const tag: u8 = @bitCast(abc.traitTag[t]);
         try lines.next();
         try w.print("  trait {s} {d} name={d} kind={d} attr=", .{ owner, index, abc.traitName[t], tag & 0x0f });
         try writeHex(w, tag & 0xf0);
@@ -367,7 +372,7 @@ pub fn codeDump(gpa: Allocator, bytes: []const u8, builtin: bool) Error![]const 
         }
 
         try lines.next();
-        try w.print("  unreachable {d}", .{abc.bodyCodeLength[body] - decoded});
+        try w.print("  unreachable {d}", .{abc.bodyCode[body].len - decoded});
     }
 
     return out.written();

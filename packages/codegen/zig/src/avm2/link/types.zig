@@ -19,16 +19,16 @@ pub fn isBindingName(dom: *const Domain, index: u32, multiname: u32) bool {
     const pool = &dom.abcs.get(index).pool;
     var mn = multiname;
     var kind = pool.mnKind[mn];
-    if (kind == C.CONSTANT_TypeName) {
+    if (kind == .type_name) {
         mn = pool.mnA[mn];
         kind = pool.mnKind[mn];
     }
 
-    if (kind == C.CONSTANT_Qname) {
+    if (kind == .qname) {
         return pool.mnA[mn] != 0 and pool.mnB[mn] != 0;
     }
 
-    return kind == C.CONSTANT_Multiname and pool.mnB[mn] != 0;
+    return kind == .multiname and pool.mnB[mn] != 0;
 }
 
 /// As avmplus' getBinding: the binding multiname `mn` of ABC `index` has on
@@ -85,7 +85,7 @@ fn lookupBinding(dom: *const Domain, index: u32, type_: i32, multiname: u32) u32
 
     const pool = &dom.abcs.get(index).pool;
     var mn = multiname;
-    if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+    if (pool.mnKind[mn] == .type_name) {
         mn = pool.mnA[mn];
     }
 
@@ -93,7 +93,7 @@ fn lookupBinding(dom: *const Domain, index: u32, type_: i32, multiname: u32) u32
     const ids = dom.abcNs.get(index);
     const versions = dom.abcNsVersion.get(index);
     const name = dom.abcString.get(index)[pool.mnB[mn]];
-    if (pool.mnKind[mn] == C.CONSTANT_Qname) {
+    if (pool.mnKind[mn] == .qname) {
         const ns = pool.mnA[mn];
         return traits.find(type_, ids[ns], name, versions[ns]);
     }
@@ -132,7 +132,7 @@ fn lookupBinding(dom: *const Domain, index: u32, type_: i32, multiname: u32) u32
 pub fn getOwnBinding(dom: *Domain, index: u32, t: u32, multiname: u32) u32 {
     const pool = &dom.abcs.get(index).pool;
     var mn = multiname;
-    if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+    if (pool.mnKind[mn] == .type_name) {
         mn = pool.mnA[mn];
     }
 
@@ -140,7 +140,7 @@ pub fn getOwnBinding(dom: *Domain, index: u32, t: u32, multiname: u32) u32 {
     const ids = dom.abcNs.get(index);
     const versions = dom.abcNsVersion.get(index);
     const name = dom.abcString.get(index)[pool.mnB[mn]];
-    if (pool.mnKind[mn] == C.CONSTANT_Qname) {
+    if (pool.mnKind[mn] == .qname) {
         const ns = pool.mnA[mn];
         dom.foundNs = @intCast(ids[ns]);
         return traits.own(t, ids[ns], name, versions[ns]);
