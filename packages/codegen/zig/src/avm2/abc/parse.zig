@@ -19,8 +19,8 @@ const Reader = @import("reader.zig").Reader;
 /// be followed by PADDING readable bytes (the caller copies it so, as
 /// domainAdd will; Reader.init asserts it), its tables in `gpa` and what
 /// only the parse needs in `scratch`; `builtin` for an ABC the player ships
-/// (see Abc.builtin). Check `error` on the result: 0, or the VerifyError
-/// avmplus would throw.
+/// (see Abc.builtin). Check `error` on the result: .none, or the
+/// VerifyError avmplus would throw.
 pub fn readAbc(gpa: Allocator, scratch: Allocator, data: []const u8, length: u32, builtin: bool) Allocator.Error!*Abc {
     const abc = try gpa.create(Abc);
     abc.* = try .init(gpa, length, builtin);

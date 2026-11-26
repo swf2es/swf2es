@@ -440,16 +440,16 @@ pub fn domainIrAll(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
                 w.print("\nblock {d} {d} {d} {d} {d} |", .{ k, ir.blockPc[k], ir.blockFirst[k], ir.blockStack[k], ir.blockScope[k] }) catch break :write;
                 for (0..ir.frameSize) |v| {
                     const at = k * ir.frameSize + v;
-                    w.print(" {d}:{d}", .{ ir.entryType[at], ir.entryFlags[at] }) catch break :write;
+                    w.print(" {d}:{d}", .{ @backingInt(ir.entryType[at]), ir.entryFlags[at] }) catch break :write;
                 }
             }
 
             for (0..ir.count) |i| {
-                w.print("\n{d} {d} {d} {d} {d} {d} {d} {d} {d} {d}", .{ ir.op[i], ir.dst[i], ir.src[i], ir.srcCount[i], ir.a[i], ir.b[i], ir.c[i], ir.type[i], ir.notNull[i], ir.pc[i] }) catch break :write;
+                w.print("\n{d} {d} {d} {d} {d} {d} {d} {d} {d} {d}", .{ ir.op[i], ir.dst[i], ir.src[i], ir.srcCount[i], ir.a[i], ir.b[i], ir.c[i], @backingInt(ir.type[i]), ir.notNull[i], ir.pc[i] }) catch break :write;
             }
 
             for (0..ir.handlerCount) |h| {
-                w.print("\nhandler {d} {d} {d} {d} {d}", .{ ir.handlerFrom[h], ir.handlerTo[h], ir.handlerBlock[h], ir.handlerType[h], ir.handlerScope[h] }) catch break :write;
+                w.print("\nhandler {d} {d} {d} {d} {d}", .{ ir.handlerFrom[h], ir.handlerTo[h], ir.handlerBlock[h], @backingInt(ir.handlerType[h]), @backingInt(ir.handlerScope[h]) }) catch break :write;
             }
 
             w.writeAll("\ncases ") catch break :write;
@@ -493,7 +493,7 @@ fn irLine(w: *std.Io.Writer, dom: *const Domain, ir: *const Ir, i: u32) std.Io.W
         try w.print(" B{d}", .{ir.a[i]});
     } else if (op == .ir_coerce) {
         try w.writeByte(' ');
-        try writeType(w, dom, ir.c[i], 0);
+        try writeType(w, dom, ir.cType(i), 0);
     } else if (ir.a[i] != 0 or ir.b[i] != 0 or ir.c[i] != 0) {
         try w.print(" [{d} {d} {d}]", .{ ir.a[i], ir.b[i], ir.c[i] });
     }
@@ -542,9 +542,9 @@ fn irName(op: IrOp) []const u8 {
 /// A type's name: "*", void, null, a class's name, "Name$" for its class
 /// object, Vector.<T> as deep as T nests (AssemblyScript recurses there;
 /// this counts the levels).
-fn writeType(w: *std.Io.Writer, dom: *const Domain, ty: i32, notNull: u8) std.Io.Writer.Error!void {
+fn writeType(w: *std.Io.Writer, dom: *const Domain, ty: traits_.TypeId, notNull: u8) std.Io.Writer.Error!void {
     const traits = &dom.traits;
-    var t = ir_.columnType(ty);
+    var t = ty;
     var vectors: u32 = 0;
     while (t.isTraits()) {
         const u = t.index();

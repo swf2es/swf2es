@@ -1,6 +1,8 @@
 // The old-against-new parity harness: a reference build of the compiler,
-// made from a git ref (the tag zig-last-parity by default, the last commit
-// that held the Zig compiler to AssemblyScript's byte for byte; reference.ts),
+// made from a git ref (the tag zig-parity-2 by default, the baseline of the
+// idiomatic pass since #1227 fixed a crash on purpose; zig-last-parity is
+// the last commit that held the Zig compiler to AssemblyScript's byte for
+// byte; reference.ts),
 // and the candidate, this tree's build, fed the same calls, their results
 // compared byte for byte; and the candidate's poison build, which fills
 // freed memory with 0xAA, against the candidate, which differ only where
@@ -2593,7 +2595,7 @@ const SUITES: Suite[] = [
 
 const args = process.argv.slice(2);
 const at = args.indexOf("--reference");
-const ref = at >= 0 ? args[at + 1] : "zig-last-parity";
+const ref = at >= 0 ? args[at + 1] : "zig-parity-2";
 if (!ref) {
   throw new Error("--reference needs a git ref");
 }

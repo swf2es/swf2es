@@ -6,6 +6,7 @@
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
 const traits_ = @import("../link/traits.zig");
+const TypeId = traits_.TypeId;
 const copies = @import("copies.zig");
 const NONE = copies.NONE;
 const handlers = @import("handlers.zig");
@@ -14,7 +15,6 @@ const MethodEmitter = @import("method.zig").MethodEmitter;
 const structure = @import("structure.zig");
 const values = @import("values.zig");
 const ir_ = @import("../ir/ir.zig");
-const columnType = ir_.columnType;
 const IrOp = ir_.Op;
 
 fn u(r: i32) usize {
@@ -134,7 +134,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
             var n = i + 1;
             var ty = ir.type[i];
             while (n < last) {
-                if (columnType(ty).isBuiltin(floatType) and debugRecord(ir.op[n])) {
+                if (ty.isBuiltin(floatType) and debugRecord(ir.op[n])) {
                     n += 1;
                 } else if (ir.dst[n] == dst and try keptAt(em, n, ty)) {
                     ty = ir.type[n];
@@ -150,7 +150,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
                     moves = n - i;
                 } else if (next == .dup) {
                     var set = n + 1;
-                    while (set < last and columnType(ty).isBuiltin(floatType)) {
+                    while (set < last and ty.isBuiltin(floatType)) {
                         if (debugRecord(ir.op[set])) {
                             set += 1;
                         } else if (ir.dst[set] == dst + 1 and try keptAt(em, set, ty)) {
@@ -201,7 +201,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
         const holds = dst >= stack and
             em.target < 0 and
             em.pendingNull < 0 and
-            columnType(ir.type[i]) != floatType and
+            ir.type[i] != floatType and
             pureValue(em, i);
         const start = out.len();
         const marks = em.map.count();
@@ -359,7 +359,7 @@ fn swapVirtual(em: *MethodEmitter, x: i32) Error!void {
     const uy = u(y);
     // A dup's copy below its original: the same value either way round.
     if (em.copyOf[uy] == x) {
-        swap(i32, em.regType, ux, uy);
+        swap(TypeId, em.regType, ux, uy);
         return;
     }
 
@@ -384,7 +384,7 @@ fn swapVirtual(em: *MethodEmitter, x: i32) Error!void {
         em.heldTop = @max(em.heldTop, y + 1);
     }
 
-    swap(i32, em.regType, ux, uy);
+    swap(TypeId, em.regType, ux, uy);
     em.promoted[ux] = 0;
     em.promoted[uy] = 0;
     em.checked[ux] = 0;
@@ -604,15 +604,15 @@ fn pureValue(em: *MethodEmitter, i: u32) bool {
         .convert_b,
         .coerce_b,
         => ir.srcCount[i] == 1 and converts(em, values.conversionType(em, op, i), src),
-        .ir_coerce => ir.srcCount[i] == 1 and converts(em, ir.c[i], src),
+        .ir_coerce => ir.srcCount[i] == 1 and converts(em, ir.cType(i), src),
         else => false,
     };
 }
 
 /// Whether converting register r to `ty` is plain JavaScript on a number or Boolean: to int, uint, Number or Boolean.
-fn converts(em: *MethodEmitter, ty: i32, r: i32) bool {
+fn converts(em: *MethodEmitter, ty: TypeId, r: i32) bool {
     const from = em.builtinOf(r);
-    return switch (em.domain.builtin(columnType(ty))) {
+    return switch (em.domain.builtin(ty)) {
         .int, .uint, .boolean => values.isNumeric(em, r),
         .number => from == .int or from == .uint or from == .number,
         else => false,
@@ -624,7 +624,7 @@ fn debugRecord(op: IrOp) bool {
 }
 
 /// Whether instruction i is a conversion in place that writes nothing, its value of type `from` being one already.
-fn keptAt(em: *MethodEmitter, i: u32, from: i32) Error!bool {
+fn keptAt(em: *MethodEmitter, i: u32, from: TypeId) Error!bool {
     const ir = em.ir;
     const op = ir.op[i];
     if (ir.dst[i] != ir.src[i] or ir.srcCount[i] != 1) {
@@ -632,10 +632,10 @@ fn keptAt(em: *MethodEmitter, i: u32, from: i32) Error!bool {
     }
 
     if (op == .ir_coerce) {
-        return values.keeps(em, ir.c[i], from);
+        return values.keeps(em, ir.cType(i), from);
     }
 
-    return values.keeps(em, values.conversionType(em, op, i), from);
+    return values.isTypedConversion(op) and try values.keeps(em, values.conversionType(em, op, i), from);
 }
 
 /// Before a branch to block t: write the copies below `limit` that t

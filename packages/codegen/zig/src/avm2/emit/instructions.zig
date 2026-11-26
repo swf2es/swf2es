@@ -19,7 +19,7 @@ const values = @import("values.zig");
 const IrOp = @import("../ir/ir.zig").Op;
 
 fn floatArithmetic(em: *const MethodEmitter, i: u32) bool {
-    const ty = ir_.columnType(em.ir.type[i]);
+    const ty = em.ir.type[i];
     return em.abc.hasFloatSupport() and (ty == .any or ty == em.domain.floatType);
 }
 
@@ -139,13 +139,13 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
         .pop, .debug => return,
         .ir_coerce => {
             const s = ir.src[i];
-            if (ir.dst[i] == s and try values.keeps(em, ir.c[i], em.regType[@intCast(s)])) {
+            if (ir.dst[i] == s and try values.keeps(em, ir.cType(i), em.regType[@intCast(s)])) {
                 em.kept = true;
                 return;
             }
 
             try em.assign(i, true);
-            try values.convert(em, "", s, ir.c[i], em.regType[@intCast(s)], em.unboxedTarget(i));
+            try values.convert(em, "", s, ir.cType(i), em.regType[@intCast(s)], em.unboxedTarget(i));
         },
         .ir_check_null => {
             // A register checked since it was last written is not null.
@@ -169,7 +169,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
                 ir.pc[next] == ir.pc[i] and
                 ir.op[next] == .ir_coerce and
                 ir.dst[next] == ir.src[next] and
-                try values.keeps(em, ir.c[next], em.regType[@intCast(ir.src[next])]))
+                try values.keeps(em, ir.cType(next), em.regType[@intCast(ir.src[next])]))
             {
                 next += 1;
             }
@@ -334,7 +334,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
         => {
             // A conversion that changes nothing, in place, is no code.
             const s = ir.src[i];
-            if (ir.dst[i] == s and try values.keeps(em, values.conversionType(em, op, i), em.regType[@intCast(s)])) {
+            if (ir.dst[i] == s and values.isTypedConversion(op) and try values.keeps(em, values.conversionType(em, op, i), em.regType[@intCast(s)])) {
                 em.kept = true;
                 return;
             }

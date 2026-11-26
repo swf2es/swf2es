@@ -103,7 +103,7 @@ pub fn handlers(em: *MethodEmitter) Error!void {
             }
 
             const ty = ir.handlerType[h];
-            if (ty >= 0) {
+            if (ty.isTraits()) {
                 try out.text("if (rt.catches(x, ");
                 try refs.typeRef(em, ty);
                 try out.text(")) ");

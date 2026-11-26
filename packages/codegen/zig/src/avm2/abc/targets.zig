@@ -153,13 +153,14 @@ fn head(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!Head
     return .done;
 }
 
-/// An edge to a handler's target: forward, so never a loop header.
+/// An edge to a handler's target: never backward, as the target is past
+/// its range, so this edge makes no loop header (another edge may).
 fn handlerEdge(bd: *BodyDecoder, pc: u32, to: u32) Error!void {
     switch (try head(bd, pc, to, 1, 0)) {
         .done => {},
         // checkHandlers rejects a target before its range's end, and head
         // makes a loop header of a backward edge alone.
-        .header => @panic("a handler's target is past its range, so never a loop header"),
+        .header => @panic("a handler's target is past its range, so this edge is never backward"),
     }
 }
 
@@ -189,8 +190,9 @@ pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!void {
         }
 
         // The same locals as when last merged into the handler change
-        // nothing there, once a backward edge has made it a loop header.
-        if (bd.handlerMerged[i] == bd.localsVersion and (to > pc or bd.loopHeader[to] != 0)) {
+        // nothing there. (The target is past pc, which is in its range, so
+        // the edge is forward whether or not the target is a loop header.)
+        if (bd.handlerMerged[i] == bd.localsVersion) {
             continue;
         }
 

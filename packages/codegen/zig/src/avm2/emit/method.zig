@@ -17,6 +17,7 @@ const ir_ = @import("../ir/ir.zig");
 const Ir = ir_.Ir;
 const Domain = @import("../link/domain.zig").Domain;
 const traits_ = @import("../link/traits.zig");
+const TypeId = traits_.TypeId;
 const blocks = @import("blocks.zig");
 const copies = @import("copies.zig");
 const CONSTANT = copies.CONSTANT;
@@ -45,7 +46,7 @@ pub fn hasBoundEntry(em: *MethodEmitter, m: u32) bool {
             return false;
         }
 
-        if (refs.isClassRef(em, ir_.typeColumn(ty))) {
+        if (refs.isClassRef(em, ty)) {
             classes = true;
         }
     }
@@ -98,7 +99,7 @@ pub const MethodEmitter = struct {
     blockFile: []i32 = &.{},
     blockLine: []u32 = &.{},
     /// Each register's type as the instruction being written reads it.
-    regType: []i32 = &.{},
+    regType: []TypeId = &.{},
     /// Locals whose float identity is known at every use; their storage is a JS number.
     unboxed: []u8 = &.{},
     /// Float stack values stay unboxed within a block, boxed only for a successor that needs them.
@@ -120,6 +121,8 @@ pub const MethodEmitter = struct {
     literalMultinames: List(u32) = .empty,
     literalStrings: List(u32) = .empty,
     /// The methods of primitives' classes the method calls, each kept in an entry of T.
+    /// Each held method's type, as its word: a List(TypeId) would be
+    /// another copy of append for one comparison.
     heldTypes: List(i32) = .empty,
     heldMethods: List(u32) = .empty,
     heldSlots: List(u32) = .empty,
@@ -259,7 +262,7 @@ pub const MethodEmitter = struct {
         self.body = self.abc.methodBody[m];
         self.staticInit = values.isStaticInit(self, m);
         const frame = ir.frameSize;
-        try atLeast(gpa, i32, &self.regType, frame);
+        try atLeast(gpa, TypeId, &self.regType, frame);
         try atLeast(gpa, u8, &self.scopeWith, ir.maxScope);
         try atLeast(gpa, i32, &self.copyOf, frame);
         try atLeast(gpa, u32, &self.copiedBy, frame);
@@ -626,7 +629,7 @@ pub const MethodEmitter = struct {
         }
 
         if (coerce) {
-            try values.convert(self, "p", @intCast(p), ir_.typeColumn(ty), ir_.typeColumn(.any), self.unboxed[p] != 0);
+            try values.convert(self, "p", @intCast(p), ty, .any, self.unboxed[p] != 0);
         } else {
             try out.text("p");
             try out.uint(p);
@@ -664,7 +667,7 @@ pub const MethodEmitter = struct {
         }
 
         const bt = self.builtinOf(dst);
-        return self.domain.builtin(ir_.columnType(ir.c[i])) == .number and (bt == .int or bt == .uint);
+        return self.domain.builtin(ir.cType(i)) == .number and (bt == .int or bt == .uint);
     }
 
     /// What a copy reads: a register, or the constant instruction `CONSTANT - copy` pushed.
@@ -786,7 +789,7 @@ pub const MethodEmitter = struct {
 
     /// The builtin type of register r's value now.
     pub fn builtinOf(self: *const MethodEmitter, r: i32) traits_.Builtin {
-        return self.domain.builtin(ir_.columnType(self.regType[@intCast(r)]));
+        return self.domain.builtin(self.regType[@intCast(r)]);
     }
 
     /// A new method's types: none yet.
@@ -807,7 +810,7 @@ pub const MethodEmitter = struct {
     }
 
     /// Class or Vector type t's index in the method's T, given it the next if new.
-    pub fn typeSlot(self: *MethodEmitter, t: i32) Error!u32 {
+    pub fn typeSlot(self: *MethodEmitter, t: TypeId) Error!u32 {
         // t is a type of the domain's, which may have more since the tables were sized.
         const count = self.domain.traits.kind.len;
         if (self.typeStamp.len < count) {
@@ -822,11 +825,11 @@ pub const MethodEmitter = struct {
             self.typeStamp = stamp;
         }
 
-        const tu: u32 = @intCast(t);
+        const tu = t.index();
         if (self.typeStamp[tu] != self.typeGen) {
             self.typeStamp[tu] = self.typeGen;
             self.typeIndex[tu] = @intCast(self.types.items.len);
-            try self.types.append(self.gpa, t);
+            try self.types.append(self.gpa, @intCast(tu));
         }
 
         return self.typeIndex[tu];
@@ -863,17 +866,17 @@ pub const MethodEmitter = struct {
 
     /// The index in the method's T of the method by dispatch id `disp` of
     /// type t's prototype, given it the next if new.
-    pub fn methodSlot(self: *MethodEmitter, t: i32, disp: u32) Error!u32 {
+    pub fn methodSlot(self: *MethodEmitter, t: TypeId, disp: u32) Error!u32 {
         // A method calls few of them: a search costs less than tables by type.
         for (self.heldTypes.items, self.heldMethods.items, 0..) |ty, d, k| {
-            if (ty == t and d == disp) {
+            if (ty == @backingInt(t) and d == disp) {
                 return self.heldSlots.items[k];
             }
         }
 
         const slot: u32 = @intCast(self.types.items.len);
         try self.types.append(self.gpa, METHOD_SLOT);
-        try self.heldTypes.append(self.gpa, t);
+        try self.heldTypes.append(self.gpa, @backingInt(t));
         try self.heldMethods.append(self.gpa, disp);
         try self.heldSlots.append(self.gpa, slot);
 
@@ -963,7 +966,7 @@ pub const MethodEmitter = struct {
         const r = if (self.target >= 0) self.target else self.ir.dst[i];
         return self.unboxedLocal(r) or
             (r >= @as(i32, @intCast(self.ir.localCount + self.ir.maxScope)) and
-                ir_.columnType(self.ir.type[i]).isBuiltin(self.domain.floatType));
+                self.ir.type[i].isBuiltin(self.domain.floatType));
     }
 
     pub fn clearRaw(self: *MethodEmitter, from: i32) void {
@@ -1023,7 +1026,7 @@ pub const MethodEmitter = struct {
         self.unboxResult = !number and self.unboxedTarget(i);
         self.rawResult = self.target < 0 and
             self.ir.dst[i] >= @as(i32, @intCast(self.ir.localCount + self.ir.maxScope)) and
-            ir_.columnType(self.ir.type[i]).isBuiltin(self.domain.floatType);
+            self.ir.type[i].isBuiltin(self.domain.floatType);
         if (self.unboxResult) {
             try self.out.text("rt.toNumber(");
         }

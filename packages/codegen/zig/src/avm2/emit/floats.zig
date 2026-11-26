@@ -18,7 +18,7 @@ pub fn floatLocals(em: *MethodEmitter) Error!void {
         return;
     }
 
-    const ty = ir_.typeColumn(float);
+    const ty = float;
 
     // Bit 2 stays set until a non-float use; bit 1 records a float value.
     for (0..ir.localCount) |r| {
@@ -72,7 +72,7 @@ pub fn floatLocals(em: *MethodEmitter) Error!void {
 
 /// Arithmetic whose operands and result are statically floats needs no runtime dispatch.
 pub fn floatOperation(em: *MethodEmitter, i: u32) Error!bool {
-    if (!ir_.columnType(em.ir.type[i]).isBuiltin(em.domain.floatType)) {
+    if (!em.ir.type[i].isBuiltin(em.domain.floatType)) {
         return false;
     }
 

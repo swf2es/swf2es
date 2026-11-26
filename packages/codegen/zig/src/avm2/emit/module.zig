@@ -461,7 +461,7 @@ pub const ModuleEmitter = struct {
         for (types, 0..) |t, k| {
             try o.text(if (k != 0) ", " else "");
             if (t >= 0) {
-                try refs.typeExpr(methods, ir_.columnType(t));
+                try refs.typeExpr(methods, .of(@intCast(t)));
                 continue;
             }
 
