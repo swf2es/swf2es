@@ -7,15 +7,16 @@ const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
 const TraitKind = abc_.TraitKind;
-const Diagnostics = abc_.Diagnostics;
-const Error = abc_.Error;
+const errors = @import("errors.zig");
+const Diagnostics = errors.Diagnostics;
+const Rejected = errors.Rejected;
 const C = @import("constants.zig");
 const ConstantPool = @import("pool.zig").ConstantPool;
 const Reader = @import("reader.zig").Reader;
 
 /// Read the traits of `owner`. Class traits may only name classes below
 /// `classesDefined`: avmplus defines classes one by one while parsing.
-pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefined: u32, diag: *Diagnostics) error{Verify}!void {
+pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefined: u32, diag: *Diagnostics) Rejected!void {
     const count = r.u30_();
     if (count > r.end - r.pos) {
         return diag.fail(C.kCorruptABCError);

@@ -6,8 +6,10 @@ const memory = @import("../../memory.zig");
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
-const Diagnostics = abc_.Diagnostics;
-const Error = abc_.Error;
+const errors = @import("errors.zig");
+const Diagnostics = errors.Diagnostics;
+const Error = errors.Error;
+const Rejected = errors.Rejected;
 const C = @import("constants.zig");
 const Reader = @import("reader.zig").Reader;
 const traits = @import("traits.zig");
@@ -153,7 +155,7 @@ pub fn readScripts(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *
 }
 
 /// A method index.
-fn readMethodIndex(abc: *const Abc, r: *Reader, diag: *Diagnostics) error{Verify}!u32 {
+fn readMethodIndex(abc: *const Abc, r: *Reader, diag: *Diagnostics) Rejected!u32 {
     const method = r.u30_();
     if (r.failed) {
         return diag.fail(C.kCorruptABCError);
@@ -167,7 +169,7 @@ fn readMethodIndex(abc: *const Abc, r: *Reader, diag: *Diagnostics) error{Verify
 }
 
 /// Bind an instance or class initializer to its owner.
-fn bind(abc: *Abc, method: u32, owner: i32, diag: *Diagnostics) error{Verify}!void {
+fn bind(abc: *Abc, method: u32, owner: i32, diag: *Diagnostics) Rejected!void {
     if (abc.methodOwner[method] != -1) {
         return diag.fail(C.kAlreadyBoundError);
     }

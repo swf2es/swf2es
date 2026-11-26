@@ -111,26 +111,6 @@ pub const Lists = struct {
     }
 };
 
-/// How an ABC's parse stops early: avmplus rejects it with a VerifyError,
-/// whose number Diagnostics holds, or memory runs out.
-pub const Error = error{Verify} || std.mem.Allocator.Error;
-
-/// Why a parse that returned Error.Verify stopped: the number of the
-/// VerifyError avmplus would throw, the first, as avmplus stops at its
-/// first throw.
-pub const Diagnostics = struct {
-    code: i32 = 0,
-
-    /// Error.Verify, the ABC rejected with VerifyError `code`.
-    pub fn fail(self: *Diagnostics, code: i32) error{Verify} {
-        if (self.code == 0) {
-            self.code = code;
-        }
-
-        return error.Verify;
-    }
-};
-
 /// A trait's kind, the low four bits of its tag (AVM2 overview 4.8.1).
 /// Kind 5, a function, is one avmplus does not read, as no other kind may
 /// be either.

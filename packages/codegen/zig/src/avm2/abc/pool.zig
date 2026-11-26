@@ -5,9 +5,9 @@ const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
 const C = @import("constants.zig");
 const Reader = @import("reader.zig").Reader;
-const abc_ = @import("abc.zig");
-const Diagnostics = abc_.Diagnostics;
-const Error = abc_.Error;
+const errors = @import("errors.zig");
+const Diagnostics = errors.Diagnostics;
+const Error = errors.Error;
 
 /// Bytes `len` long from `start` in the ABC: a string's, a body's code.
 pub const Range = struct {
@@ -66,6 +66,10 @@ pub const Value = union(enum) {
     /// A namespace's index in the pool.
     namespace: u32,
 };
+
+/// Why ConstantPool.value reads no default value: a kind no default may
+/// be, or an index past its table.
+pub const ValueError = error{ IllegalKind, OutOfRange };
 
 /// Flat tables indexed like the ABC's pools; entry 0 of each is the
 /// implicit default. Strings stay byte ranges into the ABC, so only the
@@ -140,7 +144,7 @@ pub const ConstantPool = struct {
     /// default value may be of that kind, OutOfRange where `index` is past
     /// its table. True, false and null are their kind alone; their index
     /// is not read.
-    pub fn value(self: *const ConstantPool, kind: u8, index: u32) error{ IllegalKind, OutOfRange }!Value {
+    pub fn value(self: *const ConstantPool, kind: u8, index: u32) ValueError!Value {
         const count: usize = switch (kind) {
             C.CONSTANT_Int => self.ints.len,
             C.CONSTANT_UInt => self.uints.len,
