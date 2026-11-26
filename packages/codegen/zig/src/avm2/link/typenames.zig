@@ -49,7 +49,8 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) 
                 return -2;
             }
 
-            break dom.classTraits.get(@intCast(c));
+            // A class not linked yet reads as *.
+            break dom.classTraits.get(@intCast(c)).orAny();
         }
 
         const base = resolveType(dom, index, pool.mnA[mn]);
@@ -104,7 +105,7 @@ pub fn parameterized(dom: *Domain, base: i32, param: i32) Allocator.Error!i32 {
     // As Traits::newParameterizedITraits: a subclass of Vector.<*> with no members of its own.
     const traits = &dom.traits;
     const objects: u32 = @intCast(dom.vectorObjectType);
-    const t = try traits.create(dom.gpa, .instance, traits.abc.get(objects), traits.owner.get(objects), @intCast(objects), -1, 0, 0);
+    const t = try traits.create(dom.gpa, .instance, traits.abc.get(objects), traits.owner.get(objects), .of(objects), -1, 0, 0);
     traits.param.set(t, param);
     traits.slotCount.set(t, traits.slotCount.get(objects));
     traits.methodCount.set(t, traits.methodCount.get(objects));

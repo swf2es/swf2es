@@ -121,15 +121,15 @@ pub fn coerceArgs(bd: *BodyDecoder, m: u32, argc: u32) Error!bool {
 
 /// As Verifier::emitCoerceSuper: the receiver at i becomes the declaring class's base.
 pub fn coerceSuper(bd: *BodyDecoder, i: u32) Error!i32 {
-    const base = if (bd.declarer >= 0) bd.domain.traits.base.get(@intCast(bd.declarer)) else -1;
-    if (base < 0) {
+    const base = if (bd.declarer >= 0) bd.domain.traits.base.get(@intCast(bd.declarer)) else .none;
+    if (base == .none) {
         _ = bd.fail(C.kIllegalSuperCallError);
         return -2;
     }
 
-    try bd.coerce(i, base);
-    bd.rowC = base;
-    return base;
+    try bd.coerce(i, base.toType());
+    bd.rowC = base.toType();
+    return base.toType();
 }
 
 /// As Verifier::checkEarlySlotBinding and checkSlot: `type` must come from
@@ -340,12 +340,12 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
         // The builtin global's Math and Number are never null.
         const notNull = domain.traits.abc.get(@intCast(ty)) == @as(u32, @bitCast(domain.builtinAbc)) and domain.isMathOrNumber(bd.index, mn);
         _ = bd.popPush(n, propType, if (notNull) NOT_NULL else 0);
-        return bd.emitOn(.getslot, @bitCast(obj), @bitCast(obj), 1, @as(u32, b.id), 0, 0);
+        return bd.emitOn(.getslot, @bitCast(obj), @bitCast(obj), 1, b.index(), 0, 0);
     }
 
     if (kind == .get or kind == .get_set) {
         const t: u32 = @intCast(ty);
-        const getter = domain.traits.dispatch.get(domain.traits.dispatchStart.get(t) + @as(u32, b.id));
+        const getter = domain.traits.dispatch.get(domain.traits.dispatchStart.get(t) + b.index());
         if (getter >= 0 and !try coerceArgs(bd, @intCast(getter), 0)) {
             return false;
         }
@@ -357,7 +357,7 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
             return bd.emitOn(.getproperty, @bitCast(obj), @bitCast(obj), n, mn, 0, 0);
         }
 
-        return bd.emitOn(.ir_call_getter, @bitCast(obj), @bitCast(obj), 1, @as(u32, b.id), 0, getter);
+        return bd.emitOn(.ir_call_getter, @bitCast(obj), @bitCast(obj), 1, b.index(), 0, getter);
     }
 
     if (propType == TYPE_Any and numericIndex(bd, mn)) {
@@ -420,12 +420,12 @@ pub fn setProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
         (kind == .constant and opcode == .initproperty and domain.initOfDeclarer(ty, bd.index, mn) == @as(i32, @bitCast(bd.global))))
     {
         try bd.coerce(top, propType);
-        return bd.emitOn(.setslot, -1, @bitCast(obj), 2, @as(u32, b.id), 0, 0);
+        return bd.emitOn(.setslot, -1, @bitCast(obj), 2, b.index(), 0, 0);
     }
 
     if (kind == .set or kind == .get_set) {
         const t: u32 = @intCast(ty);
-        const setter = domain.traits.dispatch.get(domain.traits.dispatchStart.get(t) + @as(u32, b.id) + 1);
+        const setter = domain.traits.dispatch.get(domain.traits.dispatchStart.get(t) + b.index() + 1);
         if (setter >= 0 and !try coerceArgs(bd, @intCast(setter), 1)) {
             return false;
         }
@@ -434,7 +434,7 @@ pub fn setProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
             return bd.emitOn(ir_.of(opcode), -1, @bitCast(obj), n, mn, 0, 0);
         }
 
-        return bd.emitOn(.ir_call_setter, -1, @bitCast(obj), 2, @as(u32, b.id) + 1, 0, setter);
+        return bd.emitOn(.ir_call_setter, -1, @bitCast(obj), 2, b.index() + 1, 0, setter);
     }
 
     if (numericIndex(bd, mn)) {
@@ -484,7 +484,7 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
     if (b.kind == .method) {
         b = try fasterCall(bd, ty, mn, b, argc);
         const t: u32 = @intCast(ty);
-        const m = traits.dispatch.get(traits.dispatchStart.get(t) + @as(u32, b.id));
+        const m = traits.dispatch.get(traits.dispatchStart.get(t) + b.index());
         if (m >= 0) {
             const mu: u32 = @intCast(m);
             const signError = try traits.sign(domain, mu);
@@ -504,7 +504,7 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
 
                 // An interface's method has no dispatch id of its own on the receiver.
                 const call: IrOp = if (traits.isInterface.get(t) != 0) .ir_call_interface else .callmethod;
-                return bd.emitOn(call, if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, @as(u32, b.id), argc, m);
+                return bd.emitOn(call, if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, b.index(), argc, m);
             }
         }
     } else if ((b.kind == .variable or b.kind == .constant) and argc == 1) {
@@ -574,7 +574,7 @@ fn fasterCall(bd: *BodyDecoder, ty: i32, mn: u32, b: Binding, argc: u32) Error!B
         return b;
     }
 
-    const m = traits.dispatch.get(traits.dispatchStart.get(@intCast(ty)) + @as(u32, faster.id));
+    const m = traits.dispatch.get(traits.dispatchStart.get(@intCast(ty)) + faster.index());
     if (m < 0 or try traits.sign(domain, @intCast(m)) != 0) {
         return b;
     }
@@ -664,7 +664,7 @@ pub fn callSuper(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool {
             return bd.fail(err);
         }
 
-        m = traits.dispatch.get(traits.dispatchStart.get(@intCast(base)) + @as(u32, b.id));
+        m = traits.dispatch.get(traits.dispatchStart.get(@intCast(base)) + b.index());
         if (m < 0) {
             return bd.fail(C.kCorruptABCError);
         }
@@ -694,7 +694,7 @@ pub fn callSuper(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool {
                 return false;
             }
 
-            return bd.emitOn(.ir_call_super, if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, @as(u32, b.id), argc, m);
+            return bd.emitOn(.ir_call_super, if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, b.index(), argc, m);
         }
     }
 

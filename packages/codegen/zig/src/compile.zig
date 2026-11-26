@@ -1106,7 +1106,8 @@ fn replayLog(dom: *Domain, gpa: Allocator, log: []const u8, at: u32) Allocator.E
             const place = try parseI32(gpa, fields[1]);
             const a = try parseI32(gpa, fields[2]);
             const b = try parseI32(gpa, fields[3]);
-            if (place < 0 or place >= seen.len or a < 0 or b < 0) {
+            // As replayEntry: no kind past verify, nor one read as its low byte.
+            if (kind < 0 or kind > @backingInt(domain_.LogKind.verify) or place < 0 or place >= seen.len or a < 0 or b < 0) {
                 ok = false;
                 break;
             }
@@ -1141,8 +1142,8 @@ fn replayed(dom: *Domain, kind: domain_.LogKind, abc: u32, a: u32, b: u32) Alloc
         .activation => @intCast(dom.bodyTraits.get(abc).len),
         else => info.classCount(),
     };
-    const t = if (b < owners) lifetime.traitsOf(dom, abc, owned, b) else -1;
-    return t >= 0 and try dom.traits.resolve(dom, @intCast(t)) == 0;
+    const t = if (b < owners) lifetime.traitsOf(dom, abc, owned, b) else .none;
+    return t != .none and try dom.traits.resolve(dom, t.index()) == 0;
 }
 
 // The rebuild, saving and loading (compile.ts tells each export's why).

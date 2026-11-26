@@ -19,16 +19,16 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
     const index = traits.abc.get(t);
     const abc = dom.abcs.get(index);
     const base = traits.base.get(t);
-    const baseSlots = if (base >= 0) traits.slotCount.get(@intCast(base)) else 0;
-    var methodCount = if (base >= 0) traits.methodCount.get(@intCast(base)) else 0;
+    const baseSlots = if (base != .none) traits.slotCount.get(base.index()) else 0;
+    var methodCount = if (base != .none) traits.methodCount.get(base.index()) else 0;
     const start = traits.memberTraits.len;
     traits.memberStart.set(t, start);
     traits.memberEnd.set(t, start);
 
     // A subclass sees its base's protected members in its own protected namespace.
     const protectedNs = traits.protectedNs.get(t);
-    if (base >= 0 and protectedNs >= 0 and traits.protectedNs.get(@intCast(base)) >= 0) {
-        const b: u32 = @intCast(base);
+    if (base != .none and protectedNs >= 0 and traits.protectedNs.get(base.index()) >= 0) {
+        const b: u32 = base.index();
         const baseNs: u32 = @intCast(traits.protectedNs.get(b));
         const last = traits.memberEnd.get(b);
         var m = traits.memberStart.get(b);
@@ -141,7 +141,7 @@ fn bindInterfaces(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!vo
     const publicNs = dom.publicNamespace();
     const publicVersion = dom.publicVersion(index);
     for (all) |ifc| {
-        if (base >= 0 and try traits.subtypeOf(dom.scratch, @intCast(base), ifc)) {
+        if (base != .none and try traits.subtypeOf(dom.scratch, base.index(), ifc)) {
             continue;
         }
 
@@ -171,11 +171,11 @@ fn bindInterfaces(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!vo
 pub fn overridden(traits: *const TraitsTable, t: u32, ns: u32, version: u8, name: u32, tag: C.TraitTag) ?Binding {
     const base = traits.base.get(t);
     var binding = Binding.none;
-    if (base >= 0) {
+    if (base != .none) {
         const protectedNs = traits.protectedNs.get(t);
-        const baseProtected = traits.protectedNs.get(@intCast(base));
+        const baseProtected = traits.protectedNs.get(base.index());
         const lookup: u32 = if (protectedNs == @as(i32, @bitCast(ns)) and baseProtected >= 0) @intCast(baseProtected) else ns;
-        binding = traits.find(base, lookup, name, version);
+        binding = traits.findFrom(base, lookup, name, version);
     }
 
     const baseKind = binding.kind;

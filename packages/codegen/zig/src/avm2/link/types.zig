@@ -8,8 +8,8 @@ const Domain = @import("domain.zig").Domain;
 const hashPair = @import("table.zig").hashPair;
 const traits_ = @import("traits.zig");
 const Binding = traits_.Binding;
-const BindingKind = traits_.BindingKind;
 const TYPE_Any = traits_.TYPE_Any;
+const TypeRef = traits_.TypeRef;
 
 /// As Multiname::isBinding: whether multiname `mn` of ABC `index` names
 /// something that can be bound early, a name in known namespaces.
@@ -99,13 +99,13 @@ fn lookupBinding(dom: *const Domain, index: u32, type_: i32, multiname: u32) Bin
     const set = pool.mnA[mn];
     const first = pool.nsSetStart[set];
     const last = pool.nsSetStart[set + 1];
-    var t = type_;
-    while (t >= 0) : (t = traits.base.get(@intCast(t))) {
+    var t = TypeRef.ofType(type_);
+    while (t != .none) : (t = traits.base.get(t.index())) {
         var found = Binding.none;
         var m = first;
         while (m < last) : (m += 1) {
             const ns = pool.nsSetMembers[m];
-            const b = traits.own(@intCast(t), ids[ns], name, versions[ns]);
+            const b = traits.own(t.index(), ids[ns], name, versions[ns]);
             if (b == Binding.none) {
                 continue;
             }
@@ -164,12 +164,12 @@ pub fn bindingType(dom: *const Domain, type_: i32, b: Binding) i32 {
     const kind = b.kind;
     const traits = &dom.traits;
     const t: u32 = @intCast(type_);
-    if (kind == BindingKind.variable or kind == BindingKind.constant) {
-        return traits.slotType.get(traits.slotStart.get(t) + @as(u32, b.id));
+    if (kind == .variable or kind == .constant) {
+        return traits.slotType.get(traits.slotStart.get(t) + b.index());
     }
 
-    if (kind == BindingKind.get or kind == BindingKind.get_set) {
-        const m = traits.dispatch.get(traits.dispatchStart.get(t) + @as(u32, b.id));
+    if (kind == .get or kind == .get_set) {
+        const m = traits.dispatch.get(traits.dispatchStart.get(t) + b.index());
         return if (m < 0) TYPE_Any else traits.returnType.get(@intCast(m));
     }
 
@@ -195,12 +195,12 @@ pub fn commonBase(dom: *const Domain, a: i32, b: i32) i32 {
         return a;
     }
 
-    var t = b;
-    while (t >= 0) : (t = traits.base.get(@intCast(t))) {
-        var s = a;
-        while (s >= 0) : (s = traits.base.get(@intCast(s))) {
+    var t = TypeRef.ofType(b);
+    while (t != .none) : (t = traits.base.get(t.index())) {
+        var s = TypeRef.ofType(a);
+        while (s != .none) : (s = traits.base.get(s.index())) {
             if (s == t) {
-                return t;
+                return t.toType();
             }
         }
     }
@@ -218,9 +218,9 @@ pub fn canAssign(dom: *const Domain, lhs: i32, rhs: i32) bool {
         return true;
     }
 
-    var t = rhs;
-    while (t >= 0) : (t = dom.traits.base.get(@intCast(t))) {
-        if (t == lhs) {
+    var t = TypeRef.ofType(rhs);
+    while (t != .none) : (t = dom.traits.base.get(t.index())) {
+        if (t.toType() == lhs) {
             return true;
         }
     }

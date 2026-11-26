@@ -10,19 +10,18 @@ const overridden = @import("bindings.zig").overridden;
 const Domain = @import("domain.zig").Domain;
 const traits_ = @import("traits.zig");
 const Binding = traits_.Binding;
-const BindingKind = traits_.BindingKind;
 const TraitsTable = traits_.TraitsTable;
 const TYPE_Any = traits_.TYPE_Any;
 const resolveTypeId = @import("typenames.zig").resolveTypeId;
 
 fn hasGetter(binding: Binding) bool {
     const kind = binding.kind;
-    return kind == BindingKind.get or kind == BindingKind.get_set;
+    return kind == .get or kind == .get_set;
 }
 
 fn hasSetter(binding: Binding) bool {
     const kind = binding.kind;
-    return kind == BindingKind.set or kind == BindingKind.get_set;
+    return kind == .set or kind == .get_set;
 }
 
 /// As Traits::finishSlotsAndMethods: each slot's type, and each method's
@@ -48,8 +47,8 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
     }
 
     var baseSlots: u32 = 0;
-    if (base >= 0) {
-        const b: u32 = @intCast(base);
+    if (base != .none) {
+        const b = base.index();
         baseSlots = traits.slotCount.get(b);
         const from = traits.slotStart.get(b);
         for (0..baseSlots) |s_| {
@@ -94,7 +93,8 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
 
             var ty: i32 = undefined;
             if (kind == .class) {
-                ty = dom.classStatic.get(dom.classStart.get(index) + abc.traitIndex[i]);
+                // A class not linked yet reads as *.
+                ty = dom.classStatic.get(dom.classStart.get(index) + abc.traitIndex[i]).orAny();
             } else {
                 ty = try resolveTypeId(dom, index, abc.traitIndex[i], false);
                 if (ty < TYPE_Any) {
@@ -111,7 +111,7 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
                 continue;
             }
 
-            const d = @as(u32, b.id) + @intFromBool(kind == .setter);
+            const d = b.index() + @intFromBool(kind == .setter);
             const baseBinding = overridden(traits, t, traits.nameNs, traits.nameNsVersion, traits.nameId, tag) orelse Binding.none;
             if (baseBinding != Binding.none) {
                 const bb = baseBinding;
@@ -119,7 +119,7 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
                     (hasGetter(bb) and kind == .getter) or
                     (hasSetter(bb) and kind == .setter))
                 {
-                    const virt = traits.dispatch.get(traits.dispatchStart.get(@intCast(base)) + d);
+                    const virt = traits.dispatch.get(traits.dispatchStart.get(base.index()) + d);
                     if (virt >= 0 and traits.methodFinal.get(@intCast(virt)) != 0) {
                         return C.kIllegalOverrideError;
                     }
@@ -140,7 +140,7 @@ pub fn checkInitialValues(traits: *const TraitsTable, dom: *const Domain, t: u32
     const early = traits.allowEarlyBinding(t);
     const base = traits.base.get(t);
     const slots = traits.slotStart.get(t);
-    var next = if (base >= 0) traits.slotCount.get(@intCast(base)) else 0;
+    var next = if (base != .none) traits.slotCount.get(base.index()) else 0;
     var i = traits.first.get(t);
     while (i < traits.end.get(t)) : (i += 1) {
         const kind = abc.traitTag[i].kind;
@@ -229,9 +229,9 @@ pub fn checkInterfaces(traits: *const TraitsTable, dom: *const Domain, t: u32, i
                 return false;
             }
 
-            const iId = @as(u32, iBinding.id);
-            const cId = @as(u32, cBinding.id);
-            if (iKind == BindingKind.method) {
+            const iId = iBinding.index();
+            const cId = cBinding.index();
+            if (iKind == .method) {
                 const virt = traits.dispatch.get(ifcDispatch + iId);
                 const over = traits.dispatch.get(dispatch + cId);
                 if (virt >= 0 and !try checkOverride(traits, dom, t, @intCast(virt), over)) {
