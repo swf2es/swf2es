@@ -1,0 +1,9 @@
+{
+  "zig": "0.17.0",
+  "inputs": "a9ad84c52fcbdbb492ca6546cfa5deef038ea2fbd36452a70ec93b11db8b39e4",
+  "modules": {
+    "dist/codegen.wasm": "85ba06dc85a887f4d8744546acb37293cb81fc824830334d0137b1bd53435e07",
+    "dist-test/testing.wasm": "d100f37a76e4039da50162cc7178c688c29b08d727fbe0b56a9f27ae51fdb448",
+    "dist-test/testing-poison.wasm": "abaf1760e47fc1efae3dd134f0b1217c1fbe71d9407a40ec6ec9eefbf37b4a42"
+  }
+}

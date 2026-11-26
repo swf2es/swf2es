@@ -11,8 +11,9 @@
 //   - each method compiled alone is byte for byte its entry in the
 //     module (docs/architecture/overview.md's JIT/AOT invariant).
 //
-// The seeds are the unit tests' hand-built ABCs and the conformance cases,
-// compiled into this package's own out/. A case that fails is written to
+// The seeds are the unit tests' hand-built ABCs, structured method bodies
+// (bodies.ts) and the conformance cases, compiled into this package's own
+// out/. A case that fails is written to
 // out/failures/ as an .abc to run again. The mutations come from a seeded
 // generator, so a run repeats exactly:
 //
@@ -23,8 +24,12 @@ import { fileURLToPath } from "node:url";
 import { containerEngine, libraries, runOracle } from "../../oracle/oracle.ts";
 import { floatLibrary } from "../../packages/runtime/dist/avm2/float-library.js";
 import { abc, tables } from "../unit/codegen/abc-builder.ts";
+import { linkAbcs } from "../unit/codegen/link-abc.ts";
 import type { Case } from "../unit/codegen/oracle-case.ts";
-import { loadTesting } from "../unit/codegen/testing-module.ts";
+import { richAbc } from "../unit/codegen/rich-abc.ts";
+import { loadTesting, TESTED } from "../unit/codegen/testing-module.ts";
+import { verifyErrorAbcs } from "../unit/codegen/verify-errors.ts";
+import { structuredAbcs } from "./bodies.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
@@ -59,6 +64,10 @@ const seeds: Uint8Array[] = [
 ];
 // Closures with debug names, in the pool, empty, none and past it, which name their functions.
 seeds.push(closuresSeed());
+// Something of every kind the parser reads; the VerifyErrors no other case
+// reaches; classes linked across ABCs; and structured bodies.
+seeds.push(richAbc(true), ...verifyErrorAbcs().map(([, bytes]) => bytes));
+seeds.push(...Object.values(linkAbcs()), ...structuredAbcs(40, 1));
 for (const [module, names] of [
   ["../unit/codegen/verify-cases.ts", ["verifyCases"]],
   ["../unit/codegen/link-cases.ts", ["linkCases", "resolveCases"]],
@@ -167,10 +176,7 @@ function parseEntries(text: string): Map<number, string> {
 
 const sha = (b: Uint8Array | string) => createHash("sha256").update(b).digest("hex");
 const builtinHashes = builtins.map(sha);
-// pnpm test:checked's build checks every array access: a read past a
-// table's end, which the release build does not catch, traps there.
-const build = process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test";
-let testing = await loadTesting(build);
+let testing = await loadTesting(TESTED);
 const failures: string[] = [];
 let accepted = 0;
 let slowest = { ms: 0, at: -1 };
@@ -208,7 +214,6 @@ for (let k = 0; k < caseCount; k++) {
     // same string.
     const parts: Uint8Array[] = [testing.domainModuleBytes(hashes, -1, false)];
     while (!testing.domainModuleDone()) {
-      testing.__collect();
       parts.push(testing.domainModuleMoreBytes());
     }
 
@@ -248,7 +253,7 @@ for (let k = 0; k < caseCount; k++) {
   } catch (e) {
     // A trap leaves the instance unusable: start a new one.
     fail(abc, `the compiler trapped (${(e as Error).message})`);
-    testing = await loadTesting(build);
+    testing = await loadTesting(TESTED);
   } finally {
     const ms = performance.now() - t0;
     if (ms > slowest.ms) {

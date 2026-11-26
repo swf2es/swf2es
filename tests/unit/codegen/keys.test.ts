@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createCodegen, KeyChains, type KeyContext, type KeyLog, moduleKey } from "@swf2es/codegen";
 import { classes, METHOD, mn, OVERRIDE, SLOT } from "./link-cases.ts";
-import { loadTesting } from "./testing-module.ts";
+import { loadTesting, TESTED } from "./testing-module.ts";
 
 const generated = new URL("../../../oracle/avmplus/generated/", import.meta.url);
 const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
@@ -38,7 +38,7 @@ const b = classes(
 const pool = [sorts, a, b, sorts];
 const decoder = new TextDecoder();
 
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+// biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
 type Testing = any;
 
 /** What KeyChains asks of the test build; without `inherit`, no domain starts from its parent's chain. */
@@ -74,7 +74,7 @@ function live(t: Testing, abcDomain: number[]): number[] {
 
 /** A domain as the player keeps one: the libraries in the root, compiled, and the main movie's domain below. */
 async function start(): Promise<{ t: Testing; abcDomain: number[]; main: number }> {
-  const t = await loadTesting(process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test");
+  const t = await loadTesting(TESTED);
   t.domainReset(50);
   const abcDomain: number[] = [];
   for (const library of [builtin, shell]) {

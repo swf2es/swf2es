@@ -8,7 +8,7 @@ and the specs and implementations to consult are in
 ## What this is
 
 swf2es plays SWF files in the browser and compiles their ActionScript
-bytecode to JavaScript. One compiler (`packages/codegen`, AssemblyScript →
+bytecode to JavaScript. One compiler (`packages/codegen`, Zig →
 `codegen.wasm`) runs both as the browser JIT and as the AOT compiler, and
 must give **identical output** in both modes.
 
@@ -20,15 +20,15 @@ git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/a
                               # vendor/minimp3, vendor/zlib, vendor/lzma-sdk, vendor/libtess2 and vendor/jxrlib
                               # (C compiled into packages/native's wasm)
 pnpm install
-pnpm build       # asc → codegen.wasm, then tsc -b for all packages, then the browser build
-pnpm build:debug # the same with unoptimized wasm, names and source maps
+pnpm build       # the pinned Zig → codegen.wasm (Zig downloaded once), then tsc -b for all
+                 # packages, then the browser build
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
-pnpm test        # unit, conformance, library, program, fuzz, player, web, site, packaging and
-                 # desktop tests (needs podman or docker, and Chrome; CHROME names another
+pnpm test        # unit, conformance, library, program, fuzz, golden, player, web, site, packaging
+                 # and desktop tests (needs podman or docker, and Chrome; CHROME names another
                  # browser; the desktop's are skipped without Electron's binary)
-pnpm test:checked # the same with every array access bounds-checked, and the player's
-                  # shortcuts and the renderer's spans checked against full walks
+pnpm test:checked # the same with the player's shortcuts and the renderer's spans checked
+                  # against full walks, and the compiler's tests on its 0xAA build
 pnpm dlx knip                 # unused files, exports and dependencies (knip.json); before
                               # removing anything, see "Code generated code calls" below
 pnpm determinism              # each module the same however it is compiled, and each method
@@ -59,10 +59,10 @@ pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on 
                               # failing tests by the lines they differ on, nearest to passing first
 node tests/player/corpus/check-references.ts [prefix...]   # the corpus's expected outputs vs Flash
 node tests/fuzz/abc.ts [cases, 2000] [seed, 1]   # malformed ABCs: codegen never traps, its modules
-                              # parse, JIT equals AOT (SWF2ES_CHECKED=1 for the checked build)
+                              # parse, JIT equals AOT (SWF2ES_CHECKED=1 on the 0xAA build)
 node tests/fuzz/avm1.ts [cases, 2000] [seed, 1]   # malformed AVM1 action blocks: the decoder
                               # and flow never trap, and decode a block the same after others
-                              # (SWF2ES_CHECKED=1 for the checked build)
+                              # (SWF2ES_CHECKED=1 on the 0xAA build)
 node tests/fuzz/compress.ts [cases, 2000] [seed, 1]   # malformed CWS, ZWS, zlib and LZMA: the
                               # decoders never trap, refuse with CompressedDataError, and a
                               # SWF that decodes has its prefix
@@ -76,6 +76,11 @@ node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]   # native fills match ind
                               # coverage under both winding rules, including crossing contours
 node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revivals and rebuilds of
                               # application domains change no module against a reference
+node tests/fuzz/recovery.ts [seeds, 20] [first seed, 1] [steps, 300]   # panics injected into
+                              # the compiler: createCodegen recovers to the domain an instance without
+                              # them has, or loses it by design (COMPACT=1 TRANSIENT=1: with rebuilds)
+node tests/fuzz/saved.ts [cases, 2000] [seed, 1]   # malformed saved domains: refused, or rebuilt
+                              # and then used, never a panic
 node tests/player/spans-fuzz.ts [seeds, 60] [first seed, 1] [frames, 40]   # random changes to a
                               # tree of containers and shapes in Chrome: the renderer's spans,
                               # checked on odd seeds, draw each frame as a view that takes none
@@ -190,10 +195,21 @@ pnpm as3:format               # format them and the tests' scripts with Apache R
                               # the PATH); tools/as3-format.ts names what it leaves as written
 SWF2ES_PLAYERGLOBAL=adobe ... # the unit, player, web and corpus tests on Flash Player's
                               # playerglobal in place of the player's own (tests/player/libraries.ts)
+node packages/codegen/zig/build.ts [--update | --verify]   # the compiler, as pnpm build builds
+                              # it (docs/zig-codegen.md); --update runs its inline tests (zig build
+                              # test in packages/codegen/zig), builds with fresh caches and writes
+                              # zig/digests.json, --verify fails where they differ (CI's codegen job)
+node packages/codegen/zig/build.ts --names   # dist-test/codegen-names.wasm, by the pinned Zig:
+                              # the compiler with the name section, so that a trap's stack names
+                              # its functions
+node tests/golden/run.ts [--abcs] [--update]   # the generated code's digests (libraries, the unit
+                              # tests' ABCs, conformance cases with and without line maps, as3pb, AVM1
+                              # blocks) against tests/golden/digests.json; --abcs builds the ABCs ASC
+                              # makes (kept in tests/golden/abcs/) again, as after a new case
 pnpm --filter @swf2es/native build:wasm   # rebuild packages/native's wasm (compress, mp3, and render:
                               # bitmap, tessellate, lines) with the pinned Zig, after the zig tests;
                               # pnpm build only checks their inputs' digests
-pnpm bench [file.abc...]      # time the ABC parser and decoder
+pnpm bench [file.abc...]      # time the ABC parser, the decoder and the verifier
 node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property access through the
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
 node tests/bench/native-collections/run.ts [<dir A> <dir B>] [runs]   # the natives that walk Arrays
@@ -210,6 +226,9 @@ node --expose-gc tests/bench/codegen-session.ts [--loads N] [--checkout DIR] [--
                               # a large main SWF loading items into its domain, most of them again,
                               # and maps into children; memory, live and dead weight, rebuilds and
                               # which exports grew memory, a window of loads at a time
+node tests/bench/codegen-strings.ts <before.wasm> <after.wasm> [pairs]   # AVM2 module emission
+                              # in two builds of the Zig compiler, interleaved pairs, loading,
+                              # linking and checking the text outside the timer
 node tests/bench/typed/run.ts [<dir A> <dir B>] [runs]   # new of classes and calls the compiler
                               # binds (class-typed parameters given subclasses, interfaces, null),
                               # as the ones above
@@ -268,8 +287,13 @@ of its own.
   player's API (`flash.*`, AVM1's globals, drawing), Flash is the reference:
   what it traces and draws under AIR's adl (`oracle/flash.ts`), where
   avmshell, which has no player, may differ.
+- **The generated code moves only on purpose.** `tests/golden/digests.json`
+  holds the digests of what the compiler makes of the libraries, the unit
+  tests' ABCs, the conformance cases and AVM1 blocks. A change that means
+  to move the generated code updates it (`node tests/golden/run.ts
+  --update`) in the same commit; any other change leaves it as it is.
 - **Code generated code calls is not dead.** Compiled modules reach the
-  runtime by name: the emitters in `packages/codegen/assembly` write runtime
+  runtime by name: the emitters in `packages/codegen/zig/src` write runtime
   helpers' and Runtime members' names as strings, natives are bound by name
   from ABC metadata, and AVM1's helpers by the AVM1 emitter. No tool sees
   those callers, so before removing or renaming anything in
@@ -300,41 +324,43 @@ of its own.
   that only restate a name, a type or the obvious.
 - Prefer no new dependencies; ask before adding one.
 
-### AssemblyScript (`packages/codegen/assembly`)
+### Zig (`packages/codegen/zig`)
 
-- **Frozen during the port to Zig** (docs/zig-codegen.md on branch
-  `zig/stage-0`): change nothing here but fixes, each made in both
-  compilers, so that the port's stages are not chasing a moving target.
-
+- Zig 0.17.0, pinned (`tools/zig.ts`), and the ReleaseSafe build shipped:
+  every index, cast and overflow checked, a failed check a panic
+  (`src/panic.zig`), from which `createCodegen` recovers in a new instance
+  (docs/zig-codegen.md, section 7). Never turn safety off for a file or a
+  function to win time; measure, and fix the hot path instead.
 - Group files by bytecode, then by compiler stage (`avm2/abc/`, `avm2/link/`,
   `avm2/ir/`, `avm2/emit/`), not by kind: no `utils/`. A helper lives next to
   its only user; what AVM1 and AVM2 come to share lives beside `avm2/`.
-- Keep any object read through a raw pointer (`changetype<usize>`, `load`)
-  referenced from a live variable, field or global; otherwise the collector
-  may free it mid-read.
-- The dialect is stricter than TypeScript: no `import type`, and `@inline`
-  only on class members (Binaryen inlines small functions at `-O3` anyway).
-  Biome's import-type fix is off for this folder for that reason.
-- Import the opcodes and the ABC constants as namespaces, `import * as ops
-  from "./opcodes"` and `import * as C from "./constants"`, and write
-  `ops.OP_add` and `C.kCorruptABCError`: the constants still inline, and
-  the files that use them need no import list. Other names, such as the
-  traits module's classes, are imported by name.
-- Mark classes `@final` unless they are meant to be extended, so calls on
-  them never need virtual dispatch.
-- The runtime is `minimal`: garbage is collected only between calls from
-  JS, never during one. Nothing allocated in a call is freed before it
-  returns, so build large results from a list joined once, not with `+=`
-  in a loop, and reuse scratch buffers across iterations.
-- Release builds leave every array access unchecked (`uncheckedBehavior:
-  "always"`), so do not write `unchecked()`. An index that comes from the
-  input needs an explicit comparison that rejects it with avmplus' error;
-  any other index must be in range by construction, which `pnpm
-  test:checked` checks on every access.
-- Errors are sticky flags or VerifyError numbers, never `throw`: an abort
-  kills the wasm instance, and the JIT must survive a malformed SWF.
-- Use avmplus' error numbers (`assembly/avm2/abc/constants.ts`) so rejections match
-  avmshell.
+- Indices are `u32`, not `usize`, so that a native build reads the tables
+  as the wasm does. Wrapping arithmetic that the output depends on is
+  written as such (`+%`, `*%`); anything else that overflows is a bug.
+- Memory is arenas (`src/memory.zig`): one a call, given back as the next
+  call starts, and one a domain (`Box`, `src/compile.zig`). Allocate a
+  call's scratch from the call's arena and what outlives the call from the
+  domain's; nothing is freed one by one.
+- Running out of memory is `error.OutOfMemory` up to the export, which
+  leaves the domain as it was (`Change`, `src/avm2/link/domain.zig`) and
+  sets `codegenError()`. A row of the domain written in place is written
+  inside a Change, so that a rollback writes it back; the test builds check
+  this.
+- An index that comes from the input needs an explicit comparison that
+  rejects it with avmplus' error (`src/avm2/abc/constants.zig`), so that
+  rejections match avmshell; a panic on malformed input is a bug, found by
+  the fuzzers.
+- Each file's tests are at its end, run natively by `zig build test`
+  (`node packages/codegen/zig/build.ts --update` runs them). The 0xAA
+  build (`dist-test/testing-poison.wasm`) fills freed and rolled-back
+  memory, and must give the same output.
+- `AS QUIRK, KEPT AS IS` marks behaviour copied from the AssemblyScript
+  compiler this one replaced, which the generated code depends on; it
+  changes only with the golden digests. Comments that name
+  `assembly/...` mean that compiler's files, at the tag `zig-last-parity`.
+- Only digests of the wasm are checked in (`packages/codegen/zig/digests.json`);
+  `node packages/codegen/zig/build.ts --update` after a change to the Zig
+  sources writes them, and CI builds the wasm again and compares.
 
 ## Git
 

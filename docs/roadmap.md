@@ -7,7 +7,7 @@ links; how much of AS3 and Flash's behaviour it matches, in
 
 ## Where it stands
 
-- **The compiler** (`codegen`, AssemblyScript to `codegen.wasm`) parses,
+- **The compiler** (`codegen`, Zig to `codegen.wasm`) parses,
   links and verifies ABCs with avmplus' VerifyErrors, and compiles them
   to ES modules, structured where the control flow allows, the same in
   the browser as ahead of time. It compiles AVM1 action blocks to

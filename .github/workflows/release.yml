@@ -39,6 +39,8 @@ jobs:
             exit 1
           fi
       - uses: ./.github/actions/setup
+      # codegen.wasm built again with fresh caches, and held to its digests, before it ships.
+      - run: node packages/codegen/zig/build.ts --verify
       - run: node tests/packages/run.ts
       # Trusted publishing needs npm 11.5.1 or later; Node 24's own may be older.
       - run: npm install --global npm@^11.5.1

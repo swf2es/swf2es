@@ -5,13 +5,13 @@
 avmplus checks an ABC in three places, and swf2es checks it in the same
 three, with the same VerifyError numbers:
 
-1. **Parsing** (`codegen/assembly/avm2/abc`): everything avmplus rejects while
+1. **Parsing** (`codegen/zig/src/avm2/abc`): everything avmplus rejects while
    parsing that one ABC can decide on its own: counts, pool indices, trait
    kinds and names, class order, a method bound to two owners.
 2. **Linking**, when classes are defined: anything that needs classes from
    other ABCs or playerglobal, such as base classes, interfaces, overrides
    and name clashes.
-   The ABCs loaded together form a domain (`codegen/assembly/avm2/link`), which
+   The ABCs loaded together form a domain (`codegen/zig/src/avm2/link`), which
    interns strings and namespaces across them and finds script definitions
    by qualified name. Builtin ABCs mark their namespace URIs with the API
    version that introduced a name; as in avmplus, user code sees the names

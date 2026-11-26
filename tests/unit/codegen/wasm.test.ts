@@ -21,6 +21,16 @@ test("codegen.wasm imports nothing but abort", () => {
   );
 });
 
+test("createCodegen reads the build's identity, which caches key its modules by", async () => {
+  const codegen = await createCodegen(module);
+  assert.match(codegen.identity ?? "", /^[0-9a-f]{64}$/);
+  assert.deepEqual(codegen.abcVersion(Uint8Array.of(16, 0, 46, 0)), { major: 46, minor: 16 });
+  codegen.reset();
+  assert.equal(codegen.add(new Uint8Array(0)), 1107);
+  // The wrapper counts the reset; the domain has no ABC, log entry or rebuild.
+  assert.equal(codegen.revision(), "1 0 0 0");
+});
+
 test("wrapper and wasm agree on the compiler version", async () => {
   await createCodegen(module); // throws on a mismatch
 });
@@ -341,12 +351,11 @@ test("a module's source map and entries are written when asked for, from it alon
 test("a module written a part at a time is the module written whole", { skip }, async () => {
   const builtin = new Uint8Array(await readFile(new URL("builtin.abc", generated)));
   const utf8 = new TextDecoder();
-  // Its parts, each next one asked for until it is done, garbage collected
-  // at every cut as the wrapper collects it.
+  // Its parts, each next one asked for until it is done, each call giving
+  // the last one's arena back.
   const parts = (hashes: string, index: number, keep: boolean) => {
     const got = [utf8.decode(testing.domainModuleBytes(hashes, index, keep, false))];
     while (!testing.domainModuleDone()) {
-      testing.__collect();
       got.push(utf8.decode(testing.domainModuleMoreBytes()));
     }
 

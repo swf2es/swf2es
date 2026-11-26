@@ -537,7 +537,7 @@ test("a method with a long name is named without the memory growing with it", {
       ],
     }),
   );
-  const fresh = await loadTesting("dist-test");
+  const fresh = await loadTesting("testing");
   fresh.domainReset(50);
   fresh.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
   fresh.domainModule("");

@@ -6,7 +6,7 @@
 //   - in an instance of their own (the reference);
 //   - in one instance, after all the SWFs before them;
 //   - in one instance, in the reverse order, each SWF twice in a row;
-//   - in the build that checks every array access;
+//   - in the build that fills freed and rolled-back memory with 0xAA;
 //   - in the release build, codegen.wasm, through the package's API;
 //
 // then each block alone, in order with a new emitter each, and in the
@@ -23,7 +23,7 @@ import { Avm1Assembler, constant, register, Simple } from "../avm1-assembler.ts"
 import { backwardActions, unitActions } from "../avm1-backward.ts";
 import { testingInstances } from "../unit/codegen/testing-module.ts";
 
-interface Avm1Swf {
+export interface Avm1Swf {
   name: string;
   bytes: Uint8Array;
   version: number;
@@ -54,7 +54,7 @@ function assembled(name: string, version: number, blocks: Uint8Array[]): Avm1Swf
 }
 
 /** The tests' blocks: every action the emitter writes, nested regions, and malformed input. */
-function testBlocks(): Uint8Array[] {
+export function testBlocks(): Uint8Array[] {
   const asm = () => new Avm1Assembler();
   const body = asm().push("body").trace().bytes();
   // A With whose body jumps back before the With, opening it again.
@@ -243,15 +243,14 @@ function parseEntries(text: string): Map<number, string> {
 
 const utf8 = new TextDecoder();
 
-/** The SWFs compared in every way: how many, how many blocks, and how many differ. */
-export async function avm1Determinism(): Promise<{
-  swfs: number;
-  blocks: number;
-  units: number;
-  differences: number;
-}> {
+/**
+ * The AVM1 SWFs there are: the tests' blocks as SWFs of three versions,
+ * code before a block, and, where `corpus`, the corpus's, where it was
+ * fetched. tests/golden digests them without the corpus.
+ */
+export function avm1Swfs(corpus = true): Avm1Swf[] {
   const tests = testBlocks();
-  const swfs = [
+  return [
     assembled("the tests' blocks, SWF 4", 4, tests),
     assembled("the tests' blocks, SWF 5", 5, tests),
     assembled("the tests' blocks, SWF 10", 10, tests),
@@ -271,8 +270,18 @@ export async function avm1Determinism(): Promise<{
         lengths: Int32Array.of(offset, bytes.length - offset),
       })),
     ),
-    ...corpusSwfs(),
+    ...(corpus ? corpusSwfs() : []),
   ];
+}
+
+/** The SWFs compared in every way: how many, how many blocks, and how many differ. */
+export async function avm1Determinism(): Promise<{
+  swfs: number;
+  blocks: number;
+  units: number;
+  differences: number;
+}> {
+  const swfs = avm1Swfs();
   let differences = 0;
   const differ = (swf: Avm1Swf, way: string, got: string, want: string) => {
     if (got === want) {
@@ -291,11 +300,11 @@ export async function avm1Determinism(): Promise<{
     console.log(`  got:  ${(a[line] ?? "(end)").slice(0, 160)}`);
     console.log(`  want: ${(b[line] ?? "(end)").slice(0, 160)}`);
   };
-  // biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+  // biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
   const module = (testing: any, swf: Avm1Swf, keep = false) =>
     utf8.decode(testing.actionsModuleBytes(swf.bytes, swf.offsets, swf.lengths, swf.version, keep));
 
-  const fresh = await testingInstances("dist-test");
+  const fresh = await testingInstances("testing");
   const reference = new Map<Avm1Swf, string>();
   const entries = new Map<Avm1Swf, Map<number, string>>();
   const units = new Map<Avm1Swf, Map<string, { numbers: number[]; unit: string }>>();
@@ -318,7 +327,7 @@ export async function avm1Determinism(): Promise<{
     fresh,
     [...swfs].reverse().flatMap((s) => [s, s]),
   );
-  await oneInstance("in the checked build", await testingInstances("dist-test-checked"), swfs);
+  await oneInstance("in the poison build", await testingInstances("testing-poison"), swfs);
 
   const wasm = new URL("../../packages/codegen/dist/codegen.wasm", import.meta.url);
   const codegen = await createCodegen(await WebAssembly.compile(readFileSync(wasm)));

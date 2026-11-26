@@ -1,9 +1,9 @@
-// Fuzzes codegen's AVM1 decoder and flow (packages/codegen/assembly/avm1/)
+// Fuzzes codegen's AVM1 decoder and flow (packages/codegen/zig/src/avm1/)
 // with random and mutated action blocks. The JIT decodes whatever a SWF
 // holds, so for any bytes the decoder must finish without trapping: a trap
 // kills the wasm instance. For each case,
 //
-//   - the decoder did not trap (with SWF2ES_CHECKED, nor read past an array);
+//   - the decoder did not trap (with SWF2ES_CHECKED, on the 0xAA build);
 //   - each region lists an action at most once among its blocks;
 //   - the block decodes to the same regions again, after other blocks, as
 //     the JIT/AOT invariant asks (docs/architecture/overview.md);
@@ -20,7 +20,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { loadTesting } from "../unit/codegen/testing-module.ts";
+import { loadTesting, TESTED } from "../unit/codegen/testing-module.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
@@ -232,8 +232,7 @@ function mutate(block: number[]): Uint8Array {
 }
 
 const seeds = [...edges(), ...Array.from({ length: 64 }, () => actions(1 + below(40), 3))];
-const build = process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test";
-let testing = await loadTesting(build);
+let testing = await loadTesting(TESTED);
 const failures: string[] = [];
 let tooLarge = 0;
 let slowest = { ms: 0, at: -1 };
@@ -350,7 +349,7 @@ for (let k = 0; k < caseCount; k++) {
   } catch (e) {
     // A trap leaves the instance unusable: start a new one.
     fail(block, `the compiler trapped (${(e as Error).message})`);
-    testing = await loadTesting(build);
+    testing = await loadTesting(TESTED);
     previous = null;
   } finally {
     const ms = performance.now() - t0;
