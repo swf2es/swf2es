@@ -198,6 +198,8 @@ pub fn memorySize() u64 {
 
 /// What wantsRebuild is asked. The host asks the first four by number
 /// (index.ts's WANT_* constants, which a unit test holds to these).
+// tests/unit/codegen/zig.test.ts reads this enum with a regex: keep it one
+// `name = value,` a line, with no braces in its comments.
 pub const Want = enum(u8) {
     /// A rebuild in place, with no spare instance.
     in_place = 0,
