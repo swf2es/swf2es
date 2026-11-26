@@ -7,7 +7,6 @@ const std = @import("std");
 const Error = std.mem.Allocator.Error;
 const ops = @import("../abc/opcodes.zig");
 const ir_ = @import("../ir/ir.zig");
-const TYPE_Any = @import("../link/traits.zig").TYPE_Any;
 const copies = @import("copies.zig");
 const CONSTANT = copies.CONSTANT;
 const NONE = copies.NONE;
@@ -20,8 +19,8 @@ const values = @import("values.zig");
 const IrOp = @import("../ir/ir.zig").Op;
 
 fn floatArithmetic(em: *const MethodEmitter, i: u32) bool {
-    const ty = em.ir.type[i];
-    return em.abc.hasFloatSupport() and (ty == TYPE_Any or ty == em.domain.floatType);
+    const ty = ir_.columnType(em.ir.type[i]);
+    return em.abc.hasFloatSupport() and (ty == .any or ty == em.domain.floatType);
 }
 
 fn move(em: *MethodEmitter, i: u32, src: i32) Error!void {

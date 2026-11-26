@@ -6,10 +6,13 @@
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
 const traits_ = @import("../link/traits.zig");
-const TYPE_Any = traits_.TYPE_Any;
+const TypeId = traits_.TypeId;
 const MethodEmitter = @import("method.zig").MethodEmitter;
 const refs = @import("refs.zig");
-const IrOp = @import("../ir/ir.zig").Op;
+const ir_ = @import("../ir/ir.zig");
+const columnType = ir_.columnType;
+const typeColumn = ir_.typeColumn;
+const IrOp = ir_.Op;
 
 /// No type: a conversion, convert_s or convert_o, that always calls the runtime.
 pub const CONVERTS: i32 = -2;
@@ -77,9 +80,9 @@ pub fn compare(em: *MethodEmitter, i: u32, op: IrOp, not: bool) Error!void {
 /// Whether register r holds null or an object that AS3's == compares by
 /// identity (AvmCore::equals; values.ts tells which).
 fn byIdentity(em: *MethodEmitter, r: i32) bool {
-    const ty = em.regType[@intCast(r)];
+    const ty = columnType(em.regType[@intCast(r)]);
     const domain = em.domain;
-    if (ty < 0) {
+    if (!ty.isTraits()) {
         return false;
     }
 
@@ -91,7 +94,7 @@ fn byIdentity(em: *MethodEmitter, r: i32) bool {
         return false;
     }
 
-    const kind = domain.traits.kind.get(@intCast(ty));
+    const kind = domain.traits.kind.get(ty.index());
     return kind == .instance or kind == .class;
 }
 
@@ -133,7 +136,7 @@ pub fn wraps(em: *MethodEmitter, i: u32) bool {
     return switch (ir.op[next]) {
         .convert_i, .coerce_i, .convert_u, .coerce_u => true,
         .ir_coerce => blk: {
-            const bt = em.domain.builtin(ir.c[next]);
+            const bt = em.domain.builtin(columnType(ir.c[next]));
             break :blk bt == .int or bt == .uint;
         },
         else => false,
@@ -198,7 +201,7 @@ pub fn branch(em: *MethodEmitter, i: u32, op: IrOp) Error!void {
 /// The type a conversion instruction gives, or CONVERTS for one that always calls the runtime.
 pub fn conversionType(em: *MethodEmitter, op: IrOp, i: u32) i32 {
     const domain = em.domain;
-    return switch (op) {
+    const ty: TypeId = switch (op) {
         .convert_i, .coerce_i => domain.intType,
         .convert_u, .coerce_u => domain.uintType,
         .convert_f => domain.floatType,
@@ -206,10 +209,11 @@ pub fn conversionType(em: *MethodEmitter, op: IrOp, i: u32) i32 {
         .convert_b, .coerce_b => domain.booleanType,
         .coerce_s => domain.stringType,
         .coerce_o => domain.objectType(),
-        .coerce => em.ir.c[i],
-        .coerce_a => TYPE_Any,
-        else => CONVERTS,
+        .coerce => return em.ir.c[i],
+        .coerce_a => .any,
+        else => return CONVERTS,
     };
+    return typeColumn(ty);
 }
 
 /// Whether converting a value of type `from` to `type` gives the value itself, as convert writes no code for.
@@ -219,8 +223,8 @@ pub fn keeps(em: *MethodEmitter, ty: i32, from: i32) Error!bool {
     }
 
     const domain = em.domain;
-    const bt = domain.builtin(ty);
-    const fromBt = domain.builtin(from);
+    const bt = domain.builtin(columnType(ty));
+    const fromBt = domain.builtin(columnType(from));
     return ty == from or
         bt == .any or
         (bt == .number and (fromBt == .int or fromBt == .uint or fromBt == .number)) or
@@ -237,11 +241,11 @@ fn upcast(em: *MethodEmitter, ty: i32, from: i32) Error!bool {
 
 /// Whether a value of type `from` is null, which converting to `type` keeps.
 fn nullStays(em: *MethodEmitter, ty: i32, from: i32) bool {
-    if (from < 0 or from != em.domain.nullType) {
+    if (!columnType(from).isBuiltin(em.domain.nullType)) {
         return false;
     }
 
-    const bt = em.domain.builtin(ty);
+    const bt = em.domain.builtin(columnType(ty));
     return bt == .string or bt == .object or refs.isClassRef(em, ty);
 }
 
@@ -251,24 +255,24 @@ pub fn conversion(em: *MethodEmitter, i: u32, op: IrOp, unboxed: bool) Error!voi
     const s = em.ir.src[i];
     const from = em.regType[@intCast(s)];
     switch (op) {
-        .convert_i, .coerce_i => try convert(em, "", s, domain.intType, from, false),
-        .convert_u, .coerce_u => try convert(em, "", s, domain.uintType, from, false),
-        .convert_f => try convert(em, "", s, domain.floatType, from, unboxed),
-        .convert_d, .coerce_d => try convert(em, "", s, domain.numberType, from, false),
-        .convert_b, .coerce_b => try convert(em, "", s, domain.booleanType, from, false),
+        .convert_i, .coerce_i => try convert(em, "", s, typeColumn(domain.intType), from, false),
+        .convert_u, .coerce_u => try convert(em, "", s, typeColumn(domain.uintType), from, false),
+        .convert_f => try convert(em, "", s, typeColumn(domain.floatType), from, unboxed),
+        .convert_d, .coerce_d => try convert(em, "", s, typeColumn(domain.numberType), from, false),
+        .convert_b, .coerce_b => try convert(em, "", s, typeColumn(domain.booleanType), from, false),
         .convert_s => {
             // Unlike coerce_s, null and undefined become "null" and "undefined".
             try em.out.text("rt.toString(");
             try em.reg(s);
             try em.out.text(")");
         },
-        .coerce_s => try convert(em, "", s, domain.stringType, from, false),
+        .coerce_s => try convert(em, "", s, typeColumn(domain.stringType), from, false),
         .convert_o => {
             try em.out.text("rt.toObject(");
             try em.reg(s);
             try em.out.text(")");
         },
-        .coerce_o => try convert(em, "", s, domain.objectType(), from, false),
+        .coerce_o => try convert(em, "", s, typeColumn(domain.objectType()), from, false),
         .coerce => try convert(em, "", s, em.ir.c[i], from, unboxed),
         else => try em.reg(s),
     }
@@ -280,8 +284,8 @@ pub fn conversion(em: *MethodEmitter, i: u32, op: IrOp, unboxed: bool) Error!voi
 pub fn convert(em: *MethodEmitter, prefix: []const u8, r: i32, ty: i32, from: i32, unboxed: bool) Error!void {
     const out = &em.out;
     const domain = em.domain;
-    const bt = domain.builtin(ty);
-    const fromBt = domain.builtin(from);
+    const bt = domain.builtin(columnType(ty));
+    const fromBt = domain.builtin(columnType(from));
     if (prefix.len == 0 and fromBt == .float) {
         switch (bt) {
             .float => if (unboxed) {

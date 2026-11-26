@@ -17,6 +17,7 @@ const code = @import("../abc/code.zig");
 const BodyDecoder = code.BodyDecoder;
 const Verifier = code.Verifier;
 const C = @import("../abc/constants.zig");
+const ir_ = @import("../ir/ir.zig");
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
@@ -458,7 +459,7 @@ pub const ModuleEmitter = struct {
         for (types, 0..) |t, k| {
             try o.text(if (k != 0) ", " else "");
             if (t >= 0) {
-                try refs.typeExpr(methods, t);
+                try refs.typeExpr(methods, ir_.columnType(t));
                 continue;
             }
 
@@ -1028,7 +1029,7 @@ pub const ModuleEmitter = struct {
 
                 const name = table.memberName.get(m);
                 const version = table.memberVersion.get(m);
-                const b = table.find(@intCast(t), ns, name, version);
+                const b = table.find(.of(t), ns, name, version);
                 if (b.kind != .method) {
                     continue;
                 }

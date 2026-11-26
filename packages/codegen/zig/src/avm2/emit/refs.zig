@@ -8,12 +8,14 @@ const Error = Allocator.Error;
 const output = @import("../../output.zig");
 const Output = output.Output;
 const C = @import("../abc/constants.zig");
+const ir_ = @import("../ir/ir.zig");
+const columnType = ir_.columnType;
 const Value = @import("../abc/pool.zig").Value;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
 const TraitsTable = traits_.TraitsTable;
-const TYPE_Any = traits_.TYPE_Any;
+const TypeId = traits_.TypeId;
 const MethodEmitter = @import("method.zig").MethodEmitter;
 
 /// The first slot an object keeps in its array `$S` rather than in a
@@ -35,19 +37,20 @@ pub fn slotMember(out: *Output, slot: u32) Error!void {
 
 /// Whether typeRef writes type t as T[k], a class's instances; else a literal.
 pub fn isClassRef(e: *MethodEmitter, t: i32) bool {
+    const ty = columnType(t);
     // What typeExpr writes as a literal stays one.
-    const bt = if (t < 0) .any else e.domain.builtin(t);
-    return t >= 0 and
+    const bt = if (!ty.isTraits()) .any else e.domain.builtin(ty);
+    return ty.isTraits() and
         (bt == .other or bt == .namespace) and
-        t != e.domain.voidType and
-        e.domain.traits.kind.get(@intCast(t)) == .instance;
+        ty != e.domain.voidType and
+        e.domain.traits.kind.get(ty.index()) == .instance;
 }
 
 /// Type t in a method: an entry of the module's table T for a class or
 /// Vector; the builtin types, and * as null, as they are.
 pub fn typeRef(e: *MethodEmitter, t: i32) Error!void {
     if (!isClassRef(e, t)) {
-        return typeExpr(e, t);
+        return typeExpr(e, columnType(t));
     }
 
     try e.out.text("T[");
@@ -60,14 +63,14 @@ pub fn typeRef(e: *MethodEmitter, t: i32) Error!void {
 /// cls(namespace, "Name") for a class, rt.vector(type) for Vector.<T>.
 /// AssemblyScript recurses into a Vector's element type, as deep as the
 /// input's TypeNames nest; this counts the levels.
-pub fn typeExpr(e: *MethodEmitter, type_: i32) Error!void {
+pub fn typeExpr(e: *MethodEmitter, type_: TypeId) Error!void {
     const out = &e.out;
     const domain = e.domain;
     const traits = &domain.traits;
     var t = type_;
     var vectors: u32 = 0;
     while (true) {
-        if (t < 0) {
+        if (!t.isTraits()) {
             try out.text("null");
             break;
         }
@@ -87,12 +90,12 @@ pub fn typeExpr(e: *MethodEmitter, type_: i32) Error!void {
             break;
         }
 
-        const u: u32 = @intCast(t);
+        const u = t.index();
         if (t == domain.voidType) {
             try out.text("\"void\"");
         } else if (traits.kind.get(u) != .instance) {
             try out.text("null");
-        } else if (traits.param.get(u) != TYPE_Any) {
+        } else if (traits.param.get(u) != .any) {
             try out.text("rt.vector(");
             vectors += 1;
             t = traits.param.get(u);
@@ -248,7 +251,7 @@ pub fn poolString(e: *MethodEmitter, index: u32) Error!void {
 
 /// A constant of default-value kind `kind`, index `value`, for a slot or
 /// parameter of `type`; value 0 is the type's own default.
-pub fn constant(e: *MethodEmitter, value: u32, kind: C.Constant, type_: i32) Error!void {
+pub fn constant(e: *MethodEmitter, value: u32, kind: C.Constant, type_: TypeId) Error!void {
     const out = &e.out;
     const pool = &e.abc.pool;
     if (kind == .float and e.abc.hasFloatSupport()) {
@@ -270,9 +273,9 @@ pub fn constant(e: *MethodEmitter, value: u32, kind: C.Constant, type_: i32) Err
         return defaultOf(e, type_);
     }
 
-    if (type_ >= 0 and type_ == e.domain.floatType and kind != .float) {
+    if (type_.isBuiltin(e.domain.floatType) and kind != .float) {
         try out.text("rt.float(");
-        try constant(e, value, kind, TYPE_Any);
+        try constant(e, value, kind, .any);
         try out.text(")");
         return;
     }
@@ -298,7 +301,7 @@ pub fn constant(e: *MethodEmitter, value: u32, kind: C.Constant, type_: i32) Err
 }
 
 /// The value a slot or parameter of `type` has before anything is stored.
-fn defaultOf(e: *MethodEmitter, type_: i32) Error!void {
+fn defaultOf(e: *MethodEmitter, type_: TypeId) Error!void {
     const out = &e.out;
     try out.text(switch (e.domain.builtin(type_)) {
         .any => "void 0",

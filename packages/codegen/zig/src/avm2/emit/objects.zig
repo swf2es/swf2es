@@ -7,6 +7,8 @@
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
 const ir_ = @import("../ir/ir.zig");
+const columnType = ir_.columnType;
+const typeColumn = ir_.typeColumn;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
@@ -28,7 +30,7 @@ fn u(r: i32) usize {
 
 /// Whether register r may hold XML or an XMLList: untyped, Object, or either.
 fn mayBeXml(em: *const MethodEmitter, r: i32) bool {
-    const ty = em.regType[u(r)];
+    const ty = columnType(em.regType[u(r)]);
     const bt = em.domain.builtin(ty);
     return bt == .any or
         bt == .object or
@@ -51,7 +53,7 @@ fn notesDxns(em: *MethodEmitter, op: IrOp, src: i32) void {
             }
         },
         .call => {
-            if (mayBeXml(em, src) or em.regType[u(src)] == em.domain.classType) {
+            if (mayBeXml(em, src) or columnType(em.regType[u(src)]) == em.domain.classType) {
                 em.seesDxns = true;
             }
         },
@@ -834,9 +836,10 @@ fn name(em: *MethodEmitter, a: u32, from: i32) Error!void {
 const Kind = enum { none, Int, Uint, Double, Float, Object };
 
 /// The kind of Vector type t's elements.
-fn vectorKind(em: *MethodEmitter, t: i32) Error!Kind {
+fn vectorKind(em: *MethodEmitter, type_: i32) Error!Kind {
     const domain = em.domain;
-    if (t < 0) {
+    const t = columnType(type_);
+    if (!t.isTraits()) {
         return .none;
     }
 
@@ -852,12 +855,12 @@ fn vectorKind(em: *MethodEmitter, t: i32) Error!Kind {
         return .Double;
     }
 
-    if (domain.floatType >= 0 and domain.traits.param.get(@intCast(t)) == domain.floatType) {
+    if (domain.traits.param.get(t.index()).isBuiltin(domain.floatType)) {
         return .Float;
     }
 
-    const object_ = domain.vectorObjectType >= 0 and
-        try domain.traits.subtypeOf(em.gpa, @intCast(t), @intCast(domain.vectorObjectType));
+    const object_ = domain.vectorObjectType != .any and
+        try domain.traits.subtypeOf(em.gpa, t.index(), domain.vectorObjectType.index());
     return if (object_) .Object else .none;
 }
 
@@ -883,7 +886,7 @@ fn stringIs(domain: *const Domain, id: u32, text: []const u8) bool {
 /// AS3::charCodeAt with no argument or a number; else "" (objects.ts tells why).
 fn stringMethod(em: *MethodEmitter, ty: i32, disp: u32, src: i32, argc: u32) []const u8 {
     const domain = em.domain;
-    if (ty != domain.stringType or argc > 1 or (argc == 1 and !values.isNumber(em, src + 1))) {
+    if (columnType(ty) != domain.stringType or argc > 1 or (argc == 1 and !values.isNumber(em, src + 1))) {
         return "";
     }
 
@@ -953,23 +956,23 @@ fn vectorElements(em: *MethodEmitter, a: u32, kind: Kind) bool {
 /// conversion runs no AS3; else CONVERTS (objects.ts tells why).
 fn storedType(em: *MethodEmitter, kind: Kind, src: i32) Error!i32 {
     const domain = em.domain;
-    const t = em.regType[u(src)];
+    const t = columnType(em.regType[u(src)]);
     const ty: i32 = switch (kind) {
-        .Int => domain.intType,
-        .Uint => domain.uintType,
-        .Double => domain.numberType,
-        .Object => if (t != domain.vectorObjectType) domain.traits.param.get(@intCast(t)) else CONVERTS,
+        .Int => typeColumn(domain.intType),
+        .Uint => typeColumn(domain.uintType),
+        .Double => typeColumn(domain.numberType),
+        .Object => if (t != domain.vectorObjectType) typeColumn(domain.traits.param.get(t.index())) else CONVERTS,
         else => CONVERTS,
     };
 
     const from = em.regType[u(src + 2)];
-    const fromBt = domain.builtin(from);
+    const fromBt = domain.builtin(columnType(from));
     if (ty == CONVERTS or fromBt == .float) {
         return CONVERTS;
     }
 
     const numeric = fromBt == .int or fromBt == .uint or fromBt == .number;
-    return switch (domain.builtin(ty)) {
+    return switch (domain.builtin(columnType(ty))) {
         .int, .uint => if (numeric or fromBt == .boolean) ty else CONVERTS,
         .number => if (numeric) ty else CONVERTS,
         .boolean, .object => ty,
@@ -1011,10 +1014,10 @@ fn keyed(em: *MethodEmitter, a: u32, r: i32) bool {
 /// class that extends it, and a public namespace in the set.
 fn arrayElements(em: *MethodEmitter, a: u32, r: i32) Error!bool {
     const domain = em.domain;
-    const t = em.regType[u(r)];
-    return t >= 0 and
-        domain.arrayType >= 0 and
-        try domain.traits.subtypeOf(em.gpa, @intCast(t), @intCast(domain.arrayType)) and
+    const t = columnType(em.regType[u(r)]);
+    return t.isTraits() and
+        domain.arrayType != .any and
+        try domain.traits.subtypeOf(em.gpa, t.index(), domain.arrayType.index()) and
         domain.hasPublicNamespace(em.index, a);
 }
 
@@ -1061,7 +1064,7 @@ fn constructSlot(em: *MethodEmitter, src: i32, slot: u32, argc: u32, ctraits: i3
         for (0..argc) |k| {
             const r = src + 1 + @as(i32, @intCast(k));
             try out.text(", ");
-            try values.convert(em, "", r, traits.paramType.get(start + @as(u32, @intCast(k))), em.regType[u(r)], false);
+            try values.convert(em, "", r, typeColumn(traits.paramType.get(start + @as(u32, @intCast(k)))), em.regType[u(r)], false);
         }
     } else {
         try out.text("$init.call($o");
@@ -1103,8 +1106,8 @@ fn boundConstructor(em: *MethodEmitter, ctraits: i32, argc: u32) i32 {
 fn knownConstructor(em: *MethodEmitter, ctraits: i32, argc: u32) i32 {
     const domain = em.domain;
     const traits = &domain.traits;
-    const itraits = domain.instanceTraitsOf(ctraits);
-    const init = if (itraits >= 0) traits.init.get(@intCast(itraits)) else -1;
+    const itraits = domain.instanceTraitsOf(columnType(ctraits));
+    const init = if (itraits.isTraits()) traits.init.get(itraits.index()) else -1;
     if (init < 0 or traits.signed.get(@intCast(init)) == 0) {
         return -1;
     }
@@ -1168,7 +1171,8 @@ fn virtual(em: *MethodEmitter, disp: u32, src: i32, argc: u32, m: i32) Error!voi
     const out = &em.out;
     const ty = em.regType[u(src)];
     // XML's methods look names up in the default XML namespace.
-    if (ty == em.domain.xmlType or ty == em.domain.xmlListType) {
+    const t = columnType(ty);
+    if (t == em.domain.xmlType or t == em.domain.xmlListType) {
         em.seesDxns = true;
     }
 

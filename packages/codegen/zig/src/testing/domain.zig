@@ -146,7 +146,7 @@ pub fn domainResolve(dom: *Domain, first: i32) Allocator.Error!i32 {
 /// The builtin types the domain found, as traits ids.
 pub fn domainBuiltins(gpa: Allocator) Allocator.Error![]const u8 {
     const d = try compile.domain();
-    return std.fmt.allocPrint(gpa, "object {d} class {d} void {d} null {d} number {d} int {d} uint {d} boolean {d} string {d} namespace {d} vector {d} vectorObject {d} vectorInt {d} vectorUint {d} vectorDouble {d}", .{ d.objectType(), d.classClass, d.voidType, d.nullType, d.numberType, d.intType, d.uintType, d.booleanType, d.stringType, d.namespaceType, d.vectorClass, d.vectorObjectType, d.vectorIntType, d.vectorUintType, d.vectorDoubleType });
+    return std.fmt.allocPrint(gpa, "object {d} class {d} void {d} null {d} number {d} int {d} uint {d} boolean {d} string {d} namespace {d} vector {d} vectorObject {d} vectorInt {d} vectorUint {d} vectorDouble {d}", .{ @backingInt(d.objectType()), d.classClass, @backingInt(d.voidType), @backingInt(d.nullType), @backingInt(d.numberType), @backingInt(d.intType), @backingInt(d.uintType), @backingInt(d.booleanType), @backingInt(d.stringType), @backingInt(d.namespaceType), d.vectorClass, @backingInt(d.vectorObjectType), @backingInt(d.vectorIntType), @backingInt(d.vectorUintType), @backingInt(d.vectorDoubleType) });
 }
 
 /// The slot types of the instances of class `cls` of ABC `index`, resolving
@@ -176,10 +176,10 @@ pub fn domainSlotTypes(dom: *Domain, gpa: Allocator, index: i32, cls: i32) Alloc
         }
 
         const ty = traits.slotType.get(start + @as(u32, @intCast(s)));
-        if (ty < 0) {
+        if (!ty.isTraits()) {
             try out.append(gpa, '*');
         } else {
-            try out.print(gpa, "abc {d} class {d}", .{ traits.abc.get(@intCast(ty)), traits.owner.get(@intCast(ty)) });
+            try out.print(gpa, "abc {d} class {d}", .{ traits.abc.get(ty.index()), traits.owner.get(ty.index()) });
         }
     }
 
@@ -542,12 +542,12 @@ fn irName(op: IrOp) []const u8 {
 /// this counts the levels).
 fn writeType(w: *std.Io.Writer, dom: *const Domain, ty: i32, notNull: u8) std.Io.Writer.Error!void {
     const traits = &dom.traits;
-    var t = ty;
+    var t = ir_.columnType(ty);
     var vectors: u32 = 0;
-    while (t >= 0) {
-        const u: u32 = @intCast(t);
+    while (t.isTraits()) {
+        const u = t.index();
         const kind = traits.kind.get(u);
-        const isVector = traits.param.get(u) != -1 or
+        const isVector = traits.param.get(u) != .any or
             (kind == .instance and traits.first.get(u) == traits.end.get(u) and
                 // No base reads as *, as an absent Vector.<*> does.
                 traits.base.get(u).orAny() == dom.vectorObjectType and t != dom.vectorObjectType);
@@ -560,10 +560,10 @@ fn writeType(w: *std.Io.Writer, dom: *const Domain, ty: i32, notNull: u8) std.Io
         t = traits.param.get(u);
     }
 
-    if (t < 0) {
+    if (!t.isTraits()) {
         try w.writeByte('*');
     } else {
-        const u: u32 = @intCast(t);
+        const u = t.index();
         switch (traits.kind.get(u)) {
             .void => try w.writeAll("void"),
             .null => try w.writeAll("null"),
