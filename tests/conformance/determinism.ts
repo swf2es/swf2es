@@ -5,7 +5,7 @@
 //   - in an instance of its own (the reference);
 //   - in one instance, after all the chains before it;
 //   - in one instance, in the reverse order, each chain twice in a row;
-//   - in the build that checks every array access;
+//   - in the build that fills freed and rolled-back memory with 0xAA;
 //   - a part at a time, cut at every body, as the wrapper asks for a
 //     large module (ModuleEmitter.step);
 //   - in the release build, codegen.wasm, through the package's API, as the

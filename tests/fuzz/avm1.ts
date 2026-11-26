@@ -3,7 +3,7 @@
 // holds, so for any bytes the decoder must finish without trapping: a trap
 // kills the wasm instance. For each case,
 //
-//   - the decoder did not trap (with SWF2ES_CHECKED, nor read past an array);
+//   - the decoder did not trap (with SWF2ES_CHECKED, on the 0xAA build);
 //   - each region lists an action at most once among its blocks;
 //   - the block decodes to the same regions again, after other blocks, as
 //     the JIT/AOT invariant asks (docs/architecture/overview.md);

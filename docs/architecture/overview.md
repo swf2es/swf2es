@@ -56,7 +56,7 @@ to 256 MiB. All go through
 the reader, verifier and emitter exposed for the node tests by its parts in
 `zig/src/testing/`) exports too,
 so the tests exercise the code that ships, and the determinism check
-compiles every chain through both builds.
+compiles every chain through the test builds and the release build.
 
 ## The JIT/AOT invariant
 
@@ -93,9 +93,9 @@ over the builtins, then each conformance case (also compiled with asc's
 
 - **Determinism:** each compiles to the same modules and source maps, byte
   for byte, in a compiler instance of its own, in one instance after the
-  others, in the reverse order twice in a row, and in the build that checks
-  every array access, so that nothing the compiler keeps between calls,
-  such as its reused buffers, leaks into its output.
+  others, in the reverse order twice in a row, and in the build that fills
+  freed and rolled-back memory with 0xAA, so that nothing the compiler
+  keeps between calls, such as its reused buffers, leaks into its output.
 - **The JIT/AOT invariant:** each method compiled alone (the test build's
   `domainEmitEach`) is byte for byte its entry in its module: in order with
   a new emitter each, and in the reverse order with one emitter for all,

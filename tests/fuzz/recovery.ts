@@ -22,6 +22,7 @@ const { classes, mn, METHOD, GETTER, SLOT, OVERRIDE } = await import(
 );
 const { script } = await import(`${TREE}/tests/unit/codegen/ir-cases.ts`);
 const { linkAbcs } = await import(`${TREE}/tests/unit/codegen/link-abc.ts`);
+const { TESTED, testingModule } = await import(`${TREE}/tests/unit/codegen/testing-module.ts`);
 
 const seeds = Number(process.argv[2] ?? 20);
 const first = Number(process.argv[3] ?? 1);
@@ -30,9 +31,8 @@ const COMPACT = process.env.COMPACT === "1";
 const PANIC_RATE = Number(process.env.PANIC_RATE ?? 0.06);
 const VERBOSE = process.env.VERBOSE === "1";
 
-const module = await WebAssembly.compile(
-  readFileSync(`${TREE}/packages/codegen/dist-test/testing.wasm`),
-);
+// The 0xAA build under SWF2ES_CHECKED.
+const module = await testingModule(TESTED);
 const builtin = new Uint8Array(readFileSync(`${TREE}/oracle/avmplus/generated/builtin.abc`));
 
 // Every instance's exports, the ones a recovery makes too, with panics

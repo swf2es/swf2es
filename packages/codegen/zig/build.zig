@@ -122,7 +122,7 @@ pub fn build(b: *std.Build) void {
         .cpu_arch = .wasm32,
         .os_tag = .freestanding,
         .cpu_model = .{ .explicit = &std.Target.wasm.cpu.generic },
-        // As asc builds codegen.wasm: float-to-int conversions saturate rather than trap.
+        // Float-to-int conversions saturate rather than trap, as the generated code assumes.
         .cpu_features_add = std.Target.wasm.featureSet(&.{ .bulk_memory, .nontrapping_fptoint, .sign_ext, .mutable_globals }),
     });
 

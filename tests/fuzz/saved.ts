@@ -7,10 +7,13 @@
 import { fileURLToPath } from "node:url";
 
 const TREE = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
-const { bindTesting, testingModule } = await import(`${TREE}/tests/unit/codegen/testing-module.ts`);
+const { bindTesting, TESTED, testingModule } = await import(
+  `${TREE}/tests/unit/codegen/testing-module.ts`
+);
 const { linkAbcs } = await import(`${TREE}/tests/unit/codegen/link-abc.ts`);
 const { script } = await import(`${TREE}/tests/unit/codegen/ir-cases.ts`);
-const module = await testingModule("testing");
+// The 0xAA build under SWF2ES_CHECKED.
+const module = await testingModule(TESTED);
 const cases = Number(process.argv[2] ?? 2000);
 
 let seed = Number(process.argv[3] ?? 1);

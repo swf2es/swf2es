@@ -6,7 +6,7 @@
 //   - in an instance of their own (the reference);
 //   - in one instance, after all the SWFs before them;
 //   - in one instance, in the reverse order, each SWF twice in a row;
-//   - in the build that checks every array access;
+//   - in the build that fills freed and rolled-back memory with 0xAA;
 //   - in the release build, codegen.wasm, through the package's API;
 //
 // then each block alone, in order with a new emitter each, and in the
