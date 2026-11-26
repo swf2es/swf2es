@@ -6,7 +6,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const C = @import("../abc/constants.zig");
-const overridden = @import("bindings.zig").overridden;
+const bindings = @import("bindings.zig");
+const overridden = bindings.overridden;
+const SlotIds = bindings.SlotIds;
 const Domain = @import("domain.zig").Domain;
 const traits_ = @import("traits.zig");
 const Binding = traits_.Binding;
@@ -69,27 +71,14 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32, diag: 
     }
 
     const methods = dom.methodStart.get(index);
-    const early = traits.allowEarlyBinding(t);
-    var next = baseSlots;
+    var ids = SlotIds.init(traits, t);
     var i = traits.first.get(t);
     while (i < traits.end.get(t)) : (i += 1) {
         const tag = abc.traitTag[i];
         const kind = tag.kind;
         if (kind.bindsSlot()) {
-            const id = abc.traitId[i];
-            var slot: u32 = undefined;
-            if (id == 0 or !early) {
-                next +%= 1;
-                slot = next;
-            } else {
-                slot = id;
-                if (next < id) {
-                    next = id;
-                }
-            }
-
             // A slot defined twice would give one memory location two types.
-            slot -%= 1;
+            const slot = ids.next(abc.traitId[i]);
             if (slot >= slotCount or traits.slotSet.get(slots + slot) != 0) {
                 return diag.fail(C.kCorruptABCError);
             }
@@ -140,10 +129,8 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32, diag: 
 pub fn checkInitialValues(traits: *const TraitsTable, dom: *const Domain, t: u32, diag: *Diagnostics) errors.Rejected!void {
     const index = traits.abc.get(t);
     const abc = dom.abcs.get(index);
-    const early = traits.allowEarlyBinding(t);
-    const base = traits.base.get(t);
     const slots = traits.slotStart.get(t);
-    var next = if (base != .none) traits.slotCount.get(base.index()) else 0;
+    var ids = SlotIds.init(traits, t);
     var i = traits.first.get(t);
     while (i < traits.end.get(t)) : (i += 1) {
         const kind = abc.traitTag[i].kind;
@@ -151,19 +138,7 @@ pub fn checkInitialValues(traits: *const TraitsTable, dom: *const Domain, t: u32
             continue;
         }
 
-        const id = abc.traitId[i];
-        var slot: u32 = undefined;
-        if (id == 0 or !early) {
-            next +%= 1;
-            slot = next;
-        } else {
-            slot = id;
-            if (next < id) {
-                next = id;
-            }
-        }
-
-        const ty = traits.slotType.get(slots + slot - 1);
+        const ty = traits.slotType.get(slots + ids.next(abc.traitId[i]));
         const value = if (kind == .class) 0 else abc.traitValue[i];
         try dom.checkDefault(index, value, abc.traitValueKind[i], ty, diag);
     }

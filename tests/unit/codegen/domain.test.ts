@@ -578,6 +578,17 @@ test("a method that takes a slot's name leaves the slot its storage, in the modu
     );
     assert.ok(js.includes("fill: (o, v) => { o.$0 = 3; }"), `shape ${i}`);
   }
+
+  // With more slots than the method's dispatch id, the slot is still its own,
+  // not the one at the method's id.
+  testing.domainReset(SWF_31);
+  testing.domainAdd(builtin, true);
+  const others = ["x", "n", "F"].map((name) => ({ name: mn(name), kind: SLOT }));
+  const wide = classes([{ name: mn("A"), base: mn("Object"), traits: [slot, ...others, method] }]);
+  assert.equal(testing.domainAdd(wide, false), 0);
+  const js = testing.domainModule("") as string;
+  assert.match(js, /defaults: \[\[0, 3, "int"\], \[1, void 0, null\], \[2, /);
+  assert.ok(js.includes("o.$3 = void 0; o.$2 = void 0; o.$1 = void 0; o.$0 = 3; }"));
 });
 
 test("every class that links compiles, whatever its members' names share", {
