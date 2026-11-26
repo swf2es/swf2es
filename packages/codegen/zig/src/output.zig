@@ -103,6 +103,7 @@ pub const Output = struct {
 
     /// Not inlined, as `text` is not: inlined, its loop came to some 16 KB
     /// over the emitters' 180 calls, and sharing it costs no time (P8).
+    /// `int` stays inline on purpose: it is a sign and a call of this one.
     pub noinline fn uint(self: *Output, n: u64) Allocator.Error!void {
         var digits: [20]u8 = undefined;
         var at: usize = digits.len;
