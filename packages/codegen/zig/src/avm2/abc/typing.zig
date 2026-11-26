@@ -75,7 +75,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             bd.rowC = ir_.typeColumn(domain.staticTraitsOf(bd.index, a));
             return;
         },
-        .finddef => p.findDef(bd, a),
+        .finddef => return p.findDef(bd, a),
         .setproperty, .initproperty => return p.setProperty(bd, opcode, a),
         .getproperty => {
             const n = try p.propertyDepth(bd, a, 1);
@@ -295,7 +295,10 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
 
             return bd.push(outer.types[a], .{ .not_null = true });
         },
-        .getglobalscope => _ = try p.globalScope(bd),
+        .getglobalscope => {
+            _ = try p.globalScope(bd);
+            return;
+        },
         .getglobalslot => {
             const global = try p.globalScope(bd);
 
@@ -460,6 +463,8 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             try bd.coerce(top, domain.intType);
             return;
         },
+        // Every prong above returns; the rest are the numbered locals'
+        // instructions below, or have no types to check.
         else => {},
     }
 

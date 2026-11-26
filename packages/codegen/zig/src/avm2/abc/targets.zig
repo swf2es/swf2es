@@ -157,7 +157,9 @@ fn head(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!Head
 fn handlerEdge(bd: *BodyDecoder, pc: u32, to: u32) Error!void {
     switch (try head(bd, pc, to, 1, 0)) {
         .done => {},
-        .header => unreachable,
+        // checkHandlers rejects a target before its range's end, and head
+        // makes a loop header of a backward edge alone.
+        .header => @panic("a handler's target is past its range, so never a loop header"),
     }
 }
 
