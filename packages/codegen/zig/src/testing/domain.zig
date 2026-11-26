@@ -290,7 +290,7 @@ pub fn domainIr(dom: *Domain, gpa: Allocator, body: u32) Allocator.Error![]const
             for (0..ir.blockStack[k]) |d| {
                 if (d > 0) w.writeAll(", ") catch break :write;
                 const at = entry + stackBase + @as(u32, @intCast(d));
-                writeType(w, dom, ir.entryType[at], ir.entryFlags[at] & 1) catch break :write;
+                writeType(w, dom, ir.entryType[at], @intFromBool(ir.entryFlags[at].not_null)) catch break :write;
             }
 
             w.writeAll("] scope [") catch break :write;
@@ -383,7 +383,7 @@ pub fn domainCheckIr(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
                     }
 
                     var c = ir.b[i];
-                    while (c <= ir.b[i] + @as(u32, @bitCast(ir.c[i]))) : (c += 1) {
+                    while (c <= ir.b[i] + ir.cLastCase(i)) : (c += 1) {
                         if (ir.cases[c] >= ir.blockCount) {
                             return std.fmt.allocPrint(gpa, "body {d} B{d} row {d} ({s}): case B{d}", where ++ .{ir.cases[c]});
                         }
@@ -440,12 +440,12 @@ pub fn domainIrAll(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
                 w.print("\nblock {d} {d} {d} {d} {d} |", .{ k, ir.blockPc[k], ir.blockFirst[k], ir.blockStack[k], ir.blockScope[k] }) catch break :write;
                 for (0..ir.frameSize) |v| {
                     const at = k * ir.frameSize + v;
-                    w.print(" {d}:{d}", .{ @backingInt(ir.entryType[at]), ir.entryFlags[at] }) catch break :write;
+                    w.print(" {d}:{d}", .{ @backingInt(ir.entryType[at]), @as(u8, @bitCast(ir.entryFlags[at])) }) catch break :write;
                 }
             }
 
             for (0..ir.count) |i| {
-                w.print("\n{d} {d} {d} {d} {d} {d} {d} {d} {d} {d}", .{ ir.op[i], ir.dst[i], ir.src[i], ir.srcCount[i], ir.a[i], ir.b[i], ir.c[i], @backingInt(ir.type[i]), ir.notNull[i], ir.pc[i] }) catch break :write;
+                w.print("\n{d} {d} {d} {d} {d} {d} {d} {d} {d} {d}", .{ ir.op[i], ir.dst[i], ir.src[i], ir.srcCount[i], ir.a[i], ir.b[i], ir.c[i], @backingInt(ir.type[i]), @intFromBool(ir.notNull[i]), ir.pc[i] }) catch break :write;
             }
 
             for (0..ir.handlerCount) |h| {
@@ -483,7 +483,7 @@ fn irLine(w: *std.Io.Writer, dom: *const Domain, ir: *const Ir, i: u32) std.Io.W
     if (ir.isSwitch(i)) {
         try w.print(" default B{d} [", .{ir.a[i]});
         var c = ir.b[i];
-        while (c <= ir.b[i] + @as(u32, @bitCast(ir.c[i]))) : (c += 1) {
+        while (c <= ir.b[i] + ir.cLastCase(i)) : (c += 1) {
             if (c > ir.b[i]) try w.writeByte(' ');
             try w.print("B{d}", .{ir.cases[c]});
         }
@@ -500,7 +500,7 @@ fn irLine(w: *std.Io.Writer, dom: *const Domain, ir: *const Ir, i: u32) std.Io.W
 
     if (dst >= 0) {
         try w.writeAll(" : ");
-        try writeType(w, dom, ir.type[i], ir.notNull[i]);
+        try writeType(w, dom, ir.type[i], @intFromBool(ir.notNull[i]));
     }
 }
 

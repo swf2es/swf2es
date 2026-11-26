@@ -22,7 +22,7 @@ fn emitGeneric(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, stackBefor
     const base = bd.stackBase();
     var src: i32 = @bitCast(base +% stackBefore -% pops);
     var count = pops;
-    var dst: i32 = if (bd.stack > stackBefore -% pops) @bitCast(base + bd.stack - 1) else -1;
+    var dst: i32 = if (bd.stack > stackBefore -% pops) @bitCast(base + bd.stack - 1) else ir_.no_register;
     var ra = a;
     switch (opcode) {
         .label, .nop, .bkpt, .bkptline, .timestamp => return,
@@ -55,7 +55,7 @@ fn emitGeneric(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, stackBefor
                 try ir.addCase(bd.blockOf[pc +% @as(u32, @bitCast(bd.code.cases[i]))]);
             }
 
-            try bd.emit(ir_.of(opcode), -1, src, count, bd.blockOf[pc +% @as(u32, @bitCast(bd.slotA[pc]))], cases, @bitCast(b), pc);
+            try bd.emit(ir_.of(opcode), ir_.no_register, src, count, bd.blockOf[pc +% @as(u32, @bitCast(bd.slotA[pc]))], cases, @bitCast(b), pc);
             return;
         },
         else => {},
@@ -121,14 +121,14 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: Op) Error!void {
             }
 
             if (bd.emitPass) {
-                try bd.emit(ir_.of(opcode), -1, -1, 0, a, 0, 0, pc);
+                try bd.emit(ir_.of(opcode), ir_.no_register, ir_.no_register, 0, a, 0, 0, pc);
             }
 
             return bd.checkString(a);
         },
         .debugfile => {
             if (bd.emitPass) {
-                try bd.emit(ir_.of(opcode), -1, -1, 0, a, 0, 0, pc);
+                try bd.emit(ir_.of(opcode), ir_.no_register, ir_.no_register, 0, a, 0, 0, pc);
             }
 
             return bd.checkString(a);
@@ -141,7 +141,7 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: Op) Error!void {
             }
 
             if (bd.emitPass) {
-                try bd.emit(ir_.of(opcode), @bitCast(a), -1, 0, a, 0, 0, pc);
+                try bd.emit(ir_.of(opcode), @bitCast(a), ir_.no_register, 0, a, 0, 0, pc);
             }
 
             return;
@@ -172,7 +172,7 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: Op) Error!void {
 
             bd.scope -= 1;
             if (bd.emitPass) {
-                try bd.emit(ir_.of(opcode), -1, @bitCast(bd.localCount + bd.scope), 1, 0, 0, 0, pc);
+                try bd.emit(ir_.of(opcode), ir_.no_register, @bitCast(bd.localCount + bd.scope), 1, 0, 0, 0, pc);
             }
 
             return;
