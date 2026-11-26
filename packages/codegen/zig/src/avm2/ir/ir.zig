@@ -122,6 +122,12 @@ pub const EntryFlags = packed struct(u8) {
     _: u6 = 0,
 };
 
+comptime {
+    // The verifier's first two flags, bit for bit.
+    std.debug.assert(@as(u8, @bitCast(EntryFlags{ .not_null = true })) == @as(u8, @bitCast(Flags{ .not_null = true })));
+    std.debug.assert(@as(u8, @bitCast(EntryFlags{ .with = true })) == @as(u8, @bitCast(Flags{ .with = true })));
+}
+
 pub const Ir = struct {
     gpa: Allocator,
     count: u32 = 0,
@@ -162,7 +168,8 @@ pub const Ir = struct {
     handlerType: []TypeId = &.{},
     handlerScope: []TypeId = &.{},
 
-    /// lookupswitch targets as block numbers; an instruction's are cases[b .. b + c].
+    /// lookupswitch targets as block numbers; an instruction's are
+    /// cases[b .. b + c + 1], c its last case (cLastCase).
     cases: []u32 = &.{},
     caseCount: u32 = 0,
 
@@ -188,7 +195,9 @@ pub const Ir = struct {
 
     /// Operand c as a method (domain-wide id), or -1 for none: the getter
     /// ir_call_getter calls, the setter ir_call_setter calls, the method
-    /// callmethod, ir_call_interface and ir_call_super call.
+    /// callmethod, ir_call_interface and ir_call_super call. (callstatic
+    /// and newfunction also write a method there, which the emitters do not
+    /// read.)
     pub inline fn cMethod(self: *const Ir, i: u32) i32 {
         if (options.checks) {
             const op = self.op[i];

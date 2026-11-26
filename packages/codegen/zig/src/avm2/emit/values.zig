@@ -204,8 +204,9 @@ pub fn isTypedConversion(op: IrOp) bool {
     };
 }
 
-/// The type conversion instruction i, `op`, gives. Its callers test
-/// isTypedConversion first: no other op gives a type of its own.
+/// The type conversion instruction i, `op`, gives. Callers pass only ops
+/// isTypedConversion holds of, testing it first where they do not know
+/// the op: no other op gives a type of its own.
 pub fn conversionType(em: *MethodEmitter, op: IrOp, i: u32) TypeId {
     if (options.checks) {
         std.debug.assert(isTypedConversion(op));
