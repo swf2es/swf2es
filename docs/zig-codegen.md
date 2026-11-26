@@ -543,10 +543,12 @@ golden digests use (the player's latest, AIR's, the shell's),
 time under small budgets, and the fuzzers' differential suites. Their
 behaviour is still tested (Tamarin, the corpus job, determinism, the
 keys and domains tests), but not their bytes. For a refactor of the
-compiler, the tool is the old-against-new harness: `tests/parity/run.ts`
-at the tag `zig-last-parity`, its AssemblyScript side changed to load the
-Zig test build of the commit before the refactor (both builds bind
-through `src/zig.ts`), compares every suite byte for byte.
+compiler, the tool is the old-against-new harness, `node
+tests/parity/run.ts [--reference <ref>]`: a build of the ref
+(`zig-last-parity` by default) against the tree's, every suite byte for
+byte, as the harness held Zig's to AssemblyScript's; and
+`tests/bench/codegen-compile.ts` for compile time, against the same
+reference.
 
 ## 6. AssemblyScript behaviour to copy
 

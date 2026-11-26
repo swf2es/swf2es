@@ -206,6 +206,18 @@ node tests/golden/run.ts [--abcs] [--update]   # the generated code's digests (l
                               # tests' ABCs, conformance cases with and without line maps, as3pb, AVM1
                               # blocks) against tests/golden/digests.json; --abcs builds the ABCs ASC
                               # makes (kept in tests/golden/abcs/) again, as after a new case
+node tests/parity/run.ts [--reference <ref>] [suite...]   # old against new: a build of <ref>
+                              # (zig-last-parity by default; built once into ~/.cache/swf2es/parity/)
+                              # and this tree's fed the same calls on 45 suites (libraries, tests'
+                              # ABCs, Ruffle's corpus where fetched, the oracle's ABCs where cached,
+                              # mutated and fuzzed inputs, keys, lifetimes, random exports), byte
+                              # for byte, and the 0xAA build against this tree's; every change to
+                              # the compiler meant to keep its output runs it (not in CI);
+                              # SWF2ES_LOCAL_SWFS="a.swf b.swf" adds local SWFs, reported by number
+node tests/bench/codegen-compile.ts [--reference <ref>] [--runs N]   # compile time of a build of
+                              # <ref> against this tree's, interleaved: the libraries, the conformance
+                              # cases, AVM1 blocks, SWF2ES_LOCAL_SWFS's SWFs and a rebuild; and the
+                              # two codegen.wasm's sizes
 pnpm --filter @swf2es/native build:wasm   # rebuild packages/native's wasm (compress, mp3, and render:
                               # bitmap, tessellate, lines) with the pinned Zig, after the zig tests;
                               # pnpm build only checks their inputs' digests
