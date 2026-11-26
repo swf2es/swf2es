@@ -785,14 +785,17 @@ pub const BodyDecoder = struct {
     }
 
     /// Handler i's exception type and catch scope type, as checkHandlers
-    /// wrote them for this body: in a typed walk, i below handlerCount.
+    /// wrote them for this body: in a typed walk (an untyped decoder has
+    /// handlers but no types), i below handlerCount, which the callers'
+    /// loops and verify's newcatch check keep it. The poison build's fill
+    /// in checkHandlers is what catches an entry this body did not write.
     pub inline fn handlerTypeAt(self: *const BodyDecoder, i: u32) TypeId {
-        std.debug.assert(i < self.handlerCount);
+        std.debug.assert(self.typed and i < self.handlerCount);
         return self.handlerType[i];
     }
 
     pub inline fn handlerScopeAt(self: *const BodyDecoder, i: u32) TypeId {
-        std.debug.assert(i < self.handlerCount);
+        std.debug.assert(self.typed and i < self.handlerCount);
         return self.handlerScope[i];
     }
 
