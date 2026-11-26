@@ -4,6 +4,7 @@
 // (assembly/avm2/emit/copies.ts, whose comment tells the facts and why a
 // fact enters a block only if its original is live there too).
 const std = @import("std");
+const options = @import("options");
 const Error = std.mem.Allocator.Error;
 const ops = @import("../abc/opcodes.zig");
 const ir_ = @import("../ir/ir.zig");
@@ -11,12 +12,66 @@ const MethodEmitter = @import("method.zig").MethodEmitter;
 const structure = @import("structure.zig");
 const IrOp = @import("../ir/ir.zig").Op;
 
-/// A fact's constant: CONSTANT - the instruction that pushed it.
-pub const CONSTANT: i32 = -2;
-/// No fact.
-pub const NONE: i32 = -1;
-/// A block no way in has reached yet: what a join takes the other side of.
-const UNSEEN: i32 = std.math.minInt(i32);
+/// What a scope or stack register holds, as far as the emitter knows: a
+/// copy of another register, a copy of the constant an instruction pushed,
+/// or nothing known (none). In flowCopies' rows, also a block no way in
+/// has reached yet (unseen), which a join takes the other side of. One
+/// word: a register as its number, a constant as -2 - its instruction.
+pub const Fact = enum(i32) {
+    none = -1,
+    unseen = std.math.minInt(i32),
+    _,
+
+    /// A copy of register r.
+    pub inline fn of(r: i32) Fact {
+        if (options.checks) {
+            std.debug.assert(r >= 0);
+        }
+
+        return @enumFromInt(r);
+    }
+
+    /// A copy of the constant instruction i pushed.
+    pub inline fn constant(i: u32) Fact {
+        return @enumFromInt(-2 - @as(i32, @intCast(i)));
+    }
+
+    pub inline fn isRegister(f: Fact) bool {
+        return @intFromEnum(f) >= 0;
+    }
+
+    /// Whether f copies a constant; never asked of unseen, which only flowCopies' rows hold.
+    pub inline fn isConstant(f: Fact) bool {
+        if (options.checks) {
+            std.debug.assert(f != .unseen);
+        }
+
+        return @intFromEnum(f) <= -2;
+    }
+
+    /// The register f copies.
+    pub inline fn register(f: Fact) i32 {
+        if (options.checks) {
+            std.debug.assert(f.isRegister());
+        }
+
+        return @intFromEnum(f);
+    }
+
+    /// The instruction that pushed the constant f copies.
+    pub inline fn instruction(f: Fact) u32 {
+        if (options.checks) {
+            std.debug.assert(f.isConstant());
+        }
+
+        return @intCast(-2 - @intFromEnum(f));
+    }
+
+    /// What register r reads, whose fact f is: what it copies, or r itself.
+    pub inline fn orRegister(f: Fact, r: i32) Fact {
+        return if (f == .none) .of(r) else f;
+    }
+};
 
 /// Whether op pushes a constant, which a stack register can be a copy of.
 pub fn pushesConstant(op: IrOp) bool {
@@ -44,7 +99,7 @@ fn grow(em: *MethodEmitter, comptime T: type, table: *[]T, n: usize) Error!void 
 
 /// Each block's facts on entry into em.copyIn, a row of frameSize -
 /// localCount from the first scope register: the copy each register is,
-/// or NONE.
+/// or none.
 pub fn flowCopies(em: *MethodEmitter) Error!void {
     const ir = em.ir;
     const n = ir.blockCount;
@@ -54,25 +109,25 @@ pub fn flowCopies(em: *MethodEmitter) Error!void {
     }
 
     const size = n * slots;
-    try grow(em, i32, &em.copyIn, size);
+    try grow(em, Fact, &em.copyIn, size);
     const copyIn = em.copyIn;
     // One block is entered only at the start, with no copies, or from itself.
     if (n == 1) {
-        @memset(copyIn[0..slots], NONE);
+        @memset(copyIn[0..slots], .none);
         return;
     }
 
     try grow(em, u8, &em.dirty, n);
-    try grow(em, i32, &em.flow, slots);
-    @memset(copyIn[0..size], UNSEEN);
+    try grow(em, Fact, &em.flow, slots);
+    @memset(copyIn[0..size], .unseen);
     @memset(em.dirty[0..n], 0);
 
     // The entry and the handlers start with no copies, whatever else leads there.
-    @memset(copyIn[0..slots], NONE);
+    @memset(copyIn[0..slots], .none);
     em.dirty[0] = 1;
     for (0..ir.handlerCount) |h| {
         const at = ir.handlerBlock[h] * slots;
-        @memset(copyIn[at..][0..slots], NONE);
+        @memset(copyIn[at..][0..slots], .none);
         em.dirty[ir.handlerBlock[h]] = 1;
     }
 
@@ -95,8 +150,8 @@ pub fn flowCopies(em: *MethodEmitter) Error!void {
         unseen = false;
         for (0..n) |k| {
             const at = k * slots;
-            if (copyIn[at] == UNSEEN) {
-                @memset(copyIn[at..][0..slots], NONE);
+            if (copyIn[at] == .unseen) {
+                @memset(copyIn[at..][0..slots], .none);
                 em.dirty[k] = 1;
                 unseen = true;
             }
@@ -154,22 +209,22 @@ fn walk(em: *MethodEmitter, k: u32) Error!bool {
         }
 
         const from = sourceOf(em, i);
-        if (from == dst) {
+        if (from == Fact.of(dst)) {
             // Its own value again, as a nip of a dup: nothing changes.
             continue;
         }
 
         // A value set to a local is that local's, as the register it came from
         // is, when that one is not a copy itself: `dup; setlocal`.
-        const moved = if (setsLocal(op)) root(em, s) else NONE;
+        const moved: Fact = if (setsLocal(op)) root(em, s) else .none;
         kill(em, dst);
         if (dst >= base) {
             flow[@intCast(dst - base)] = from;
-        } else if (moved >= base + @as(i32, @intCast(ir.maxScope))) {
-            flow[@intCast(moved - base)] = dst;
+        } else if (moved.isRegister() and moved.register() >= base + @as(i32, @intCast(ir.maxScope))) {
+            flow[@intCast(moved.register() - base)] = .of(dst);
             for (flow[0..slots]) |*f| {
                 if (f.* == moved) {
-                    f.* = dst;
+                    f.* = .of(dst);
                 }
             }
         }
@@ -182,15 +237,15 @@ fn walk(em: *MethodEmitter, k: u32) Error!bool {
     return back;
 }
 
-/// What instruction i's destination is a copy of, from what the facts are before it; NONE if a value of its own.
-fn sourceOf(em: *MethodEmitter, i: u32) i32 {
+/// What instruction i's destination is a copy of, from what the facts are before it; none if a value of its own.
+fn sourceOf(em: *MethodEmitter, i: u32) Fact {
     const ir = em.ir;
     const op = ir.op[i];
     const dst = ir.dst[i];
     const s = ir.src[i];
     const stack: i32 = @intCast(ir.localCount + ir.maxScope);
     if (dst >= stack and pushesConstant(op)) {
-        return CONSTANT - @as(i32, @intCast(i));
+        return .constant(i);
     }
 
     if (dst >= stack and (getsLocal(op) or op == .dup or op == .getscopeobject)) {
@@ -209,21 +264,20 @@ fn sourceOf(em: *MethodEmitter, i: u32) i32 {
     // A scope stays as long as its block does: of a local or scope only.
     if (op == .pushscope or op == .pushwith) {
         const from = root(em, s);
-        return if (from >= 0 and from < stack) from else NONE;
+        return if (from.isRegister() and from.register() < stack) from else .none;
     }
 
-    return NONE;
+    return .none;
 }
 
 /// What register r's value is now: what it copies, or itself.
-fn root(em: *MethodEmitter, r: i32) i32 {
+fn root(em: *MethodEmitter, r: i32) Fact {
     const base: i32 = @intCast(em.ir.localCount);
     if (r < base) {
-        return r;
+        return .of(r);
     }
 
-    const copy = em.flow[@intCast(r - base)];
-    return if (copy == NONE) r else copy;
+    return em.flow[@intCast(r - base)].orRegister(r);
 }
 
 /// Register x is written: no longer a copy, nor the original of one.
@@ -233,12 +287,12 @@ fn kill(em: *MethodEmitter, x: i32) void {
     const slots = ir.frameSize - ir.localCount;
     const flow = em.flow;
     if (x >= base) {
-        flow[@intCast(x - base)] = NONE;
+        flow[@intCast(x - base)] = .none;
     }
 
     for (flow[0..slots]) |*f| {
-        if (f.* == x) {
-            f.* = NONE;
+        if (f.* == Fact.of(x)) {
+            f.* = .none;
         }
     }
 }
@@ -257,17 +311,17 @@ fn join(em: *MethodEmitter, t: u32, k: u32) bool {
         const s: u32 = @intCast(s_);
         // What is not on the stacks there is no one's copy.
         const live = if (s < ir.maxScope) s < scopes else s < stack;
-        var fact = if (live) flow[s] else NONE;
+        var fact: Fact = if (live) flow[s] else .none;
         // Nor a copy of what is not, which the emitter may not have written.
-        if (fact >= @as(i32, @intCast(ir.localCount))) {
-            const f = @as(u32, @intCast(fact)) - ir.localCount;
+        if (fact.isRegister() and fact.register() >= @as(i32, @intCast(ir.localCount))) {
+            const f = @as(u32, @intCast(fact.register())) - ir.localCount;
             if (!(if (f < ir.maxScope) f < scopes else f < stack)) {
-                fact = NONE;
+                fact = .none;
             }
         }
 
         const was = copyIn[at + s];
-        const now = if (was == UNSEEN or was == fact) fact else NONE;
+        const now = if (was == .unseen or was == fact) fact else .none;
         if (now != was) {
             copyIn[at + s] = now;
             changed = true;

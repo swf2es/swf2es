@@ -20,8 +20,7 @@ const traits_ = @import("../link/traits.zig");
 const TypeId = traits_.TypeId;
 const blocks = @import("blocks.zig");
 const copies = @import("copies.zig");
-const CONSTANT = copies.CONSTANT;
-const NONE = copies.NONE;
+const Fact = copies.Fact;
 const floats = @import("floats.zig");
 const handlers = @import("handlers.zig");
 const refs = @import("refs.zig");
@@ -69,9 +68,14 @@ const RESET_END: u32 = 11;
 const MAX_HELD: u32 = 1024;
 const MAX_HELD_TEXT: u32 = 1 << 20;
 
-/// In a method's types, the entry of a method of a primitive's class
-/// (methodSlot): below the names', which count down from -1.
-pub const METHOD_SLOT: i32 = std.math.minInt(i32);
+/// An entry of a method's T: a class or Vector type, a method of a
+/// primitive's class (filled at run time, `null` in the table), or the
+/// name a MultinameL makes of a string, by its index in literalMultinames.
+pub const TSlot = union(enum) {
+    type: TypeId,
+    method,
+    literal: u32,
+};
 
 fn List(comptime T: type) type {
     return std.ArrayList(T);
@@ -110,9 +114,8 @@ pub const MethodEmitter = struct {
     /// Which local scope registers hold with scopes, and how many are pushed.
     scopeWith: []u8 = &.{},
     scopeDepth: u32 = 0,
-    /// The classes and Vectors the method refers to, in the order its T
-    /// holds them, and below zero the names among them (literalMultinames).
-    types: List(i32) = .empty,
+    /// What the method's T holds, in order.
+    types: List(TSlot) = .empty,
     /// By type: its index in types, where its stamp is typeGen, the method's.
     typeIndex: []u32 = &.{},
     typeStamp: []u32 = &.{},
@@ -199,16 +202,17 @@ pub const MethodEmitter = struct {
     handlerOf: []i32 = &.{},
     normalStart: []u32 = &.{},
     tryStack: List(u32) = .empty,
+    /// What writing blocks in place keeps, a frame a block (structure.save).
     saved: List(i32) = .empty,
-    /// The register or constant each scope and stack register copies, NONE if none.
-    copyOf: []i32 = &.{},
+    /// What each scope and stack register copies, if it is a copy.
+    copyOf: []Fact = &.{},
     /// A register from which up none is a copy.
     copyTop: i32 = 0,
     /// How many scope and stack registers copy each register.
     copiedBy: []u32 = &.{},
     /// Each block's copies on entry, and flowCopies' scratch (copies.zig).
-    copyIn: []i32 = &.{},
-    flow: []i32 = &.{},
+    copyIn: []Fact = &.{},
+    flow: []Fact = &.{},
     dirty: []u8 = &.{},
     /// By register: whether it was checked not null since it was last written.
     checked: []u8 = &.{},
@@ -264,11 +268,11 @@ pub const MethodEmitter = struct {
         const frame = ir.frameSize;
         try atLeast(gpa, TypeId, &self.regType, frame);
         try atLeast(gpa, u8, &self.scopeWith, ir.maxScope);
-        try atLeast(gpa, i32, &self.copyOf, frame);
+        try atLeast(gpa, Fact, &self.copyOf, frame);
         try atLeast(gpa, u32, &self.copiedBy, frame);
         try atLeast(gpa, u8, &self.promoted, frame);
         try atLeast(gpa, u8, &self.rawFloat, frame);
-        @memset(self.copyOf[0..frame], NONE);
+        @memset(self.copyOf[0..frame], .none);
         try atLeast(gpa, u8, &self.held, frame);
         try atLeast(gpa, u32, &self.heldAt, frame);
         try atLeast(gpa, u32, &self.heldEnd, frame);
@@ -646,14 +650,14 @@ pub const MethodEmitter = struct {
             return false;
         }
 
-        const copy = if (r < @as(i32, @intCast(ir.localCount))) NONE else self.copyOf[@intCast(r)];
-        const from = if (copy == NONE) r else copy;
-        if (dst < stack and (from < 0 or from >= stack)) {
+        const copy: Fact = if (r < @as(i32, @intCast(ir.localCount))) .none else self.copyOf[@intCast(r)];
+        const from = copy.orRegister(r);
+        if (dst < stack and (!from.isRegister() or from.register() >= stack)) {
             return false;
         }
 
         // Its own value again, as a nip of a dup: as it was.
-        self.setCopy(dst, if (from == dst) NONE else from);
+        self.setCopy(dst, if (from == Fact.of(dst)) .none else from);
         self.kept = true;
         return true;
     }
@@ -670,22 +674,23 @@ pub const MethodEmitter = struct {
         return self.domain.builtin(ir.cType(i)) == .number and (bt == .int or bt == .uint);
     }
 
-    /// What a copy reads: a register, or the constant instruction `CONSTANT - copy` pushed.
-    pub fn copied(self: *MethodEmitter, copy: i32, boxed: bool) Error!void {
-        if (copy >= 0) {
-            const c: u32 = @intCast(copy);
+    /// What a copy reads: a register, or the constant an instruction pushed.
+    pub fn copied(self: *MethodEmitter, copy: Fact, boxed: bool) Error!void {
+        if (copy.isRegister()) {
+            const r = copy.register();
+            const c: u32 = @intCast(r);
             if (self.held[c] != 0) {
-                try self.inline_(copy);
+                try self.inline_(r);
                 return;
             }
 
-            self.readsAt(copy, copy);
-            const wrap = boxed and (self.unboxedLocal(copy) or self.rawFloat[c] != 0);
+            self.readsAt(r, r);
+            const wrap = boxed and (self.unboxedLocal(r) or self.rawFloat[c] != 0);
             if (wrap) {
                 try self.out.text("rt.float(");
             }
 
-            try self.regName(copy);
+            try self.regName(r);
             if (wrap) {
                 try self.out.text(")");
             }
@@ -695,7 +700,7 @@ pub const MethodEmitter = struct {
 
         const out = &self.out;
         const pool = &self.abc.pool;
-        const i: u32 = @intCast(CONSTANT - copy);
+        const i = copy.instruction();
         const a = self.ir.a[i];
         switch (self.ir.op[i]) {
             .pushbyte, .pushshort => try self.literal(@floatFromInt(@as(i32, @bitCast(a))), false),
@@ -742,7 +747,7 @@ pub const MethodEmitter = struct {
         const top = @min(self.copyTop, @as(i32, @intCast(self.ir.frameSize)));
         var r = from;
         while (r < top) : (r += 1) {
-            self.setCopy(r, NONE);
+            self.setCopy(r, .none);
         }
 
         if (from < self.copyTop) {
@@ -750,20 +755,20 @@ pub const MethodEmitter = struct {
         }
     }
 
-    /// Register r now a copy of `copy`, or of nothing for NONE: copyTop and copiedBy kept.
-    pub fn setCopy(self: *MethodEmitter, r: i32, copy: i32) void {
+    /// Register r now a copy of `copy`, or of nothing for none: copyTop and copiedBy kept.
+    pub fn setCopy(self: *MethodEmitter, r: i32, copy: Fact) void {
         const ru: u32 = @intCast(r);
         const old = self.copyOf[ru];
-        if (old >= 0) {
-            self.copiedBy[@intCast(old)] -%= 1;
+        if (old.isRegister()) {
+            self.copiedBy[@intCast(old.register())] -%= 1;
         }
 
         self.copyOf[ru] = copy;
-        if (copy >= 0) {
-            self.copiedBy[@intCast(copy)] +%= 1;
+        if (copy.isRegister()) {
+            self.copiedBy[@intCast(copy.register())] +%= 1;
         }
 
-        if (copy != NONE and r >= self.copyTop) {
+        if (copy != .none and r >= self.copyTop) {
             self.copyTop = r + 1;
         }
     }
@@ -775,11 +780,11 @@ pub const MethodEmitter = struct {
         @memset(self.copiedBy[0..frame], 0);
         for (0..frame) |r| {
             const copy = self.copyOf[r];
-            if (copy >= 0) {
-                self.copiedBy[@intCast(copy)] +%= 1;
+            if (copy.isRegister()) {
+                self.copiedBy[@intCast(copy.register())] +%= 1;
             }
 
-            if (copy != NONE) {
+            if (copy != .none) {
                 top = @intCast(r + 1);
             }
         }
@@ -829,7 +834,7 @@ pub const MethodEmitter = struct {
         if (self.typeStamp[tu] != self.typeGen) {
             self.typeStamp[tu] = self.typeGen;
             self.typeIndex[tu] = @intCast(self.types.items.len);
-            try self.types.append(self.gpa, @intCast(tu));
+            try self.types.append(self.gpa, .{ .type = t });
         }
 
         return self.typeIndex[tu];
@@ -849,13 +854,13 @@ pub const MethodEmitter = struct {
 
         if (self.literalStamp[string] == self.typeGen) {
             const slot = self.literalIndex[string];
-            if (self.literalMultinames.items[@intCast(-1 - self.types.items[slot])] == mn) {
+            if (self.literalMultinames.items[self.types.items[slot].literal] == mn) {
                 return slot;
             }
         }
 
         const slot: u32 = @intCast(self.types.items.len);
-        try self.types.append(self.gpa, -1 - @as(i32, @intCast(self.literalMultinames.items.len)));
+        try self.types.append(self.gpa, .{ .literal = @intCast(self.literalMultinames.items.len) });
         try self.literalMultinames.append(self.gpa, mn);
         try self.literalStrings.append(self.gpa, string);
         self.literalStamp[string] = self.typeGen;
@@ -875,7 +880,7 @@ pub const MethodEmitter = struct {
         }
 
         const slot: u32 = @intCast(self.types.items.len);
-        try self.types.append(self.gpa, METHOD_SLOT);
+        try self.types.append(self.gpa, .method);
         try self.heldTypes.append(self.gpa, @backingInt(t));
         try self.heldMethods.append(self.gpa, disp);
         try self.heldSlots.append(self.gpa, slot);
@@ -904,7 +909,7 @@ pub const MethodEmitter = struct {
 
     /// Register r as read before a `.`; a constant in parentheses, as `void 0.x` does not parse.
     pub fn member(self: *MethodEmitter, r: i32) Error!void {
-        if (r == self.pendingNull or self.copyOf[@intCast(r)] <= CONSTANT) {
+        if (r == self.pendingNull or self.copyOf[@intCast(r)].isConstant()) {
             try self.out.byte('(');
             try self.reg(r);
             try self.out.byte(')');
@@ -950,12 +955,7 @@ pub const MethodEmitter = struct {
 
     /// Register r as read: what it copies, if it is a copy.
     pub fn read(self: *MethodEmitter, r: i32) Error!void {
-        const copy = self.copyOf[@intCast(r)];
-        if (copy == NONE) {
-            try self.copied(r, true);
-        } else {
-            try self.copied(copy, true);
-        }
+        try self.copied(self.copyOf[@intCast(r)].orRegister(r), true);
     }
 
     pub fn unboxedLocal(self: *const MethodEmitter, r: i32) bool {
@@ -981,10 +981,12 @@ pub const MethodEmitter = struct {
     /// A known float's payload, avoiding a wrapper when it is a local or its copy.
     pub fn numberReg(self: *MethodEmitter, r: i32) Error!void {
         const copy = self.copyOf[@intCast(r)];
-        const which = if (copy == NONE) r else copy;
-        if (copy <= CONSTANT and self.ir.op[@intCast(CONSTANT - copy)] == .pushfloat) {
-            try self.literal(self.abc.pool.floats[self.ir.a[@intCast(CONSTANT - copy)]], true);
-        } else if (self.unboxedLocal(which) or (copy >= NONE and self.rawFloat[@intCast(which)] != 0)) {
+        const which = copy.orRegister(r);
+        if (copy.isConstant() and self.ir.op[copy.instruction()] == .pushfloat) {
+            try self.literal(self.abc.pool.floats[self.ir.a[copy.instruction()]], true);
+        } else if (which.isRegister() and
+            (self.unboxedLocal(which.register()) or self.rawFloat[@intCast(which.register())] != 0))
+        {
             try self.copied(which, false);
         } else if (self.builtinOf(r) == .float) {
             try self.out.text("rt.toNumber(");

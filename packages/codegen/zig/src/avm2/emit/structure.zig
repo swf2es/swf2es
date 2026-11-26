@@ -497,60 +497,97 @@ pub fn branchTo(em: *MethodEmitter, t: u32) Error!void {
     }
 }
 
+/// What save keeps of the emitter's scalars: words in a frame, as a
+/// list of its own would be another copy of append and pop.
+const SavedScalars = extern struct {
+    scopeDepth: u32,
+    region: i32,
+    file: i32,
+    line: u32,
+};
+
+comptime {
+    if (@sizeOf(SavedScalars) != 4 * @sizeOf(i32)) {
+        @compileError("SavedScalars must be four words of em.saved");
+    }
+}
+
+/// A frame of em.saved: the scalars, then each register's type, checked
+/// and promoted, each scope's with, and each scope and stack register's
+/// copy, a word each.
+const SavedFrame = struct {
+    scalars: *SavedScalars,
+    types: []i32,
+    checked: []i32,
+    promoted: []i32,
+    withs: []i32,
+    copies: []i32,
+
+    fn size(ir: *const ir_.Ir) usize {
+        return 4 + 3 * ir.frameSize + ir.maxScope + (ir.frameSize - ir.localCount);
+    }
+
+    fn of(ir: *const ir_.Ir, words: []i32) SavedFrame {
+        const frame = ir.frameSize;
+        const regs = words[4..];
+        return .{
+            .scalars = @ptrCast(words[0..4]),
+            .types = regs[0..frame],
+            .checked = regs[frame..][0..frame],
+            .promoted = regs[2 * frame ..][0..frame],
+            .withs = regs[3 * frame ..][0..ir.maxScope],
+            .copies = regs[3 * frame + ir.maxScope ..][0 .. frame - ir.localCount],
+        };
+    }
+};
+
 /// Push what writing a block follows: its registers' types and copies, scopes and region.
 fn save(em: *MethodEmitter) Error!void {
     const ir = em.ir;
-    const gpa = em.gpa;
-    const saved = &em.saved;
-    // The stack holds words: the types as theirs.
-    for (em.regType[0..ir.frameSize]) |t| {
-        try saved.append(gpa, @backingInt(t));
+    const frame = ir.frameSize;
+    const f = SavedFrame.of(ir, try em.saved.addManyAsSlice(em.gpa, SavedFrame.size(ir)));
+    f.scalars.* = .{ .scopeDepth = em.scopeDepth, .region = em.region, .file = em.file, .line = em.line };
+    for (f.types, em.regType[0..frame]) |*w, t| {
+        w.* = @backingInt(t);
     }
 
-    for (em.scopeWith[0..ir.maxScope]) |w| {
-        try saved.append(gpa, w);
+    for (f.checked, f.promoted, em.checked[0..frame], em.promoted[0..frame]) |*c, *p, checked, promoted| {
+        c.* = checked;
+        p.* = promoted;
     }
 
-    for (0..ir.frameSize) |r| {
-        try saved.append(gpa, em.checked[r]);
-        try saved.append(gpa, em.promoted[r]);
+    for (f.withs, em.scopeWith[0..ir.maxScope]) |*w, with| {
+        w.* = with;
     }
 
-    try saved.appendSlice(gpa, em.copyOf[ir.localCount..ir.frameSize]);
-    try saved.append(gpa, @intCast(em.scopeDepth));
-    try saved.append(gpa, em.region);
-    try saved.append(gpa, em.file);
-    try saved.append(gpa, @bitCast(em.line));
+    @memcpy(f.copies, @as([]const i32, @ptrCast(em.copyOf[ir.localCount..frame])));
 }
 
 /// Pop what save pushed.
 fn restore(em: *MethodEmitter) void {
     const ir = em.ir;
-    const saved = &em.saved;
-    em.line = @bitCast(saved.pop().?);
-    em.file = saved.pop().?;
-    em.region = saved.pop().?;
-    em.scopeDepth = @intCast(saved.pop().?);
-    var r: i32 = @as(i32, @intCast(ir.frameSize)) - 1;
-    while (r >= @as(i32, @intCast(ir.localCount))) : (r -= 1) {
-        em.copyOf[@intCast(r)] = saved.pop().?;
+    const frame = ir.frameSize;
+    const top = em.saved.items.len - SavedFrame.size(ir);
+    const f = SavedFrame.of(ir, em.saved.items[top..]);
+    for (em.regType[0..frame], f.types) |*t, w| {
+        t.* = @fromBackingInt(w);
     }
 
+    for (em.checked[0..frame], em.promoted[0..frame], f.checked, f.promoted) |*checked, *promoted, c, p| {
+        checked.* = @intCast(c);
+        promoted.* = @intCast(p);
+    }
+
+    for (em.scopeWith[0..ir.maxScope], f.withs) |*with, w| {
+        with.* = @intCast(w);
+    }
+
+    @memcpy(@as([]i32, @ptrCast(em.copyOf[ir.localCount..frame])), f.copies);
     em.recount();
 
-    r = @as(i32, @intCast(ir.frameSize)) - 1;
-    while (r >= 0) : (r -= 1) {
-        em.promoted[@intCast(r)] = @intCast(saved.pop().?);
-        em.checked[@intCast(r)] = @intCast(saved.pop().?);
-    }
-
-    var d: i32 = @as(i32, @intCast(ir.maxScope)) - 1;
-    while (d >= 0) : (d -= 1) {
-        em.scopeWith[@intCast(d)] = @intCast(saved.pop().?);
-    }
-
-    r = @as(i32, @intCast(ir.frameSize)) - 1;
-    while (r >= 0) : (r -= 1) {
-        em.regType[@intCast(r)] = @fromBackingInt(saved.pop().?);
-    }
+    em.scopeDepth = f.scalars.scopeDepth;
+    em.region = f.scalars.region;
+    em.file = f.scalars.file;
+    em.line = f.scalars.line;
+    em.saved.shrinkRetainingCapacity(top);
 }
