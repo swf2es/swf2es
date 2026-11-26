@@ -4,12 +4,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
-const Abc = @import("abc.zig").Abc;
+const abc_ = @import("abc.zig");
+const Abc = abc_.Abc;
+const Lists = abc_.Lists;
 const C = @import("constants.zig");
 const Reader = @import("reader.zig").Reader;
 const readTraits = @import("traits.zig").readTraits;
 
-pub fn readMethodBodies(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool {
+pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocator.Error!bool {
     abc.methodBody = try gpa.alloc(i32, abc.methodCount());
     @memset(abc.methodBody, -1);
 
@@ -45,13 +47,13 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!b
         const codeStart: u32 = @intCast(r.pos);
         r.pos += codeLength;
 
-        const exceptionStart = abc.exceptionFrom.len;
+        const exceptionStart = abc_.len(lists.exceptionFrom);
         const exceptionCount = r.u30_();
         for (0..exceptionCount) |_| {
-            _ = try abc.exceptionFrom.append(gpa, r.u30_());
-            _ = try abc.exceptionTo.append(gpa, r.u30_());
-            _ = try abc.exceptionTarget.append(gpa, r.u30_());
-            _ = try abc.exceptionType.append(gpa, r.u30_());
+            try lists.exceptionFrom.append(lists.scratch, r.u30_());
+            try lists.exceptionTo.append(lists.scratch, r.u30_());
+            try lists.exceptionTarget.append(lists.scratch, r.u30_());
+            try lists.exceptionType.append(lists.scratch, r.u30_());
             const name = r.u30_();
             if (r.failed) {
                 return abc.fail(C.kCorruptABCError);
@@ -61,7 +63,7 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!b
                 return abc.fail(C.kCpoolIndexRangeError);
             }
 
-            _ = try abc.exceptionName.append(gpa, name);
+            try lists.exceptionName.append(lists.scratch, name);
         }
 
         const owner = abc.methodOwner[method];
@@ -73,24 +75,24 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!b
             return abc.fail(C.kDuplicateMethodBodyError);
         }
 
-        abc.methodBody[method] = @intCast(abc.bodyMethod.len);
-        _ = try abc.bodyMethod.append(gpa, method);
-        _ = try abc.bodyMaxStack.append(gpa, maxStack);
-        _ = try abc.bodyLocalCount.append(gpa, localCount);
-        _ = try abc.bodyInitScopeDepth.append(gpa, initScopeDepth);
-        _ = try abc.bodyMaxScopeDepth.append(gpa, maxScopeDepth);
-        _ = try abc.bodyCodeStart.append(gpa, codeStart);
-        _ = try abc.bodyCodeLength.append(gpa, codeLength);
-        _ = try abc.bodyExceptionStart.append(gpa, exceptionStart);
-        _ = try abc.bodyTraitStart.append(gpa, abc.traitName.len);
+        abc.methodBody[method] = @intCast(abc_.len(lists.bodyMethod));
+        try lists.bodyMethod.append(lists.scratch, method);
+        try lists.bodyMaxStack.append(lists.scratch, maxStack);
+        try lists.bodyLocalCount.append(lists.scratch, localCount);
+        try lists.bodyInitScopeDepth.append(lists.scratch, initScopeDepth);
+        try lists.bodyMaxScopeDepth.append(lists.scratch, maxScopeDepth);
+        try lists.bodyCodeStart.append(lists.scratch, codeStart);
+        try lists.bodyCodeLength.append(lists.scratch, codeLength);
+        try lists.bodyExceptionStart.append(lists.scratch, exceptionStart);
+        try lists.bodyTraitStart.append(lists.scratch, abc_.len(lists.traitName));
 
         // Every body has a traits list, empty unless the method needs an activation.
-        if (!try readTraits(gpa, abc, r, abc.activationOwner(method), abc.classCount())) {
+        if (!try readTraits(abc, lists, r, abc.activationOwner(method), abc.classCount())) {
             return false;
         }
     }
 
-    _ = try abc.bodyExceptionStart.append(gpa, abc.exceptionFrom.len);
-    _ = try abc.bodyTraitStart.append(gpa, abc.traitName.len);
+    try lists.bodyExceptionStart.append(lists.scratch, abc_.len(lists.exceptionFrom));
+    try lists.bodyTraitStart.append(lists.scratch, abc_.len(lists.traitName));
     return true;
 }

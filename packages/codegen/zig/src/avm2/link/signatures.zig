@@ -69,10 +69,10 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
     var next = baseSlots;
     var i = traits.first.get(t);
     while (i < traits.end.get(t)) : (i += 1) {
-        const tag = abc.traitTag.get(i);
+        const tag = abc.traitTag[i];
         const kind = tag & 0x0f;
         if (kind == C.TRAIT_Slot or kind == C.TRAIT_Const or kind == C.TRAIT_Class) {
-            const id = abc.traitId.get(i);
+            const id = abc.traitId[i];
             var slot: u32 = undefined;
             if (id == 0 or !early) {
                 next +%= 1;
@@ -92,9 +92,9 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
 
             var ty: i32 = undefined;
             if (kind == C.TRAIT_Class) {
-                ty = dom.classStatic.get(dom.classStart.get(index) + abc.traitIndex.get(i));
+                ty = dom.classStatic.get(dom.classStart.get(index) + abc.traitIndex[i]);
             } else {
-                ty = try resolveTypeId(dom, index, abc.traitIndex.get(i), false);
+                ty = try resolveTypeId(dom, index, abc.traitIndex[i], false);
                 if (ty < TYPE_Any) {
                     return dom.typeError;
                 }
@@ -124,7 +124,7 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
                 }
             }
 
-            traits.dispatch.set(dispatch + d, @intCast(methods + abc.traitIndex.get(i)));
+            traits.dispatch.set(dispatch + d, @intCast(methods + abc.traitIndex[i]));
         }
     }
 
@@ -141,12 +141,12 @@ pub fn checkInitialValues(traits: *const TraitsTable, dom: *const Domain, t: u32
     var next = if (base >= 0) traits.slotCount.get(@intCast(base)) else 0;
     var i = traits.first.get(t);
     while (i < traits.end.get(t)) : (i += 1) {
-        const kind = abc.traitTag.get(i) & 0x0f;
+        const kind = abc.traitTag[i] & 0x0f;
         if (kind != C.TRAIT_Slot and kind != C.TRAIT_Const and kind != C.TRAIT_Class) {
             continue;
         }
 
-        const id = abc.traitId.get(i);
+        const id = abc.traitId[i];
         var slot: u32 = undefined;
         if (id == 0 or !early) {
             next +%= 1;
@@ -159,8 +159,8 @@ pub fn checkInitialValues(traits: *const TraitsTable, dom: *const Domain, t: u32
         }
 
         const ty = traits.slotType.get(slots + slot - 1);
-        const value = if (kind == C.TRAIT_Class) 0 else abc.traitValue.get(i);
-        const err = dom.checkDefault(index, value, abc.traitValueKind.get(i), ty);
+        const value = if (kind == C.TRAIT_Class) 0 else abc.traitValue[i];
+        const err = dom.checkDefault(index, value, abc.traitValueKind[i], ty);
         if (err != 0) {
             return err;
         }

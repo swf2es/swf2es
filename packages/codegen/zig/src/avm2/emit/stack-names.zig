@@ -60,8 +60,8 @@ pub fn stackName(dom: *Domain, gpa: Allocator, index: u32, m: u32) Allocator.Err
         if (declaring) {
             var i = traits.first.get(tu);
             while (i < traits.end.get(tu)) : (i += 1) {
-                const tk = abc.traitTag.get(i) & 0x0f;
-                if ((tk == C.TRAIT_Method or tk == C.TRAIT_Getter or tk == C.TRAIT_Setter) and abc.traitIndex.get(i) == local) {
+                const tk = abc.traitTag[i] & 0x0f;
+                if ((tk == C.TRAIT_Method or tk == C.TRAIT_Getter or tk == C.TRAIT_Setter) and abc.traitIndex[i] == local) {
                     traits.readName(dom, index, i);
                     try ascii(gpa, &out, if (tk == C.TRAIT_Getter) "/get " else if (tk == C.TRAIT_Setter) "/set " else "/");
                     try shown(dom, gpa, &out, traits.nameNs, traits.nameId);

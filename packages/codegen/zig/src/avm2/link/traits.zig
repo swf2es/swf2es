@@ -430,7 +430,7 @@ pub const TraitsTable = struct {
         const abc = dom.abcs.get(index);
         const pool = &abc.pool;
         const versions = dom.abcNsVersion.get(index);
-        var mn = abc.traitName.get(i);
+        var mn = abc.traitName[i];
         if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
             mn = pool.mnA[mn];
         }
@@ -669,7 +669,7 @@ pub const TraitsTable = struct {
         const count = abc.methodParamStart[local + 1] - first;
         const start = self.paramType.len;
         for (0..count) |p| {
-            const ty = try typenames.resolveTypeId(dom, index, abc.paramTypes.get(first + @as(u32, @intCast(p))), false);
+            const ty = try typenames.resolveTypeId(dom, index, abc.paramTypes[first + @as(u32, @intCast(p))], false);
             if (ty < TYPE_Any) {
                 self.paramType.truncate(start);
                 return dom.typeError;
@@ -683,7 +683,7 @@ pub const TraitsTable = struct {
         for (0..optional) |j_| {
             const j: u32 = @intCast(j_);
             const ty = self.paramType.get(start + count - optional + j);
-            const err = dom.checkDefault(index, abc.optionalValue.get(optionalFirst + j), abc.optionalKind.get(optionalFirst + j), ty);
+            const err = dom.checkDefault(index, abc.optionalValue[optionalFirst + j], abc.optionalKind[optionalFirst + j], ty);
             if (err != 0) {
                 self.paramType.truncate(start);
                 return err;

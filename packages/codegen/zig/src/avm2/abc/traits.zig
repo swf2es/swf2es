@@ -4,20 +4,22 @@
 // classes are linked.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Abc = @import("abc.zig").Abc;
+const abc_ = @import("abc.zig");
+const Abc = abc_.Abc;
+const Lists = abc_.Lists;
 const C = @import("constants.zig");
 const ConstantPool = @import("pool.zig").ConstantPool;
 const Reader = @import("reader.zig").Reader;
 
 /// Read the traits of `owner`. Class traits may only name classes below
 /// `classesDefined`: avmplus defines classes one by one while parsing.
-pub fn readTraits(gpa: Allocator, abc: *Abc, r: *Reader, owner: i32, classesDefined: u32) Allocator.Error!bool {
+pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefined: u32) Allocator.Error!bool {
     const count = r.u30_();
     if (count > r.end - r.pos) {
         return abc.fail(C.kCorruptABCError);
     }
 
-    const first = abc.traitName.len;
+    const first = abc_.len(lists.traitName);
     for (0..count) |_| {
         const name = r.u30_();
         if (r.failed) {
@@ -49,7 +51,7 @@ pub fn readTraits(gpa: Allocator, abc: *Abc, r: *Reader, owner: i32, classesDefi
             return abc.fail(if (r.failed) C.kCorruptABCError else C.kUnsupportedTraitsKindError);
         }
 
-        _ = try abc.traitMetadataStart.append(gpa, abc.traitMetadata.len);
+        try lists.traitMetadataStart.append(lists.scratch, abc_.len(lists.traitMetadata));
         if (tag & C.ATTR_Metadata != 0) {
             const metadataCount = r.u30_();
             for (0..metadataCount) |_| {
@@ -58,7 +60,7 @@ pub fn readTraits(gpa: Allocator, abc: *Abc, r: *Reader, owner: i32, classesDefi
                     return abc.fail(C.kCorruptABCError);
                 }
 
-                _ = try abc.traitMetadata.append(gpa, metadata);
+                try lists.traitMetadata.append(lists.scratch, metadata);
             }
         }
 
@@ -80,20 +82,20 @@ pub fn readTraits(gpa: Allocator, abc: *Abc, r: *Reader, owner: i32, classesDefi
             }
         }
 
-        _ = try abc.traitName.append(gpa, name);
-        _ = try abc.traitTag.append(gpa, tag);
-        _ = try abc.traitId.append(gpa, id);
-        _ = try abc.traitIndex.append(gpa, index);
-        _ = try abc.traitValue.append(gpa, value);
-        _ = try abc.traitValueKind.append(gpa, valueKind);
+        try lists.traitName.append(lists.scratch, name);
+        try lists.traitTag.append(lists.scratch, tag);
+        try lists.traitId.append(lists.scratch, id);
+        try lists.traitIndex.append(lists.scratch, index);
+        try lists.traitValue.append(lists.scratch, value);
+        try lists.traitValueKind.append(lists.scratch, valueKind);
     }
 
     // As avmplus' makeMethodOf: a method belongs to at most one owner.
     var t = first;
-    while (t < abc.traitName.len) : (t += 1) {
-        const kind = abc.traitTag.at(t).* & 0x0f;
+    while (t < abc_.len(lists.traitName)) : (t += 1) {
+        const kind = lists.traitTag.items[t] & 0x0f;
         if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
-            const method = abc.traitIndex.at(t).*;
+            const method = lists.traitIndex.items[t];
             if (abc.methodOwner[method] != -1) {
                 return abc.fail(C.kCorruptABCError);
             }

@@ -4,14 +4,16 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
-const Abc = @import("abc.zig").Abc;
+const abc_ = @import("abc.zig");
+const Abc = abc_.Abc;
+const Lists = abc_.Lists;
 const C = @import("constants.zig");
 const Reader = @import("reader.zig").Reader;
 const traits = @import("traits.zig");
 const bindingNameError = traits.bindingNameError;
 const readTraits = traits.readTraits;
 
-pub fn readInstances(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool {
+pub fn readInstances(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocator.Error!bool {
     const count = r.u30_();
     if (count > r.end - r.pos) {
         return abc.fail(C.kCorruptABCError);
@@ -57,7 +59,7 @@ pub fn readInstances(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool
             return abc.fail(C.kCorruptABCError);
         }
 
-        abc.instanceInterfaceStart[i] = abc.interfaces.len;
+        abc.instanceInterfaceStart[i] = abc_.len(lists.interfaces);
         for (0..interfaceCount) |_| {
             const @"type" = r.u30_();
             if (r.failed) {
@@ -72,7 +74,7 @@ pub fn readInstances(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool
                 return abc.fail(C.kCpoolIndexRangeError);
             }
 
-            _ = try abc.interfaces.append(gpa, @"type");
+            try lists.interfaces.append(lists.scratch, @"type");
         }
 
         const init = r.u30_();
@@ -89,20 +91,20 @@ pub fn readInstances(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool
         abc.instanceFlags[i] = flags;
         abc.instanceProtectedNs[i] = protectedNs;
         abc.instanceInit[i] = init;
-        abc.instanceTraitStart[i] = abc.traitName.len;
+        abc.instanceTraitStart[i] = abc_.len(lists.traitName);
 
         // No class is defined yet while instances are parsed.
-        if (!try readTraits(gpa, abc, r, abc.instanceOwner(i), 0) or !bind(abc, init, abc.instanceOwner(i))) {
+        if (!try readTraits(abc, lists, r, abc.instanceOwner(i), 0) or !bind(abc, init, abc.instanceOwner(i))) {
             return false;
         }
     }
 
-    abc.instanceInterfaceStart[count] = abc.interfaces.len;
-    abc.instanceTraitStart[count] = abc.traitName.len;
+    abc.instanceInterfaceStart[count] = abc_.len(lists.interfaces);
+    abc.instanceTraitStart[count] = abc_.len(lists.traitName);
     return true;
 }
 
-pub fn readClasses(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool {
+pub fn readClasses(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocator.Error!bool {
     const count = abc.classCount();
     abc.classInit = try memory.allocZeroed(gpa, u32, count);
     abc.classTraitStart = try memory.allocZeroed(gpa, u32, count + 1);
@@ -115,19 +117,19 @@ pub fn readClasses(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool {
         }
 
         abc.classInit[i] = @intCast(init);
-        abc.classTraitStart[i] = abc.traitName.len;
+        abc.classTraitStart[i] = abc_.len(lists.traitName);
 
         // Class i's traits may name the classes before it.
-        if (!try readTraits(gpa, abc, r, abc.classOwner(i), i) or !bind(abc, @intCast(init), abc.classOwner(i))) {
+        if (!try readTraits(abc, lists, r, abc.classOwner(i), i) or !bind(abc, @intCast(init), abc.classOwner(i))) {
             return false;
         }
     }
 
-    abc.classTraitStart[count] = abc.traitName.len;
+    abc.classTraitStart[count] = abc_.len(lists.traitName);
     return true;
 }
 
-pub fn readScripts(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool {
+pub fn readScripts(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocator.Error!bool {
     const count = r.u30_();
     if (count > r.end - r.pos) {
         return abc.fail(C.kCorruptABCError);
@@ -150,8 +152,8 @@ pub fn readScripts(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool {
         }
 
         abc.scriptInit[i] = method;
-        abc.scriptTraitStart[i] = abc.traitName.len;
-        if (!try readTraits(gpa, abc, r, abc.scriptOwner(i), abc.classCount())) {
+        abc.scriptTraitStart[i] = abc_.len(lists.traitName);
+        if (!try readTraits(abc, lists, r, abc.scriptOwner(i), abc.classCount())) {
             return false;
         }
 
@@ -161,7 +163,7 @@ pub fn readScripts(gpa: Allocator, abc: *Abc, r: *Reader) Allocator.Error!bool {
         }
     }
 
-    abc.scriptTraitStart[count] = abc.traitName.len;
+    abc.scriptTraitStart[count] = abc_.len(lists.traitName);
     return true;
 }
 

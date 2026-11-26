@@ -268,11 +268,11 @@ pub fn addClassNames(dom: *Domain, index: u32) Allocator.Error!void {
     const end = abc.scriptTraitStart[abc.scriptCount()];
     var t = first;
     while (t < end) : (t += 1) {
-        if ((abc.traitTag.get(t) & 0x0f) != C.TRAIT_Class) {
+        if ((abc.traitTag[t] & 0x0f) != C.TRAIT_Class) {
             continue;
         }
 
-        var mn = abc.traitName.get(t);
+        var mn = abc.traitName[t];
         if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
             mn = pool.mnA[mn];
         }
@@ -297,7 +297,7 @@ pub fn addClassNames(dom: *Domain, index: u32) Allocator.Error!void {
         const name = strings[pool.mnB[mn]];
         const domain = dom.abcDomain.get(index);
         if (dom.nsType.get(nsId) != domain_.NS_Private and findTypeOf(dom, nsId, name, version, -1, domain) < 0) {
-            const id = dom.classStart.get(index) + abc.traitIndex.get(t);
+            const id = dom.classStart.get(index) + abc.traitIndex[t];
             try nameType(dom, nsId, name, version, @intCast(id), -1, domain);
         }
     }

@@ -2,14 +2,62 @@
 // ABC's own arrays (assembly/avm2/abc/abc.ts). Variable-length parts live in
 // shared tables: entry i of a table owns items [start[i], start[i + 1]).
 // Fixed tables are exact slices, zero where nothing was read, as
-// AssemblyScript's StaticArrays are; growing ones are Rows, whose rows
-// never move. A table the parse did not reach is empty, but those
-// AssemblyScript starts with one entry (the start tables), which `init`
-// gives each ABC of its own.
+// AssemblyScript's StaticArrays are; growing ones are built in Lists, in
+// the call's scratch, and kept as exact slices once the parse ends. A
+// table the parse did not reach is empty, but those AssemblyScript starts
+// with one entry (the start tables), which `init` gives each ABC of its
+// own.
 const std = @import("std");
 const memory = @import("../../memory.zig");
-const Rows = memory.Rows;
 const ConstantPool = @import("pool.zig").ConstantPool;
+
+/// The tables an ABC's parse grows, in the call's scratch, as long as the
+/// parse lasts; `keep` copies them into the ABC's arena as exact slices,
+/// whatever the parse reached.
+pub const Lists = struct {
+    scratch: std.mem.Allocator,
+    paramTypes: std.ArrayList(u32) = .empty,
+    optionalValue: std.ArrayList(u32) = .empty,
+    optionalKind: std.ArrayList(u8) = .empty,
+    metadataKey: std.ArrayList(u32) = .empty,
+    metadataValue: std.ArrayList(u32) = .empty,
+    interfaces: std.ArrayList(u32) = .empty,
+    bodyMethod: std.ArrayList(u32) = .empty,
+    bodyMaxStack: std.ArrayList(u32) = .empty,
+    bodyLocalCount: std.ArrayList(u32) = .empty,
+    bodyInitScopeDepth: std.ArrayList(u32) = .empty,
+    bodyMaxScopeDepth: std.ArrayList(u32) = .empty,
+    bodyCodeStart: std.ArrayList(u32) = .empty,
+    bodyCodeLength: std.ArrayList(u32) = .empty,
+    bodyExceptionStart: std.ArrayList(u32) = .empty,
+    exceptionFrom: std.ArrayList(u32) = .empty,
+    exceptionTo: std.ArrayList(u32) = .empty,
+    exceptionTarget: std.ArrayList(u32) = .empty,
+    exceptionType: std.ArrayList(u32) = .empty,
+    exceptionName: std.ArrayList(u32) = .empty,
+    bodyTraitStart: std.ArrayList(u32) = .empty,
+    traitName: std.ArrayList(u32) = .empty,
+    traitTag: std.ArrayList(u8) = .empty,
+    traitId: std.ArrayList(u32) = .empty,
+    traitIndex: std.ArrayList(u32) = .empty,
+    traitValue: std.ArrayList(u32) = .empty,
+    traitValueKind: std.ArrayList(u8) = .empty,
+    traitMetadataStart: std.ArrayList(u32) = .empty,
+    traitMetadata: std.ArrayList(u32) = .empty,
+
+    pub fn keep(self: *const Lists, gpa: std.mem.Allocator, abc: *Abc) std.mem.Allocator.Error!void {
+        inline for (@typeInfo(Lists).@"struct".field_names) |name| {
+            if (comptime !std.mem.eql(u8, name, "scratch")) {
+                @field(abc, name) = try gpa.dupe(@typeInfo(@TypeOf(@field(abc, name))).pointer.child, @field(self, name).items);
+            }
+        }
+    }
+};
+
+/// A list's length, as the tables' u32 indices take it.
+pub inline fn len(list: anytype) u32 {
+    return @intCast(list.items.len);
+}
 
 pub const Abc = struct {
     /// 0, or the VerifyError number avmplus would throw; then the tables are incomplete.
@@ -33,18 +81,18 @@ pub const Abc = struct {
     methodName: []u32 = &.{},
     methodFlags: []u8 = &.{},
     methodParamStart: []u32 = &.{},
-    paramTypes: Rows(u32) = .{},
+    paramTypes: []u32 = &.{},
     methodOptionalStart: []u32 = &.{},
-    optionalValue: Rows(u32) = .{},
-    optionalKind: Rows(u8) = .{},
+    optionalValue: []u32 = &.{},
+    optionalKind: []u8 = &.{},
     /// The owner (see instanceOwner .. activationOwner) a method is bound to, or -1.
     methodOwner: []i32 = &.{},
 
     // metadata_info
     metadataName: []u32 = &.{},
     metadataItemStart: []u32 = &.{},
-    metadataKey: Rows(u32) = .{},
-    metadataValue: Rows(u32) = .{},
+    metadataKey: []u32 = &.{},
+    metadataValue: []u32 = &.{},
 
     // instance_info and class_info. Base classes and interfaces are checked
     // when classes are linked, since they may come from another ABC.
@@ -55,7 +103,7 @@ pub const Abc = struct {
     /// Namespace index; 0 if the class has no protected namespace.
     instanceProtectedNs: []u32 = &.{},
     instanceInterfaceStart: []u32 = &.{},
-    interfaces: Rows(u32) = .{},
+    interfaces: []u32 = &.{},
     instanceInit: []u32 = &.{},
     classInit: []u32 = &.{},
 
@@ -65,38 +113,38 @@ pub const Abc = struct {
     // method_body_info, in ABC order.
     /// Index of each method's body, or -1 if it has none.
     methodBody: []i32 = &.{},
-    bodyMethod: Rows(u32) = .{},
-    bodyMaxStack: Rows(u32) = .{},
-    bodyLocalCount: Rows(u32) = .{},
-    bodyInitScopeDepth: Rows(u32) = .{},
-    bodyMaxScopeDepth: Rows(u32) = .{},
+    bodyMethod: []u32 = &.{},
+    bodyMaxStack: []u32 = &.{},
+    bodyLocalCount: []u32 = &.{},
+    bodyInitScopeDepth: []u32 = &.{},
+    bodyMaxScopeDepth: []u32 = &.{},
     /// Offset of the bytecode from the start of the ABC.
-    bodyCodeStart: Rows(u32) = .{},
-    bodyCodeLength: Rows(u32) = .{},
-    bodyExceptionStart: Rows(u32) = .{},
-    exceptionFrom: Rows(u32) = .{},
-    exceptionTo: Rows(u32) = .{},
-    exceptionTarget: Rows(u32) = .{},
+    bodyCodeStart: []u32 = &.{},
+    bodyCodeLength: []u32 = &.{},
+    bodyExceptionStart: []u32 = &.{},
+    exceptionFrom: []u32 = &.{},
+    exceptionTo: []u32 = &.{},
+    exceptionTarget: []u32 = &.{},
     /// Multiname of the caught type; 0 catches everything.
-    exceptionType: Rows(u32) = .{},
+    exceptionType: []u32 = &.{},
     /// Multiname of the catch variable; 0 if it has none.
-    exceptionName: Rows(u32) = .{},
+    exceptionName: []u32 = &.{},
     /// Body b's activation traits are traits [start[b] .. start[b + 1]].
-    bodyTraitStart: Rows(u32) = .{},
+    bodyTraitStart: []u32 = &.{},
 
     // traits_info of every instance, class, script and method activation, in that order.
-    traitName: Rows(u32) = .{},
+    traitName: []u32 = &.{},
     /// Kind in the low 4 bits, attributes in the high 4.
-    traitTag: Rows(u8) = .{},
+    traitTag: []u8 = &.{},
     /// Slot id, or disp id for methods.
-    traitId: Rows(u32) = .{},
+    traitId: []u32 = &.{},
     /// Type multiname (slots), class index or method index.
-    traitIndex: Rows(u32) = .{},
+    traitIndex: []u32 = &.{},
     /// Constant pool index of a slot's default value; 0 if none.
-    traitValue: Rows(u32) = .{},
-    traitValueKind: Rows(u8) = .{},
-    traitMetadataStart: Rows(u32) = .{},
-    traitMetadata: Rows(u32) = .{},
+    traitValue: []u32 = &.{},
+    traitValueKind: []u8 = &.{},
+    traitMetadataStart: []u32 = &.{},
+    traitMetadata: []u32 = &.{},
     instanceTraitStart: []u32 = &.{},
     classTraitStart: []u32 = &.{},
     scriptTraitStart: []u32 = &.{},
@@ -157,7 +205,7 @@ pub const Abc = struct {
     }
 
     pub inline fn bodyCount(self: *const Abc) u32 {
-        return self.bodyMethod.len;
+        return @intCast(self.bodyMethod.len);
     }
 
     /// Record the first error, as avmplus stops at the first throw; returns false.

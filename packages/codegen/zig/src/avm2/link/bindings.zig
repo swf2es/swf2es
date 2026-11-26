@@ -58,12 +58,12 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
         const nsVersion = traits.nameNsVersion;
         const version = traits.nameVersion;
         const name = traits.nameId;
-        const tag = abc.traitTag.get(i);
+        const tag = abc.traitTag[i];
         const kind = tag & 0x0f;
         switch (kind) {
             C.TRAIT_Slot, C.TRAIT_Const, C.TRAIT_Class => {
                 // As SlotIdCalcer: explicit ids only where slots may bind early.
-                const id = abc.traitId.get(i);
+                const id = abc.traitId[i];
                 var slot: u32 = undefined;
                 if (id == 0 or !early) {
                     slotCount +%= 1;

@@ -157,9 +157,9 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
 
     const nsSetCount = @max(readCount(r), 1);
     pool.nsSetStart = try memory.allocZeroed(gpa, u32, nsSetCount + 1);
-    var members: memory.Rows(u32) = .{};
+    var members: std.ArrayList(u32) = .empty;
     for (1..nsSetCount) |i| {
-        pool.nsSetStart[i] = members.len;
+        pool.nsSetStart[i] = @intCast(members.items.len);
         const count = readCount(r);
         for (0..count) |_| {
             const ns = r.u30_();
@@ -171,14 +171,11 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
                 return fail(pool, C.kCpoolIndexRangeError);
             }
 
-            _ = try members.append(scratch, ns);
+            try members.append(scratch, ns);
         }
     }
-    pool.nsSetStart[nsSetCount] = members.len;
-    pool.nsSetMembers = try gpa.alloc(u32, members.len);
-    for (pool.nsSetMembers, 0..) |*member, j| {
-        member.* = members.at(@intCast(j)).*;
-    }
+    pool.nsSetStart[nsSetCount] = @intCast(members.items.len);
+    pool.nsSetMembers = try gpa.dupe(u32, members.items);
 
     const mnCount = @max(readCount(r), 1);
     pool.mnKind = try memory.allocZeroed(gpa, u8, mnCount);
