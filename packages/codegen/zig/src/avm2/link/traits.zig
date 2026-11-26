@@ -105,6 +105,8 @@ pub const Binding = packed struct(u32) {
 };
 
 comptime {
+    // The word avmplus' layout gives, which the tables and the modules hold.
+    std.debug.assert(@sizeOf(Binding) == 4);
     std.debug.assert(@as(u32, @bitCast(Binding.of(5, .get))) == 5 << 3 | 5);
 }
 /// Types the rules below treat specially, as avmplus' BuiltinType.
@@ -831,6 +833,22 @@ pub fn legalDefault(bt: Builtin, value: Value) bool {
 }
 
 const testing = std.testing;
+
+test "a binding is the word id << 3 | kind, both ways" {
+    const words = [_]u32{ 0, 1, 2 << 3 | 2, 12 << 3 | 3, 7 << 3 | 5, 7 << 3 | 6, 7 << 3 | 7, 0x1fffffff << 3 | 1, 0xffffffff };
+    for (words) |word| {
+        const b: Binding = @bitCast(word);
+        try testing.expectEqual(word & 7, @backingInt(b.kind));
+        try testing.expectEqual(word >> 3, b.id);
+        try testing.expectEqual(word, @as(u32, @bitCast(Binding.of(word >> 3, b.kind))));
+    }
+
+    try testing.expectEqual(@as(u32, 0), @as(u32, @bitCast(Binding.none)));
+    try testing.expectEqual(@as(u32, 0xffffffff), @as(u32, @bitCast(Binding.ambiguous)));
+    // An id past 29 bits loses its top bits, as id << 3 in a u32 did.
+    const wide: u32 = 0xe0000005;
+    try testing.expectEqual(wide << 3 | 1, @as(u32, @bitCast(Binding.of(wide, .method))));
+}
 
 test "int and uint defaults are numbers they hold exactly" {
     try testing.expect(legalDefault(.int, .{ .double = -2147483648 }));
