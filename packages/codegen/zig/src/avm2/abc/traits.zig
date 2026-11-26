@@ -6,16 +6,18 @@ const std = @import("std");
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
+const Diagnostics = abc_.Diagnostics;
+const Error = abc_.Error;
 const C = @import("constants.zig");
 const ConstantPool = @import("pool.zig").ConstantPool;
 const Reader = @import("reader.zig").Reader;
 
 /// Read the traits of `owner`. Class traits may only name classes below
 /// `classesDefined`: avmplus defines classes one by one while parsing.
-pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefined: u32) bool {
+pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefined: u32, diag: *Diagnostics) error{Verify}!void {
     const count = r.u30_();
     if (count > r.end - r.pos) {
-        return abc.fail(C.kCorruptABCError);
+        return diag.fail(C.kCorruptABCError);
     }
 
     // As avmplus' makeMethodOf, a method belongs to at most one owner; a
@@ -25,12 +27,12 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
     for (0..count) |_| {
         const name = r.u30_();
         if (r.failed) {
-            return abc.fail(C.kCorruptABCError);
+            return diag.fail(C.kCorruptABCError);
         }
 
         const nameError = bindingNameError(&abc.pool, name, abc.builtin);
         if (nameError != 0) {
-            return abc.fail(nameError);
+            return diag.fail(nameError);
         }
 
         const tag: u8 = @truncate(r.u8_());
@@ -50,7 +52,7 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
             id = r.u30_();
             index = r.u30_();
         } else {
-            return abc.fail(if (r.failed) C.kCorruptABCError else C.kUnsupportedTraitsKindError);
+            return diag.fail(if (r.failed) C.kCorruptABCError else C.kUnsupportedTraitsKindError);
         }
 
         lists.push("traitMetadataStart", lists.len("traitMetadata"));
@@ -59,7 +61,7 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
             for (0..metadataCount) |_| {
                 const metadata = r.u30_();
                 if (r.failed or metadata >= abc.metadataCount()) {
-                    return abc.fail(C.kCorruptABCError);
+                    return diag.fail(C.kCorruptABCError);
                 }
 
                 lists.push("traitMetadata", metadata);
@@ -67,20 +69,20 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
         }
 
         if (r.failed) {
-            return abc.fail(C.kCorruptABCError);
+            return diag.fail(C.kCorruptABCError);
         }
 
         if (kind == C.TRAIT_Class) {
             if (index >= abc.classCount()) {
-                return abc.fail(C.kClassInfoExceedsCountError);
+                return diag.fail(C.kClassInfoExceedsCountError);
             }
 
             if (index >= classesDefined) {
-                return abc.fail(C.kClassInfoOrderError);
+                return diag.fail(C.kClassInfoOrderError);
             }
         } else if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
             if (index >= abc.methodCount()) {
-                return abc.fail(C.kMethodInfoExceedsCountError);
+                return diag.fail(C.kMethodInfoExceedsCountError);
             }
         }
 
@@ -101,10 +103,8 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
     }
 
     if (owned) {
-        return abc.fail(C.kCorruptABCError);
+        return diag.fail(C.kCorruptABCError);
     }
-
-    return true;
 }
 
 /// 0 if multiname `index` can name a trait or class: a QName with a namespace

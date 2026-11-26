@@ -6,13 +6,15 @@ const memory = @import("../../memory.zig");
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
+const Diagnostics = abc_.Diagnostics;
+const Error = abc_.Error;
 const C = @import("constants.zig");
 const Reader = @import("reader.zig").Reader;
 
-pub fn readMethods(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocator.Error!bool {
+pub fn readMethods(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *Diagnostics) Error!void {
     const count = r.u30_();
     if (@max(count, 1) > r.end - r.pos) {
-        return abc.fail(C.kCorruptABCError);
+        return diag.fail(C.kCorruptABCError);
     }
 
     abc.methodReturnType = try lists.zeroed(u32, gpa, abc.methodReturnType, count);
@@ -36,11 +38,11 @@ pub fn readMethods(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocat
         abc.methodName[i] = r.u30_();
         const flags: u8 = @truncate(r.u8_());
         if (r.failed) {
-            return abc.fail(C.kCorruptABCError);
+            return diag.fail(C.kCorruptABCError);
         }
 
         if (flags & C.METHOD_Native != 0 and !abc.builtin) {
-            return abc.fail(C.kIllegalNativeMethodError);
+            return diag.fail(C.kIllegalNativeMethodError);
         }
 
         abc.methodFlags[i] = flags;
@@ -54,7 +56,7 @@ pub fn readMethods(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocat
             }
 
             if (optionalCount == 0 or optionalCount > paramCount) {
-                return abc.fail(C.kCorruptABCError);
+                return diag.fail(C.kCorruptABCError);
             }
         }
 
@@ -67,19 +69,18 @@ pub fn readMethods(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocat
         }
 
         if (r.failed) {
-            return abc.fail(C.kCorruptABCError);
+            return diag.fail(C.kCorruptABCError);
         }
     }
 
     abc.methodParamStart[count] = lists.len("paramTypes");
     abc.methodOptionalStart[count] = lists.len("optionalValue");
-    return true;
 }
 
-pub fn readMetadata(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocator.Error!bool {
+pub fn readMetadata(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *Diagnostics) Error!void {
     const count = r.u30_();
     if (count > r.end - r.pos) {
-        return abc.fail(C.kCorruptABCError);
+        return diag.fail(C.kCorruptABCError);
     }
 
     abc.metadataName = try lists.zeroed(u32, gpa, abc.metadataName, count);
@@ -88,11 +89,11 @@ pub fn readMetadata(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Alloca
     for (0..count) |i| {
         const name = r.u30_();
         if (r.failed) {
-            return abc.fail(C.kCorruptABCError);
+            return diag.fail(C.kCorruptABCError);
         }
 
         if (name == 0 or name >= abc.pool.stringCount()) {
-            return abc.fail(C.kCpoolIndexRangeError);
+            return diag.fail(C.kCpoolIndexRangeError);
         }
 
         abc.metadataName[i] = name;
@@ -113,10 +114,9 @@ pub fn readMetadata(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Alloca
         }
 
         if (r.failed) {
-            return abc.fail(C.kCorruptABCError);
+            return diag.fail(C.kCorruptABCError);
         }
     }
 
     abc.metadataItemStart[count] = lists.len("metadataKey");
-    return true;
 }

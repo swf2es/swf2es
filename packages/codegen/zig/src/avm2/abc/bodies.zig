@@ -7,11 +7,13 @@ const memory = @import("../../memory.zig");
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
+const Diagnostics = abc_.Diagnostics;
+const Error = abc_.Error;
 const C = @import("constants.zig");
 const Reader = @import("reader.zig").Reader;
 const readTraits = @import("traits.zig").readTraits;
 
-pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocator.Error!bool {
+pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag: *Diagnostics) Error!void {
     abc.methodBody = try lists.zeroed(i32, gpa, abc.methodBody, abc.methodCount());
     @memset(abc.methodBody, -1);
 
@@ -20,11 +22,11 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Al
     for (0..count) |_| {
         const method = r.u30_();
         if (r.failed) {
-            return abc.fail(C.kCorruptABCError);
+            return diag.fail(C.kCorruptABCError);
         }
 
         if (method >= abc.methodCount()) {
-            return abc.fail(C.kMethodInfoExceedsCountError);
+            return diag.fail(C.kMethodInfoExceedsCountError);
         }
 
         const maxStack = r.u30_();
@@ -33,15 +35,15 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Al
         const maxScopeDepth = r.u30_();
         const codeLength = r.u30_();
         if (r.failed) {
-            return abc.fail(C.kCorruptABCError);
+            return diag.fail(C.kCorruptABCError);
         }
 
         if (codeLength == 0) {
-            return abc.fail(C.kInvalidCodeLengthError);
+            return diag.fail(C.kInvalidCodeLengthError);
         }
 
         if (@as(u64, r.pos) + codeLength >= r.end) {
-            return abc.fail(C.kCorruptABCError);
+            return diag.fail(C.kCorruptABCError);
         }
 
         const codeStart: u32 = @intCast(r.pos);
@@ -56,11 +58,11 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Al
             lists.push("exceptionType", r.u30_());
             const name = r.u30_();
             if (r.failed) {
-                return abc.fail(C.kCorruptABCError);
+                return diag.fail(C.kCorruptABCError);
             }
 
             if (name >= abc.pool.multinameCount()) {
-                return abc.fail(C.kCpoolIndexRangeError);
+                return diag.fail(C.kCpoolIndexRangeError);
             }
 
             lists.push("exceptionName", name);
@@ -68,11 +70,11 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Al
 
         const owner = abc.methodOwner[method];
         if (owner >= 0 and @as(u32, @intCast(owner)) < abc.classCount() and abc.instanceFlags[@intCast(owner)] & C.INSTANCE_Interface != 0) {
-            return abc.fail(C.kIllegalInterfaceMethodBodyError);
+            return diag.fail(C.kIllegalInterfaceMethodBodyError);
         }
 
         if (abc.methodBody[method] != -1) {
-            return abc.fail(C.kDuplicateMethodBodyError);
+            return diag.fail(C.kDuplicateMethodBodyError);
         }
 
         abc.methodBody[method] = @intCast(lists.len("bodyMethod"));
@@ -87,12 +89,9 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Al
         lists.push("bodyTraitStart", lists.len("traitName"));
 
         // Every body has a traits list, empty unless the method needs an activation.
-        if (!readTraits(abc, lists, r, abc.activationOwner(method), abc.classCount())) {
-            return false;
-        }
+        try readTraits(abc, lists, r, abc.activationOwner(method), abc.classCount(), diag);
     }
 
     lists.push("bodyExceptionStart", lists.len("exceptionFrom"));
     lists.push("bodyTraitStart", lists.len("traitName"));
-    return true;
 }
