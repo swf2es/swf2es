@@ -85,7 +85,7 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) 
 /// As PoolObject::resolveParameterizedType: Vector.<T>, which avmplus has
 /// as its own classes for int, uint, Number and *, and otherwise makes as
 /// a subclass of Vector.<*>; TypeId.failed if `base` is not Vector, and *
-/// for a builtin Vector absent.
+/// for a builtin Vector absent, or one that needs Vector.<*> without it.
 pub fn parameterized(dom: *Domain, base: i32, param: TypeId) Allocator.Error!TypeId {
     if (base != dom.vectorClass or base < 0) {
         return TypeId.failed;
@@ -102,6 +102,12 @@ pub fn parameterized(dom: *Domain, base: i32, param: TypeId) Allocator.Error!Typ
     const made = dom.vectorFor(param);
     if (made != .none) {
         return made.toType();
+    }
+
+    // A builtin ABC with Vector but not Vector.<*>: nothing to subclass, as
+    // for Vector.<*> above, rather than a panic.
+    if (dom.vectorObjectType == .any) {
+        return .any;
     }
 
     // As Traits::newParameterizedITraits: a subclass of Vector.<*> with no members of its own.

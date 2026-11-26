@@ -12,7 +12,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Error = Allocator.Error;
-const ir_ = @import("../ir/ir.zig");
+const TypeId = @import("../link/traits.zig").TypeId;
 const code_ = @import("code.zig");
 const BodyDecoder = code_.BodyDecoder;
 const NOT_NULL = code_.NOT_NULL;
@@ -24,7 +24,7 @@ pub fn saveEntry(bd: *BodyDecoder, t: u32) Error!void {
     const size = bd.frameSize;
     if (bd.entryUsed + size > bd.entryType.len) {
         const capacity = @max(bd.entryUsed + size, bd.entryType.len * 2);
-        const types = try bd.gpa.alloc(i32, capacity);
+        const types = try bd.gpa.alloc(TypeId, capacity);
         const flags = try bd.gpa.alloc(u8, capacity);
         @memcpy(types[0..bd.entryUsed], bd.entryType[0..bd.entryUsed]);
         @memcpy(flags[0..bd.entryUsed], bd.entryFlags[0..bd.entryUsed]);
@@ -215,7 +215,7 @@ pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!bool {
         const firstType = bd.typeOf(base);
         const firstFlags = bd.valueFlags[base];
         const firstOrigin = bd.origin[base];
-        const ty = ir_.columnType(bd.handlerType.items[i]);
+        const ty = bd.handlerType[i];
         bd.setValue(base, ty, if (bd.domain.typeNotNull(ty)) NOT_NULL else 0);
         bd.stack = 1;
         bd.scope = 0;
@@ -236,7 +236,7 @@ pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!bool {
 
 fn saveCurrent(bd: *BodyDecoder) Error!void {
     if (bd.savedType.len < bd.frameSize) {
-        bd.savedType = try bd.gpa.alloc(i32, bd.frameSize);
+        bd.savedType = try bd.gpa.alloc(TypeId, bd.frameSize);
         bd.savedFlags = try bd.gpa.alloc(u8, bd.frameSize);
     }
 
