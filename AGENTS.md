@@ -361,6 +361,14 @@ of its own.
   sets `codegenError()`. A row of the domain written in place is written
   inside a Change, so that a rollback writes it back; the test builds check
   this.
+- Each area names its errors: `pub const Error = error{Verify} ||
+  Allocator.Error` and the like, merged with `||`, every signature an
+  explicit `Error!T`, and a failure `return` of the error where it is
+  found. avmplus' VerifyError number goes in a `Diagnostics` the caller
+  passes (`src/avm2/abc/abc.zig`), as Zig's errors carry no payload. Where
+  the semantics keep going (a method that fails to verify still gets its
+  throwing stub), the failure is recorded, not unwound. The areas not yet
+  converted keep their sticky error fields until their pass.
 - An index that comes from the input needs an explicit comparison that
   rejects it with avmplus' error (`src/avm2/abc/constants.zig`), so that
   rejections match avmshell; a panic on malformed input is a bug, found by

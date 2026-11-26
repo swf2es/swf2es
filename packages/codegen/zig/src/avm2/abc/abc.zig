@@ -111,6 +111,26 @@ pub const Lists = struct {
     }
 };
 
+/// How an ABC's parse stops early: avmplus rejects it with a VerifyError,
+/// whose number Diagnostics holds, or memory runs out.
+pub const Error = error{Verify} || std.mem.Allocator.Error;
+
+/// Why a parse that returned Error.Verify stopped: the number of the
+/// VerifyError avmplus would throw, the first, as avmplus stops at its
+/// first throw.
+pub const Diagnostics = struct {
+    code: i32 = 0,
+
+    /// Error.Verify, the ABC rejected with VerifyError `code`.
+    pub fn fail(self: *Diagnostics, code: i32) error{Verify} {
+        if (self.code == 0) {
+            self.code = code;
+        }
+
+        return error.Verify;
+    }
+};
+
 pub const Abc = struct {
     /// 0, or the VerifyError number avmplus would throw; then the tables are incomplete.
     @"error": i32 = 0,
@@ -260,7 +280,7 @@ pub const Abc = struct {
         return @intCast(self.bodyMethod.len);
     }
 
-    /// Record the first error, as avmplus stops at the first throw; returns false.
+    /// Record the first error of linking the ABC, as avmplus stops at the first throw; returns false.
     pub fn fail(self: *Abc, err: i32) bool {
         if (self.@"error" == 0) {
             self.@"error" = err;

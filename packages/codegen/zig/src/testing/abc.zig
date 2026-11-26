@@ -13,6 +13,8 @@ const Abc = @import("../avm2/abc/abc.zig").Abc;
 const ops = @import("../avm2/abc/opcodes.zig");
 const readAbc = @import("../avm2/abc/parse.zig").readAbc;
 const readConstantPool = @import("../avm2/abc/pool.zig").readConstantPool;
+const ConstantPool = @import("../avm2/abc/pool.zig").ConstantPool;
+const Diagnostics = @import("../avm2/abc/abc.zig").Diagnostics;
 const reader = @import("../avm2/abc/reader.zig");
 const Reader = reader.Reader;
 const Rows = memory.Rows;
@@ -79,7 +81,12 @@ pub fn poolDump(gpa: Allocator, bytes: []const u8) Error![]const u8 {
     var r: Reader = .init(data, 0, bytes.len);
     const minor = r.u16_();
     const major = r.u16_();
-    const pool = try readConstantPool(gpa, gpa, &r, major == 47 and minor >= 16);
+    var pool: ConstantPool = .{};
+    var diag: Diagnostics = .{};
+    readConstantPool(gpa, gpa, &r, major == 47 and minor >= 16, &pool, &diag) catch |err| switch (err) {
+        error.Verify => {},
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     var out: Output = try .init(gpa);
     const w = out.writer();
@@ -129,8 +136,8 @@ pub fn poolDump(gpa: Allocator, bytes: []const u8) Error![]const u8 {
         try writeHex(w, pool.mnKind[i]);
         try w.print(" {d} {d}\n", .{ pool.mnA[i], pool.mnB[i] });
     }
-    if (pool.@"error" != 0) {
-        try w.print("error {d}\n", .{pool.@"error"});
+    if (diag.code != 0) {
+        try w.print("error {d}\n", .{diag.code});
     }
 
     return out.written();
