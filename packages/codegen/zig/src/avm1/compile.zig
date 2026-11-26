@@ -105,11 +105,7 @@ pub fn moduleUnits(gpa: Allocator) Error![]const u8 {
         const code = codes[unit.code.?];
         try listed.key.write(&entries);
         try entries.byte(1);
-        for ([_]i64{ key.at, key.end, key.bound }) |n| {
-            try entries.int(n);
-            try entries.byte(',');
-        }
-        try entries.byte(if (key.five) '1' else '0');
+        try key.write(&entries);
         try entries.byte(1);
         try entries.int(unit.high);
         try entries.byte(',');

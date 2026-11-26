@@ -14,7 +14,12 @@ pub const Output = struct {
     allocating: std.Io.Writer.Allocating,
 
     pub fn init(gpa: Allocator) Allocator.Error!Output {
-        return .{ .allocating = try .initCapacity(gpa, 1 << 16) };
+        return initCapacity(gpa, 1 << 16);
+    }
+
+    /// Room for `capacity` bytes at first, for a short result.
+    pub fn initCapacity(gpa: Allocator, capacity: usize) Allocator.Error!Output {
+        return .{ .allocating = try .initCapacity(gpa, capacity) };
     }
 
     pub fn deinit(self: *Output) void {
@@ -103,6 +108,7 @@ pub const Output = struct {
 
     /// Not inlined, as `text` is not: inlined, its loop came to some 16 KB
     /// over the emitters' 180 calls, and sharing it costs no time (P8).
+    /// `int` stays inline on purpose: it is a sign and a call of this one.
     pub noinline fn uint(self: *Output, n: u64) Allocator.Error!void {
         var digits: [20]u8 = undefined;
         var at: usize = digits.len;

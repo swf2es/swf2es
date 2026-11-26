@@ -18,14 +18,11 @@ pub const Key = struct {
 
     /// The key as the module names it.
     pub fn write(self: Key, out: *Output) Allocator.Error!void {
-        try out.int(self.unit.at);
         if (!self.short) {
-            try out.byte(',');
-            try out.int(self.unit.end);
-            try out.byte(',');
-            try out.int(self.unit.bound);
+            return self.unit.write(out);
         }
 
+        try out.int(self.unit.at);
         try out.text(if (self.unit.five) ",1" else ",0");
     }
 

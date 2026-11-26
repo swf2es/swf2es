@@ -4,6 +4,8 @@
 // a window, as bitmaps' bytes between blocks may be long; and not past the
 // end of its region.
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const Output = @import("../../output.zig").Output;
 
 /// A block of actions: `length` bytes from `offset` in the SWF's bytes.
 pub const BlockRange = struct {
@@ -19,6 +21,16 @@ pub const UnitKey = struct {
     end: i32,
     bound: i32,
     five: bool,
+
+    /// Its four numbers as V.far is called with them, joined with commas, the flag as 1 or 0.
+    pub fn write(self: UnitKey, out: *Output) Allocator.Error!void {
+        try out.int(self.at);
+        try out.byte(',');
+        try out.int(self.end);
+        try out.byte(',');
+        try out.int(self.bound);
+        try out.text(if (self.five) ",1" else ",0");
+    }
 };
 
 /// How far after its offset a unit's home reaches at most.
