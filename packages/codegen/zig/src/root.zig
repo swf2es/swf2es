@@ -440,6 +440,8 @@ test {
         @import("avm2/link/table.zig"),
         @import("avm2/link/namespaces.zig"),
         @import("avm2/link/domain.zig"),
+        @import("avm2/link/domain/queries.zig"),
+        @import("avm2/link/domain/names.zig"),
         @import("avm2/link/classes.zig"),
         @import("avm2/link/typenames.zig"),
         @import("avm2/link/traits.zig"),

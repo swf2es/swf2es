@@ -13,6 +13,7 @@ const avm1_compile = @import("avm1/compile.zig");
 const abc = @import("testing/abc.zig");
 const avm2 = @import("compile.zig");
 const domain = @import("testing/domain.zig");
+const abcs = @import("testing/domain/abcs.zig");
 const link = @import("avm2/link/domain.zig");
 
 pub const panic = root.panic;
@@ -383,9 +384,9 @@ fn throughExports(_: std.mem.Allocator, p: *memory.Pages) !void {
     root.domainReset(50);
     try failed.check();
     for ([_]struct { []const u8, bool, i32 }{
-        .{ &domain.link_builtin, true, 0 },
-        .{ &domain.link_user, false, 1 },
-        .{ &domain.link_failing, false, 0 },
+        .{ &abcs.link_builtin, true, 0 },
+        .{ &abcs.link_user, false, 1 },
+        .{ &abcs.link_failing, false, 0 },
     }, 0..) |added, k| {
         if (k == 1) {
             _ = root.input(0);
@@ -430,7 +431,7 @@ fn throughExports(_: std.mem.Allocator, p: *memory.Pages) !void {
     _ = root.domainParent(1);
     root.domainDrop(1);
     try failed.check();
-    _ = root.domainRestore(0, try staging.call(&domain.link_user), domain.link_user.len);
+    _ = root.domainRestore(0, try staging.call(&abcs.link_user), abcs.link_user.len);
     try failed.check();
 
     // The modules' exports, whole and a part a method, and the bodies alone.
