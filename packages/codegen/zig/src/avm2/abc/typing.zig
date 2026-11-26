@@ -301,17 +301,16 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             return true;
         },
         .newactivation => {
-            const body = domain.bodyTraits.get(bd.index)[@intCast(bd.abc.methodBody[bd.method])];
-            // A body without activation traits pushes *.
-            const t: TypeId = if (body >= 0) .of(@intCast(body)) else .any;
-            const err = if (t != .any) try domain.traits.resolve(domain, t.index()) else 0;
+            const t = domain.bodyTraits.get(bd.index)[@intCast(bd.abc.methodBody[bd.method])];
+            const err = if (t != .none) try domain.traits.resolve(domain, t.index()) else 0;
             if (err != 0) {
                 return bd.fail(err);
             }
 
-            return bd.push(t, .{ .not_null = true });
+            // A body without activation traits pushes *.
+            return bd.push(t.orAny(), .{ .not_null = true });
         },
-        .newcatch => return bd.push(bd.handlerScope[a], .{ .not_null = true }),
+        .newcatch => return bd.push(bd.handlerScopeAt(a), .{ .not_null = true }),
         .getscopeobject => {
             const i = bd.localCount + bd.byteAt(pc + 1);
             return bd.push(bd.typeOf(i), .{ .not_null = bd.valueFlags[i].not_null });
@@ -632,7 +631,7 @@ fn captureFunction(bd: *BodyDecoder, m: u32) Error!bool {
         return true;
     }
 
-    if (traits.methodTraits.get(global) >= 0) {
+    if (traits.methodTraits.get(global) != .none) {
         return bd.fail(C.kCorruptABCError);
     }
 

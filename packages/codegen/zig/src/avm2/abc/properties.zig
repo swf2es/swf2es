@@ -120,7 +120,7 @@ pub fn coerceArgs(bd: *BodyDecoder, m: u32, argc: u32) Error!bool {
 
 /// As Verifier::emitCoerceSuper: the receiver at i becomes the declaring class's base.
 pub fn coerceSuper(bd: *BodyDecoder, i: u32) Error!TypeId {
-    const base = if (bd.declarer >= 0) bd.domain.traits.base.get(@intCast(bd.declarer)) else .none;
+    const base = if (bd.declarer != .none) bd.domain.traits.base.get(bd.declarer.index()) else .none;
     if (base == .none) {
         _ = bd.fail(C.kIllegalSuperCallError);
         return TypeId.failed;
@@ -234,18 +234,18 @@ pub fn findProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
 
             if (j <= 0) {
                 const script = domain.findScript(bd.index, mn);
-                if (script >= 0) {
-                    _ = bd.push(.of(@intCast(script)), .{ .not_null = true });
+                if (script != .none) {
+                    _ = bd.push(script.toType(), .{ .not_null = true });
 
                     // Defined by this very script: its global object.
-                    if (domain.traits.init.get(@intCast(script)) == @as(i32, @bitCast(bd.global))) {
+                    if (domain.traits.init.get(script.index()) == @as(i32, @bitCast(bd.global))) {
                         return if (outer.size > 0)
                             emitFound(bd, .getouterscope, top, -1, 0, 0)
                         else
                             emitFound(bd, .ir_get_global_scope, top, -1, 0, 0);
                     }
 
-                    return emitFound(bd, .finddef, top, -1, mn, script);
+                    return emitFound(bd, .finddef, top, -1, mn, ir_.typeColumn(script.toType()));
                 }
 
                 global = true;
@@ -314,7 +314,7 @@ fn emitFound(bd: *BodyDecoder, op: IrOp, dst: i32, src: i32, a: u32, c: i32) Err
 pub fn findDef(bd: *BodyDecoder, mn: u32) bool {
     const domain = bd.domain;
     const script = domain.findScript(bd.index, mn);
-    return bd.push(if (script >= 0) .of(@intCast(script)) else domain.objectType(), .{ .not_null = true });
+    return bd.push(if (script != .none) script.toType() else domain.objectType(), .{ .not_null = true });
 }
 
 /// As Verifier::emitGetProperty: a slot's or getter's type when the name

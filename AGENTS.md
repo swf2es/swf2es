@@ -379,7 +379,10 @@ of its own.
   prefer helpers that return a bool to ones that return an optional or a
   union, unless a measurement says otherwise: LLVM may pass an optional
   through memory in wasm, which costs a load and a larger frame at every
-  call (`ir.opcodeIs` against `ir.opcode`).
+  call (`ir.opcodeIs` against `ir.opcode`). Tiny accessors on those paths
+  are `inline fn` (`Binding.index`, `TypeRef.index`, `TypeId.index`): LLVM
+  may put one out of line once it has enough callers, which cost the
+  verifier 1–2% in the compile bench.
 - Each file's tests are at its end, run natively by `zig build test`
   (`node packages/codegen/zig/build.ts --update` runs them). The 0xAA
   build (`dist-test/testing-poison.wasm`) fills freed and rolled-back

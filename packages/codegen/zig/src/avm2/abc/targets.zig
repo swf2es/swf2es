@@ -214,7 +214,7 @@ pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!bool {
         const firstType = bd.typeOf(base);
         const firstFlags = bd.valueFlags[base];
         const firstOrigin = bd.origin[base];
-        const ty = bd.handlerType[i];
+        const ty = bd.handlerTypeAt(i);
         bd.setValue(base, ty, .{ .not_null = bd.domain.typeNotNull(ty) });
         bd.stack = 1;
         bd.scope = 0;

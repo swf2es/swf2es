@@ -79,7 +79,7 @@ pub const TypeId = enum(i32) {
     }
 
     /// Its traits id; a type that is a traits'.
-    pub fn index(t: TypeId) u32 {
+    pub inline fn index(t: TypeId) u32 {
         std.debug.assert(t.isTraits());
         return @intCast(@backingInt(t));
     }
@@ -116,7 +116,7 @@ pub const TypeRef = enum(i32) {
     }
 
     /// Its traits id; a ref that is not none.
-    pub fn index(ref: TypeRef) u32 {
+    pub inline fn index(ref: TypeRef) u32 {
         std.debug.assert(ref != .none);
         return @intCast(@backingInt(ref));
     }
@@ -341,7 +341,8 @@ pub const TraitsTable = struct {
     dispatch: Rows(i32) = .{},
 
     // Methods by domain-wide id; ABC a's method m is Domain.methodStart[a] + m.
-    methodTraits: Rows(i32) = .{},
+    /// The traits each method is bound to, if any.
+    methodTraits: Rows(TypeRef) = .{},
     methodFinal: Rows(u8) = .{},
     /// Bound by a method, getter or setter trait, not as an initializer.
     methodVirtual: Rows(u8) = .{},
@@ -436,13 +437,13 @@ pub const TraitsTable = struct {
         }
 
         const t = self.methodTraits.get(m);
-        return if (t < 0) null else self.scope.get(@intCast(t));
+        return if (t == .none) null else self.scope.get(t.index());
     }
 
     /// Room for `count` more methods, unbound and unsigned.
     pub fn addMethods(self: *TraitsTable, gpa: Allocator, count: u32) Allocator.Error!void {
         for (0..count) |_| {
-            try self.methodTraits.push(gpa, -1);
+            try self.methodTraits.push(gpa, .none);
             try self.methodFinal.push(gpa, 0);
             try self.methodVirtual.push(gpa, 0);
             try self.methodFunction.push(gpa, 0);
@@ -859,7 +860,7 @@ pub const TraitsTable = struct {
 
         const owner = self.methodTraits.get(m);
         try dom.put(self.returnType.at(m), returnType);
-        try dom.put(self.receiverType.at(m), if (owner >= 0) TypeId.of(@intCast(owner)) else dom.objectType());
+        try dom.put(self.receiverType.at(m), if (owner != .none) owner.toType() else dom.objectType());
         try dom.put(self.paramStart.at(m), start);
         try dom.put(self.paramCount.at(m), count);
         try dom.put(self.optionalCount.at(m), optionalCount);

@@ -22,6 +22,7 @@ const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
 const Scope = traits_.Scope;
 const TypeId = traits_.TypeId;
+const TypeRef = traits_.TypeRef;
 const types = @import("../link/types.zig");
 const Abc = @import("abc.zig").Abc;
 const C = @import("constants.zig");
@@ -259,9 +260,9 @@ pub const BodyDecoder = struct {
     domain: *Domain,
     typed: bool,
     index: u32 = 0,
-    /// The method's domain-wide id, and the traits it belongs to or -1.
+    /// The method's domain-wide id, and the traits it belongs to, if any.
     global: u32 = 0,
-    declarer: i32 = -1,
+    declarer: TypeRef = .none,
     outer: *const Scope = &empty_scope,
     frameSize: u32 = 0,
     /// The current values: locals, then maxScope scope entries, then the stack.
@@ -469,7 +470,7 @@ pub const BodyDecoder = struct {
                 continue;
             }
 
-            try ir.addHandler(abc.exceptionFrom[h], abc.exceptionTo[h], self.blockOf[to], self.handlerType[i], self.handlerScope[i]);
+            try ir.addHandler(abc.exceptionFrom[h], abc.exceptionTo[h], self.blockOf[to], self.handlerTypeAt(@intCast(i)), self.handlerScopeAt(@intCast(i)));
         }
 
         var ok = true;
@@ -579,6 +580,13 @@ pub const BodyDecoder = struct {
             const capacity = @max(self.handlerCount, self.handlerType.len * 2);
             self.handlerType = try self.gpa.alloc(TypeId, capacity);
             self.handlerScope = try self.gpa.alloc(TypeId, capacity);
+        }
+
+        // An earlier body's handler types read for this one's would give the
+        // poison build other output.
+        if (memory.poison and typed) {
+            @memset(std.mem.sliceAsBytes(self.handlerType[0..self.handlerCount]), memory.poison_byte);
+            @memset(std.mem.sliceAsBytes(self.handlerScope[0..self.handlerCount]), memory.poison_byte);
         }
 
         for (0..self.handlerCount) |i_| {
@@ -774,6 +782,18 @@ pub const BodyDecoder = struct {
 
     pub inline fn typeOf(self: *const BodyDecoder, i: u32) TypeId {
         return self.valueType[i];
+    }
+
+    /// Handler i's exception type and catch scope type, as checkHandlers
+    /// wrote them for this body: in a typed walk, i below handlerCount.
+    pub inline fn handlerTypeAt(self: *const BodyDecoder, i: u32) TypeId {
+        std.debug.assert(i < self.handlerCount);
+        return self.handlerType[i];
+    }
+
+    pub inline fn handlerScopeAt(self: *const BodyDecoder, i: u32) TypeId {
+        std.debug.assert(i < self.handlerCount);
+        return self.handlerScope[i];
     }
 
     pub inline fn isNotNull(self: *const BodyDecoder, i: u32) bool {

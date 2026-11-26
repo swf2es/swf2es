@@ -573,11 +573,11 @@ pub const ModuleEmitter = struct {
         const abc = domain.abcs.get(self.index);
         const local = m - domain.methodStart.get(self.index);
         var text: List(u16) = .empty;
-        if (t < 0) {
+        if (t == .none) {
             return &.{};
         }
 
-        const tu: u32 = @intCast(t);
+        const tu = t.index();
         const kind = table.kind.get(tu);
         if (kind == .instance or kind == .class) {
             try text.appendSlice(gpa, try refs.className(&self.methods, table, tu));
@@ -1113,10 +1113,10 @@ pub const ModuleEmitter = struct {
         const bodies = self.domain.bodyTraits.get(self.index);
         for (bodies, 0..) |t, b| {
             try o.text(if (b != 0) ", " else "");
-            if (t < 0) {
+            if (t == .none) {
                 try o.text("null");
             } else {
-                try self.traits(@intCast(t));
+                try self.traits(t.index());
             }
         }
     }

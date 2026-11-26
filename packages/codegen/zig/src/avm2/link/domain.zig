@@ -416,9 +416,9 @@ pub const Domain = struct {
     methodAbcIndex: Rows(u32) = .{},
     /// The error of the last resolveTypeId that failed.
     typeError: i32 = 0,
-    /// Per ABC, each script's traits, and each body's activation traits or -1.
+    /// Per ABC, each script's traits, and each body's activation traits, if any.
     scriptTraits: Rows([]u32) = .{},
-    bodyTraits: Rows([]i32) = .{},
+    bodyTraits: Rows([]TypeRef) = .{},
 
     /// Class names. Those a script defines are visible to every ABC (owner -1);
     /// while an ABC links, its own classes are visible to it by instance name
@@ -884,13 +884,13 @@ pub const Domain = struct {
         }
 
         const t = traits.methodTraits.get(m);
-        return t >= 0 and traits.init.get(@intCast(t)) == @as(i32, @bitCast(m)) and traits.kind.get(@intCast(t)) != .script;
+        return t != .none and traits.init.get(t.index()) == @as(i32, @bitCast(m)) and traits.kind.get(t.index()) != .script;
     }
 
     /// As DomainMgr::findScriptInPoolByMultiname: the global object traits of
-    /// the one script that defines multiname `mn` of ABC `index`, or -1 for
-    /// none or several.
-    pub fn findScript(self: *const Domain, index: u32, multiname: u32) i32 {
+    /// the one script that defines multiname `mn` of ABC `index`, or none
+    /// for none or several.
+    pub fn findScript(self: *const Domain, index: u32, multiname: u32) TypeRef {
         const pool = &self.abcs.get(index).pool;
         var mn = multiname;
         if (pool.mnKind[mn] == .type_name) {
@@ -906,14 +906,14 @@ pub const Domain = struct {
         }
 
         const set = pool.mnA[mn];
-        var found: i32 = -1;
+        var found: TypeRef = .none;
         var m = pool.nsSetStart[set];
         while (m < pool.nsSetStart[set + 1]) : (m += 1) {
             const ns = pool.nsSetMembers[m];
             const script = self.scriptOf(self.find(ids[ns], name, versions[ns], self.abcDomain.get(index)));
-            if (script >= 0) {
-                if (found >= 0 and found != script) {
-                    return -1;
+            if (script != .none) {
+                if (found != .none and found != script) {
+                    return .none;
                 }
 
                 found = script;
@@ -923,14 +923,14 @@ pub const Domain = struct {
         return found;
     }
 
-    /// The global object traits of the script binding b is in, or -1.
-    pub fn scriptOf(self: *const Domain, b: i32) i32 {
+    /// The global object traits of the script binding b is in, or none.
+    pub fn scriptOf(self: *const Domain, b: i32) TypeRef {
         if (b < 0) {
-            return -1;
+            return .none;
         }
 
         const index = self.bindingAbc.get(@intCast(b));
-        return @intCast(self.scriptTraits.get(index)[self.bindingScript.get(@intCast(b))]);
+        return .of(self.scriptTraits.get(index)[self.bindingScript.get(@intCast(b))]);
     }
 
     /// The interned id of multiname `mn`'s name with a leading underscore,
