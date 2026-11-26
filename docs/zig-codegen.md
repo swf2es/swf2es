@@ -526,9 +526,23 @@ After the swap, done in stage 7 with no release between: the jobs run on
 Zig, and the parity job went with `assembly/`. From then on output is held
 by determinism, conformance, Tamarin and the corpus, as before, and by
 golden digests (`tests/golden/`, question 8 below): what the compiler makes
-of the libraries, the unit tests' ABCs, the conformance cases and AVM1
-blocks, generated from the binary the last parity run held to
+of the libraries (the player's and the oracle's), the unit tests' ABCs,
+the conformance cases (with and without line maps), the programs and
+AVM1 blocks, generated from the binary the last parity run held to
 AssemblyScript's, and moved only by a change that means to move them.
+
+What is no longer byte-compared on every pull request: Tamarin's ABCs,
+Ruffle's corpus (AVM1 and AS3), API versions other than the ones the
+golden digests use (the player's latest, AIR's, the shell's),
+`compileModuleLogged`'s logs, `replay`, the key bytes (`domainKeyHeaderBytes`,
+`domainKeyLogBytes`), the stepped paths of a module written a part at a
+time under small budgets, and the fuzzers' differential suites. Their
+behaviour is still tested (Tamarin, the corpus job, determinism, the
+keys and domains tests), but not their bytes. For a refactor of the
+compiler, the tool is the old-against-new harness: `tests/parity/run.ts`
+at the tag `zig-last-parity`, its AssemblyScript side changed to load the
+Zig test build of the commit before the refactor (both builds bind
+through `src/zig.ts`), compares every suite byte for byte.
 
 ## 6. AssemblyScript behaviour to copy
 
@@ -827,7 +841,7 @@ ReleaseSafe, the parser now reached through `domainAdd`; the test build
   error, its traits before and after resolving, the ABCs it sees, its
   classes' slot types, and the domain's counts, builtins, weights and
   lookups: the libraries; the tests' ABCs and the link cases; the
-  corpus's 1,000-odd AS3 SWFs and two private ones, each into a child
+  corpus's 1,000-odd AS3 SWFs and two additional local ones, each into a child
   domain then dropped; 8,000 mutated ABCs; the rich and the link ABCs
   cut and set byte by byte; 150 random lifetimes of application domains;
   and, where a host keeps them, the 9,884 ABCs ASC compiled for the
@@ -870,7 +884,7 @@ Stage 4 (the verifier and the IR: `avm2/ir/ir.ts`, `abc/code`,
   (20,000); each ABC verified after it links (the error of every body,
   its IR checked, and the IR of up to 64 bodies spread over it): the
   libraries (315), the tests' and the link cases' (448), the corpus's AS3
-  SWFs and two private ones (80,153), 6,000 ABCs with their code mutated
+  SWFs and two additional local ones (80,153), 6,000 ABCs with their code mutated
   (29,078), and, where a host keeps them, the oracle's 9,884 (112,914).
   All the same, the poison build's included, with no unspecified read.
   Under `SWF2ES_COMPILER=zig` the `code`, `verify`, `typed` and `ir`
@@ -887,7 +901,7 @@ Stage 4 (the verifier and the IR: `avm2/ir/ir.ts`, `abc/code`,
   memory leaves wasm memory as large as it grew, up to 4 GiB, which never
   shrinks: the host's recovery (section 7) should count that, a fresh
   instance being the only way to give it back. Parity case counts include
-  the two private SWFs where SWF2ES_PRIVATE names them.
+  two additional local SWFs.
 - *Parity of the IR, whole.* `domainIrAll` (both test builds) writes every
   verified body's IR as numbers, block entry frames, flags and the with
   bit included, which stage 5 reads; each verify suite compares it for
