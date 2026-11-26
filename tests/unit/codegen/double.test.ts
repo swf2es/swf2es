@@ -1,64 +1,68 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { abc } from "./abc-builder.ts";
-import { type Build, loadTesting, TESTED } from "./testing-module.ts";
+import { loadTesting, TESTED } from "./testing-module.ts";
 
-const POWERS10 = [1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000];
-
-// Doubles whose Grisu2 digits end ten places past the integer part, and the
-// text codegen has always printed for them: the last digit unrounded. A
-// multiplier over 5e8 for 10^10 rounds them otherwise.
-const PRINTED: [number, string][] = [
-  [6.1300000000000005e-22, "6.1300000000000009e-22"],
-  [3.8712999999999997e-22, "3.8712999999999999e-22"],
-  [3.3493069370161103e-14, "3.3493069370161106e-14"],
-  [2396245078700000000, "2396245078700000500.0"],
+// Doubles as the compiler prints them (output.zig's numberText): what
+// JavaScript's String prints, the shortest digits that read back as the
+// double. Among them, those AssemblyScript's Grisu2 printed with longer or
+// other digits, and an integer past 2^53, which it printed with ".0".
+const NOTED = [
+  6.1300000000000005e-22,
+  3.8712999999999997e-22,
+  3.3493069370161103e-14,
+  2396245078700000000,
+  Math.SQRT2,
+  0.1 + 0.2,
+  209.14077758789062,
+  1.2345678901234568e21,
+  2 ** 53 + 2,
+  1e21,
+  1e-7,
+  -1.5e-7,
+  0.000001234,
+  5e-324,
+  Number.MAX_VALUE,
+  2.2250738585072014e-308,
+  -123.456,
 ];
 
-/** Where POWERS10 of the number formatting (zig/src/dtoa.zig) is in `memory`, in words. */
-function powers10(memory: WebAssembly.Memory): number {
-  const words = new Uint32Array(memory.buffer);
-  const found: number[] = [];
-  for (let i = 0; i + POWERS10.length <= words.length; i++) {
-    if (POWERS10.every((n, k) => words[i + k] === n)) {
-      found.push(i);
+/** The doubles `doubles` as the test build's pool dump prints them. */
+async function printed(doubles: number[]): Promise<string[]> {
+  const testing = await loadTesting(TESTED);
+  return (testing.poolDump(abc({ doubles })) as string)
+    .trimEnd()
+    .split("\n")
+    .map((line) => line.split(" ")[2]);
+}
+
+test("doubles print as JavaScript's String prints them", async () => {
+  assert.deepEqual(
+    await printed(NOTED),
+    NOTED.map((d) => String(d)),
+  );
+});
+
+test("random doubles print as JavaScript's String prints them", async () => {
+  // Any bit pattern but zeros, NaNs and infinities, from a fixed seed.
+  let seed = 1;
+  const next = () => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return seed;
+  };
+  const bits = new DataView(new ArrayBuffer(8));
+  const doubles: number[] = [];
+  while (doubles.length < 4000) {
+    bits.setUint32(0, next());
+    bits.setUint32(4, next());
+    const d = bits.getFloat64(0);
+    if (Number.isFinite(d) && d !== 0) {
+      doubles.push(d);
     }
   }
 
-  assert.equal(found.length, 1);
-  return found[0];
-}
-
-async function printed(build: Build): Promise<string[]> {
-  const testing = await loadTesting(build);
-  const dump = (): string[] =>
-    (testing.poolDump(abc({ doubles: PRINTED.map(([d]) => d) })) as string)
-      .trimEnd()
-      .split("\n")
-      .map((line) => line.split(" ")[2]);
-  const before = dump();
-
-  // The word after the table, read as 10^10 when it overran, made as large
-  // as a word gets: the digits must not change. Only that word matters: from
-  // 10^11 on, no u32 is large enough to round.
-  const words = new Uint32Array(testing.memory.buffer);
-  const after = powers10(testing.memory) + POWERS10.length;
-  const kept = words[after];
-  words[after] = 0xffffffff;
-  const poisoned = dump();
-  new Uint32Array(testing.memory.buffer)[after] = kept;
-
-  assert.deepEqual(poisoned, before);
-  return before;
-}
-
-test("doubles print without reading past the table of powers of ten", async () => {
-  const text = await printed(TESTED);
   assert.deepEqual(
-    text,
-    PRINTED.map(([, s]) => s),
+    await printed(doubles),
+    doubles.map((d) => String(d)),
   );
-  for (const [i, [d]] of PRINTED.entries()) {
-    assert.equal(Number(text[i]), d);
-  }
 });

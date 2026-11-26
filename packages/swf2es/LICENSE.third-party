@@ -445,13 +445,11 @@ https://www.w3.org/Consortium/Legal/2015/copyright-software-and-document
 AssemblyScript
 ==============
 
-dist/codegen.wasm holds ports of two parts of AssemblyScript's standard
+dist/codegen.wasm holds a port of part of AssemblyScript's standard
 library, https://github.com/AssemblyScript/assemblyscript, under the
-Apache License 2.0 (LICENSE), so that the compiler writes and reads
-numbers as it did when AssemblyScript compiled it: its Grisu2 number
-formatting (std/assembly/util/number.ts), ported to zig/src/dtoa.zig, and
-its integer parsing (strtol of std/assembly/util/string.ts), ported to
-zig/src/parse.zig. Its NOTICE:
+Apache License 2.0 (LICENSE), so that the compiler reads numbers as it
+did when AssemblyScript compiled it: its integer parsing (strtol of
+std/assembly/util/string.ts), ported to zig/src/parse.zig. Its NOTICE:
 
 The following authors have all licensed their contributions to AssemblyScript
 under the licensing terms detailed in LICENSE:

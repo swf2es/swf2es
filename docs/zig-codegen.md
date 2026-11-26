@@ -577,13 +577,15 @@ From the AVM1 slice, already in `experiment/zig-avm1`:
 
 - **Printing a double.** `Output.double` writes integers below 2^53
   itself and everything else with `f64.toString`, AssemblyScript's
-  Grisu2. `dtoa.zig` is that algorithm as the repository's patch to
+  Grisu2. `dtoa.zig` was that algorithm as the repository's patch to
   AssemblyScript has it (`patches/assemblyscript@0.28.20.patch`, since
   the slice): where `genDigits` read past the ten entries of `POWERS10`
   into whatever static data followed, it multiplies by 0, which leaves
-  the last digit unrounded, as every build printed it. The slice's
-  copied over-read values (`tools/powers10.ts`) are gone; section 10's
-  fourth question is answered by the patch.
+  the last digit unrounded, as every build printed it. The idiomatic
+  pass's P11 replaced it: `numberText` (output.zig) writes what
+  JavaScript's `String` writes, from the shortest digits Zig's
+  `std.fmt.float` (Ryu) gives, a deliberate change of the golden digests
+  in which every literal that changed reads as the same double.
 - **Parsing an integer.** `i32.parse` and `I32.parseInt`: signs,
   whitespace, digits after garbage, wrapping. AVM2 uses them in
   `compile.ts` on the body list of `domainEmitEach` and on
@@ -742,8 +744,9 @@ more:
   stripped, plus a build with names for reading a trap's stack.
 - `tools/notices.ts` gains Zig's standard library (MIT) for what is
   compiled in. AssemblyScript's notice stays after the deletion, reworded:
-  `dtoa.zig` and `parse.zig` are translated from AssemblyScript's standard
-  library (Apache-2.0), say so, and are compiled into `codegen.wasm`.
+  `parse.zig` is translated from AssemblyScript's standard library
+  (Apache-2.0), says so, and is compiled into `codegen.wasm` (`dtoa.zig`
+  was too, until P11 replaced it).
 
 **Release mode: ReleaseSafe**, as agreed. A wrong index in the compiler
 would otherwise become wrong JavaScript run with the page's privileges.
@@ -1285,7 +1288,7 @@ For the user to decide:
    that panicked fails as a VerifyError would.
 4. **`POWERS10`.** Answered: the repository patched AssemblyScript to
    read no further than the table, printing what every build printed;
-   `dtoa.zig` does the same.
+   `dtoa.zig` did the same until P11 replaced it with Zig's Ryu.
 5. **Size limit.** What may the wasm weigh before ReleaseSafe gives way
    to Small for cold code: twice today's gzipped size, as proposed?
 6. **M2 at all, and when?** If M1 alone brings the 300-load session

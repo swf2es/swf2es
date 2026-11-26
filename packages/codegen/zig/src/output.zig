@@ -1,11 +1,11 @@
 // The JavaScript being written, as bytes, all ASCII (every character past
 // it escaped), in one growable buffer (assembly/output.ts). The emitters,
 // AVM1's and AVM2's, write through its methods, as AssemblyScript's call
-// them; a double goes through AS's own dtoa (dtoa.zig). The test build's
-// dumps write through `writer()`, a std.Io.Writer, with std.fmt.
+// them; a double is written as JavaScript's String writes it, from Zig's
+// shortest digits (numberText). The test build's dumps write through
+// `writer()`, a std.Io.Writer, with std.fmt.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const dtoa = @import("dtoa.zig");
 
 /// What writing through `writer()` can fail with: a writer that cannot grow, or an allocation.
 pub const Error = std.Io.Writer.Error || Allocator.Error;
@@ -136,9 +136,8 @@ pub const Output = struct {
         } else if (d == @floor(d) and @abs(d) < 9007199254740992) {
             try self.int(@intFromFloat(d));
         } else {
-            // Every double round-trips through 17 significant digits.
-            var buffer: [dtoa.max_length]u8 = undefined;
-            try self.text(dtoa.dtoa(&buffer, d));
+            var buffer: [max_number_length]u8 = undefined;
+            try self.text(numberText(&buffer, d));
         }
     }
 
@@ -310,6 +309,104 @@ test "the AVM2 emitters' methods write as AssemblyScript's Output does" {
     try std.testing.expectEqualStrings(" !#[]~plain\\x7fend\\\"tailab\\u00e9cd\\x01e", out.written());
 }
 
+/// Room for what numberText writes: 25 bytes at most, a sign, "0.", five
+/// zeros and 17 digits.
+pub const max_number_length = 32;
+
+/// What JavaScript's String(d) writes for a finite, nonzero double
+/// (ECMA-262, Number::toString), from the shortest digits that read back
+/// as it, which std.fmt.float's Ryu gives.
+pub fn numberText(buffer: *[max_number_length]u8, d: f64) []const u8 {
+    var scientific: [std.fmt.float.min_buffer_size]u8 = undefined;
+    // Full precision fits min_buffer_size, as render's doc says.
+    const s = std.fmt.float.render(&scientific, d, .{}) catch unreachable;
+
+    // [-]D[.DDD]e[-]X: the digits, and n, where the point goes after the n-th.
+    var digits: [17]u8 = undefined;
+    var k: usize = 0;
+    var at: usize = @intFromBool(s[0] == '-');
+    while (s[at] != 'e') : (at += 1) {
+        if (s[at] != '.') {
+            digits[k] = s[at];
+            k += 1;
+        }
+    }
+
+    const exponent = std.fmt.parseInt(i32, s[at + 1 ..], 10) catch unreachable;
+    while (k > 1 and digits[k - 1] == '0') {
+        k -= 1;
+    }
+
+    const n = exponent + 1;
+    var len: usize = 0;
+    if (d < 0) {
+        buffer[0] = '-';
+        len = 1;
+    }
+
+    const ki: i32 = @intCast(k);
+    if (ki <= n and n <= 21) {
+        // 1234e7: the digits, then zeros.
+        @memcpy(buffer[len..][0..k], digits[0..k]);
+        len += k;
+        const zeros: usize = @intCast(n - ki);
+        @memset(buffer[len..][0..zeros], '0');
+        len += zeros;
+    } else if (0 < n and n <= 21) {
+        // 1234e-2: the point among the digits.
+        const whole: usize = @intCast(n);
+        @memcpy(buffer[len..][0..whole], digits[0..whole]);
+        len += whole;
+        buffer[len] = '.';
+        len += 1;
+        @memcpy(buffer[len..][0 .. k - whole], digits[whole..k]);
+        len += k - whole;
+    } else if (-6 < n and n <= 0) {
+        // 1234e-7: "0.", zeros, the digits.
+        buffer[len] = '0';
+        buffer[len + 1] = '.';
+        len += 2;
+        const zeros: usize = @intCast(-n);
+        @memset(buffer[len..][0..zeros], '0');
+        len += zeros;
+        @memcpy(buffer[len..][0..k], digits[0..k]);
+        len += k;
+    } else {
+        // 1.234e+30: one digit, the rest after a point, the exponent signed.
+        buffer[len] = digits[0];
+        len += 1;
+        if (k > 1) {
+            buffer[len] = '.';
+            len += 1;
+            @memcpy(buffer[len..][0 .. k - 1], digits[1..k]);
+            len += k - 1;
+        }
+
+        buffer[len] = 'e';
+        buffer[len + 1] = if (n - 1 < 0) '-' else '+';
+        len += 2;
+        var e: u32 = @abs(n - 1);
+        var ed: [3]u8 = undefined;
+        var el: usize = 0;
+        while (true) {
+            ed[el] = @intCast('0' + e % 10);
+            el += 1;
+            e /= 10;
+            if (e == 0) {
+                break;
+            }
+        }
+
+        while (el > 0) {
+            el -= 1;
+            buffer[len] = ed[el];
+            len += 1;
+        }
+    }
+
+    return buffer[0..len];
+}
+
 /// The code point of the well-formed sequence of `n` bytes that starts `p` (wellFormed).
 pub fn codePoint(p: []const u8, n: u32) u32 {
     const c: u32 = p[0];
@@ -346,6 +443,34 @@ fn follows(b: u8) bool {
     return b & 0xc0 == 0x80;
 }
 
+fn expectNumber(d: f64, text: []const u8) !void {
+    var buffer: [max_number_length]u8 = undefined;
+    try std.testing.expectEqualStrings(text, numberText(&buffer, d));
+}
+
+test "doubles as JavaScript's String writes them, each reading back as itself" {
+    try expectNumber(0.1, "0.1");
+    try expectNumber(-1.5, "-1.5");
+    try expectNumber(1e21, "1e+21");
+    try expectNumber(1.5e300, "1.5e+300");
+    try expectNumber(1e-7, "1e-7");
+    try expectNumber(1.234e-7, "1.234e-7");
+    try expectNumber(0.000001234, "0.000001234");
+    try expectNumber(9007199254740994.0, "9007199254740994");
+    try expectNumber(123.456, "123.456");
+    try expectNumber(5e-324, "5e-324");
+    try expectNumber(1.7976931348623157e308, "1.7976931348623157e+308");
+    try expectNumber(3.14159, "3.14159");
+    // Where AssemblyScript's Grisu2 left the last digit unrounded, the shortest digits.
+    try expectNumber(6.1300000000000005e-22, "6.1300000000000005e-22");
+    try expectNumber(3.8712999999999997e-22, "3.8712999999999997e-22");
+    try expectNumber(3.3493069370161103e-14, "3.3493069370161103e-14");
+    try expectNumber(2396245078700000000.0, "2396245078700000000");
+    try expectNumber(0.625666, "0.625666");
+    try expectNumber(6.92923, "6.92923");
+    try expectNumber(-6.39568e-7, "-6.39568e-7");
+}
+
 test "numbers as AssemblyScript writes them" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
@@ -372,7 +497,8 @@ test "well-formed UTF-8, as JavaScript and avmplus both read it" {
     try std.testing.expectEqual(0, wellFormed("\xe2\x80"));
 }
 
-/// A double as AssemblyScript's f64.toString writes it, as a template string does.
+/// A double in a dump: as numberText writes it, and zero as "0.0", as
+/// AssemblyScript's template strings wrote both zeros.
 pub fn writeF64(w: *std.Io.Writer, d: f64) std.Io.Writer.Error!void {
     if (d == 0) {
         return w.writeAll("0.0");
@@ -386,8 +512,8 @@ pub fn writeF64(w: *std.Io.Writer, d: f64) std.Io.Writer.Error!void {
         return w.writeAll(if (d < 0) "-Infinity" else "Infinity");
     }
 
-    var buffer: [dtoa.max_length]u8 = undefined;
-    try w.writeAll(dtoa.dtoa(&buffer, d));
+    var buffer: [max_number_length]u8 = undefined;
+    try w.writeAll(numberText(&buffer, d));
 }
 
 /// The UTF-16 units String.UTF8.decodeUnsafe makes of `bytes`, written as

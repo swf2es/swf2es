@@ -256,13 +256,11 @@ function assemblyScript(): Notice {
     title: "AssemblyScript",
     // Its NOTICE names parts of its standard library from musl and Arm (MIT) and V8 (BSD-3-Clause).
     spdx: ["MIT", "BSD-3-Clause"],
-    text: `dist/codegen.wasm holds ports of two parts of AssemblyScript's standard
+    text: `dist/codegen.wasm holds a port of part of AssemblyScript's standard
 library, https://github.com/AssemblyScript/assemblyscript, under the
-Apache License 2.0 (LICENSE), so that the compiler writes and reads
-numbers as it did when AssemblyScript compiled it: its Grisu2 number
-formatting (std/assembly/util/number.ts), ported to zig/src/dtoa.zig, and
-its integer parsing (strtol of std/assembly/util/string.ts), ported to
-zig/src/parse.zig. Its NOTICE:
+Apache License 2.0 (LICENSE), so that the compiler reads numbers as it
+did when AssemblyScript compiled it: its integer parsing (strtol of
+std/assembly/util/string.ts), ported to zig/src/parse.zig. Its NOTICE:
 
 ${ASSEMBLYSCRIPT_NOTICE}`,
   };
