@@ -308,7 +308,8 @@ pub fn traitsOf(dom: *const Domain, abc: u32, kind: TraitsKind, owner: u32) Type
         return .of(dom.scriptTraits.get(abc)[owner]);
     }
 
-    return .ofType(dom.bodyTraits.get(abc)[owner]);
+    const body = dom.bodyTraits.get(abc)[owner];
+    return if (body < 0) .none else .of(@intCast(body));
 }
 
 // The rebuild, saving and loading (stage 6).

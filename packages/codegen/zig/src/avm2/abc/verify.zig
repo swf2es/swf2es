@@ -5,7 +5,6 @@
 // that wrote no IR of its own, the generic row the second pass writes.
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
-const TYPE_Any = @import("../link/traits.zig").TYPE_Any;
 const code_ = @import("code.zig");
 const BodyDecoder = code_.BodyDecoder;
 const C = @import("constants.zig");
@@ -138,7 +137,7 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: Op) Error!bool {
             }
 
             if (bd.typed) {
-                bd.setValue(a, TYPE_Any, 0);
+                bd.setValue(a, .any, 0);
             }
 
             if (bd.emitPass) {

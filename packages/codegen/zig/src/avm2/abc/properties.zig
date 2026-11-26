@@ -8,7 +8,7 @@ const Error = std.mem.Allocator.Error;
 const ir_ = @import("../ir/ir.zig");
 const traits_ = @import("../link/traits.zig");
 const Binding = traits_.Binding;
-const TYPE_Any = traits_.TYPE_Any;
+const TypeId = traits_.TypeId;
 const types = @import("../link/types.zig");
 const code_ = @import("code.zig");
 const BodyDecoder = code_.BodyDecoder;
@@ -18,7 +18,7 @@ const C = @import("constants.zig");
 const Op = @import("opcodes.zig").Op;
 const IrOp = @import("../ir/ir.zig").Op;
 
-fn notNullIf(bd: *BodyDecoder, ty: i32) u8 {
+fn notNullIf(bd: *BodyDecoder, ty: TypeId) u8 {
     return if (bd.domain.typeNotNull(ty)) NOT_NULL else 0;
 }
 
@@ -50,7 +50,7 @@ pub fn propertyDepth(bd: *BodyDecoder, mn: u32, depth: u32) u32 {
 }
 
 /// The binding of `mn` on `type`, recording 1008 if it is ambiguous.
-pub fn binding(bd: *BodyDecoder, ty: i32, mn: u32) Error!Binding {
+pub fn binding(bd: *BodyDecoder, ty: TypeId, mn: u32) Error!Binding {
     const b = try types.getBinding(bd.domain, bd.index, ty, mn);
     if (b == Binding.ambiguous) {
         _ = bd.fail(C.kAmbiguousBindingError);
@@ -59,33 +59,33 @@ pub fn binding(bd: *BodyDecoder, ty: i32, mn: u32) Error!Binding {
     return b;
 }
 
-/// As Verifier::readBinding: resolve `type`, then the type of its binding b; below TYPE_Any on error.
-pub fn readBinding(bd: *BodyDecoder, ty: i32, b: Binding) Error!i32 {
-    if (ty < 0) {
-        return TYPE_Any;
+/// As Verifier::readBinding: resolve `type`, then the type of its binding b; TypeId.failed on error.
+pub fn readBinding(bd: *BodyDecoder, ty: TypeId, b: Binding) Error!TypeId {
+    if (!ty.isTraits()) {
+        return .any;
     }
 
     const domain = bd.domain;
-    const err = try domain.traits.resolve(domain, @intCast(ty));
+    const err = try domain.traits.resolve(domain, ty.index());
     if (err != 0) {
         _ = bd.fail(err);
-        return -2;
+        return TypeId.failed;
     }
 
     return types.bindingType(domain, ty, b);
 }
 
-/// As Verifier::checkTypeName: the type multiname `mn` names; below TYPE_Any on error.
-pub fn typeName(bd: *BodyDecoder, mn: u32) Error!i32 {
+/// As Verifier::checkTypeName: the type multiname `mn` names; TypeId.failed on error.
+pub fn typeName(bd: *BodyDecoder, mn: u32) Error!TypeId {
     const pool = &bd.abc.pool;
     if (mn == 0 or mn >= pool.multinameCount()) {
         _ = bd.fail(C.kCpoolIndexRangeError);
-        return -2;
+        return TypeId.failed;
     }
 
     const domain = bd.domain;
     const t = try domain.checkTypeName(bd.index, mn);
-    if (t < TYPE_Any) {
+    if (t == TypeId.failed) {
         _ = bd.fail(domain.typeError);
     }
 
@@ -111,7 +111,7 @@ pub fn coerceArgs(bd: *BodyDecoder, m: u32, argc: u32) Error!bool {
     const start = traits.paramStart.get(m);
     var k: u32 = 1;
     while (k <= argc) : (k += 1) {
-        const target = if (k <= count) traits.paramType.get(start + k - 1) else TYPE_Any;
+        const target = if (k <= count) traits.paramType.get(start + k - 1) else .any;
         try bd.coerce(bd.peek(argc - k + 1), target);
     }
 
@@ -120,46 +120,46 @@ pub fn coerceArgs(bd: *BodyDecoder, m: u32, argc: u32) Error!bool {
 }
 
 /// As Verifier::emitCoerceSuper: the receiver at i becomes the declaring class's base.
-pub fn coerceSuper(bd: *BodyDecoder, i: u32) Error!i32 {
+pub fn coerceSuper(bd: *BodyDecoder, i: u32) Error!TypeId {
     const base = if (bd.declarer >= 0) bd.domain.traits.base.get(@intCast(bd.declarer)) else .none;
     if (base == .none) {
         _ = bd.fail(C.kIllegalSuperCallError);
-        return -2;
+        return TypeId.failed;
     }
 
     try bd.coerce(i, base.toType());
-    bd.rowC = base.toType();
+    bd.rowC = ir_.typeColumn(base.toType());
     return base.toType();
 }
 
 /// As Verifier::checkEarlySlotBinding and checkSlot: `type` must come from
 /// this ABC and allow early binding, and have slot `slot`, whose type this
-/// returns; below TYPE_Any on error.
-pub fn slot(bd: *BodyDecoder, ty: i32, at: u32) Error!i32 {
+/// returns; TypeId.failed on error.
+pub fn slot(bd: *BodyDecoder, ty: TypeId, at: u32) Error!TypeId {
     const domain = bd.domain;
     const traits = &domain.traits;
-    if (ty < 0 or traits.abc.get(@intCast(ty)) != bd.index or !traits.allowEarlyBinding(@intCast(ty))) {
+    if (!ty.isTraits() or traits.abc.get(ty.index()) != bd.index or !traits.allowEarlyBinding(ty.index())) {
         _ = bd.fail(C.kIllegalEarlyBindingError);
-        return -2;
+        return TypeId.failed;
     }
 
-    const t: u32 = @intCast(ty);
+    const t = ty.index();
     const err = try traits.resolve(domain, t);
     if (err != 0) {
         _ = bd.fail(err);
-        return -2;
+        return TypeId.failed;
     }
 
     if (at >= traits.slotCount.get(t)) {
         _ = bd.fail(C.kSlotExceedsCountError);
-        return -2;
+        return TypeId.failed;
     }
 
     return traits.slotType.get(traits.slotStart.get(t) + at);
 }
 
-/// As Verifier::checkGetGlobalScope: push the global object; its type, below TYPE_Any on error.
-pub fn globalScope(bd: *BodyDecoder) i32 {
+/// As Verifier::checkGetGlobalScope: push the global object; its type, TypeId.failed on error.
+pub fn globalScope(bd: *BodyDecoder) TypeId {
     const outer = bd.outer;
     if (outer.size > 0) {
         const t = outer.types[0];
@@ -169,7 +169,7 @@ pub fn globalScope(bd: *BodyDecoder) i32 {
 
     if (bd.scope == 0) {
         _ = bd.failWith(C.kGetScopeObjectBoundsError, 0);
-        return -2;
+        return TypeId.failed;
     }
 
     const i = bd.localCount;
@@ -236,7 +236,7 @@ pub fn findProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
             if (j <= 0) {
                 const script = domain.findScript(bd.index, mn);
                 if (script >= 0) {
-                    _ = bd.push(script, NOT_NULL);
+                    _ = bd.push(.of(@intCast(script)), NOT_NULL);
 
                     // Defined by this very script: its global object.
                     if (domain.traits.init.get(@intCast(script)) == @as(i32, @bitCast(bd.global))) {
@@ -284,15 +284,15 @@ pub fn findProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
 fn globalSearch(bd: *BodyDecoder) u32 {
     const traits = &bd.domain.traits;
     const outer = bd.outer;
-    const from: u32 = if (outer.size > 0 and outer.extra == TYPE_Any) 0 else 1;
+    const from: u32 = if (outer.size > 0 and outer.extra == .any) 0 else 1;
     var d = from;
     while (d < bd.scope) : (d += 1) {
         const t = bd.typeOf(bd.localCount + d);
-        if (t < 0) {
+        if (!t.isTraits()) {
             return from + 1;
         }
 
-        switch (traits.kind.get(@intCast(t))) {
+        switch (traits.kind.get(t.index())) {
             .class, .script, .activation, .catch_scope => {},
             else => return from + 1,
         }
@@ -315,7 +315,7 @@ fn emitFound(bd: *BodyDecoder, op: IrOp, dst: i32, src: i32, a: u32, c: i32) Err
 pub fn findDef(bd: *BodyDecoder, mn: u32) bool {
     const domain = bd.domain;
     const script = domain.findScript(bd.index, mn);
-    return bd.push(if (script >= 0) script else domain.objectType(), NOT_NULL);
+    return bd.push(if (script >= 0) .of(@intCast(script)) else domain.objectType(), NOT_NULL);
 }
 
 /// As Verifier::emitGetProperty: a slot's or getter's type when the name
@@ -330,7 +330,7 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
     }
 
     var propType = try readBinding(bd, ty, b);
-    if (propType < TYPE_Any) {
+    if (propType == TypeId.failed) {
         return false;
     }
 
@@ -338,13 +338,13 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
     const kind = b.kind;
     if (kind == .variable or kind == .constant) {
         // The builtin global's Math and Number are never null.
-        const notNull = domain.traits.abc.get(@intCast(ty)) == @as(u32, @bitCast(domain.builtinAbc)) and domain.isMathOrNumber(bd.index, mn);
+        const notNull = domain.traits.abc.get(ty.index()) == @as(u32, @bitCast(domain.builtinAbc)) and domain.isMathOrNumber(bd.index, mn);
         _ = bd.popPush(n, propType, if (notNull) NOT_NULL else 0);
         return bd.emitOn(.getslot, @bitCast(obj), @bitCast(obj), 1, b.index(), 0, 0);
     }
 
     if (kind == .get or kind == .get_set) {
-        const t: u32 = @intCast(ty);
+        const t = ty.index();
         const getter = domain.traits.dispatch.get(domain.traits.dispatchStart.get(t) + b.index());
         if (getter >= 0 and !try coerceArgs(bd, @intCast(getter), 0)) {
             return false;
@@ -360,17 +360,17 @@ pub fn getProperty(bd: *BodyDecoder, mn: u32, n: u32) Error!bool {
         return bd.emitOn(.ir_call_getter, @bitCast(obj), @bitCast(obj), 1, b.index(), 0, getter);
     }
 
-    if (propType == TYPE_Any and numericIndex(bd, mn)) {
+    if (propType == .any and numericIndex(bd, mn)) {
         if (ty == domain.vectorIntType) {
             propType = domain.intType;
         } else if (ty == domain.vectorUintType) {
             propType = domain.uintType;
         } else if (ty == domain.vectorDoubleType) {
             propType = domain.numberType;
-        } else if (ty >= 0 and domain.vectorObjectType >= 0 and
-            try domain.traits.subtypeOf(domain.scratch, @intCast(ty), @intCast(domain.vectorObjectType)))
+        } else if (ty.isTraits() and domain.vectorObjectType != .any and
+            try domain.traits.subtypeOf(domain.scratch, ty.index(), domain.vectorObjectType.index()))
         {
-            propType = domain.traits.param.get(@intCast(ty));
+            propType = domain.traits.param.get(ty.index());
         }
     }
 
@@ -407,7 +407,7 @@ pub fn setProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
     }
 
     const propType = try readBinding(bd, ty, b);
-    if (propType < TYPE_Any) {
+    if (propType == TypeId.failed) {
         return false;
     }
 
@@ -424,7 +424,7 @@ pub fn setProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
     }
 
     if (kind == .set or kind == .get_set) {
-        const t: u32 = @intCast(ty);
+        const t = ty.index();
         const setter = domain.traits.dispatch.get(domain.traits.dispatchStart.get(t) + b.index() + 1);
         if (setter >= 0 and !try coerceArgs(bd, @intCast(setter), 1)) {
             return false;
@@ -451,7 +451,7 @@ pub fn setProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
     // initializer is written as setproperty writes it: ReferenceError 1074.
     // A global's is left to initproperty: a SWF loaded again into the one
     // domain initializes its classes on the first load's global.
-    const late = kind == .constant and opcode == .initproperty and ty >= 0 and domain.traits.kind.get(@intCast(ty)) == .instance;
+    const late = kind == .constant and opcode == .initproperty and ty.isTraits() and domain.traits.kind.get(ty.index()) == .instance;
     const write: Op = if (late) .setproperty else opcode;
     return bd.emitOn(ir_.of(write), -1, @bitCast(obj), n, mn, 0, 0);
 }
@@ -467,8 +467,8 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
 
     const obj = bd.peek(n);
     const ty = bd.typeOf(obj);
-    if (ty >= 0) {
-        const err = try traits.resolve(domain, @intCast(ty));
+    if (ty.isTraits()) {
+        const err = try traits.resolve(domain, ty.index());
         if (err != 0) {
             return bd.fail(err);
         }
@@ -483,7 +483,7 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
     const voidCall = opcode == .callpropvoid;
     if (b.kind == .method) {
         b = try fasterCall(bd, ty, mn, b, argc);
-        const t: u32 = @intCast(ty);
+        const t = ty.index();
         const m = traits.dispatch.get(traits.dispatchStart.get(t) + b.index());
         if (m >= 0) {
             const mu: u32 = @intCast(m);
@@ -512,8 +512,8 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
         const slotType = types.bindingType(domain, ty, b);
         const converted = domain.conversionOf(slotType);
         const top = bd.peek(1);
-        if (converted != -2) {
-            if (converted >= 0 and domain.isConversion(slotType)) {
+        if (converted != TypeId.failed) {
+            if (converted.isTraits() and domain.isConversion(slotType)) {
                 bd.setValue(top, converted, NOT_NULL);
                 _ = try bd.emitOn(conversionOp(bd, converted), @bitCast(top), @bitCast(top), 1, 0, 0, 0);
             } else {
@@ -532,12 +532,12 @@ pub fn callProperty(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool
         }
     }
 
-    _ = bd.popPush(n, TYPE_Any, 0);
+    _ = bd.popPush(n, .any, 0);
     return bd.emitOn(ir_.of(opcode), if (voidCall) -1 else @bitCast(obj), @bitCast(obj), n, mn, argc, 0);
 }
 
 /// The convert opcode that gives `type`, one of the builtin conversions.
-fn conversionOp(bd: *BodyDecoder, ty: i32) IrOp {
+fn conversionOp(bd: *BodyDecoder, ty: TypeId) IrOp {
     const domain = bd.domain;
     if (ty == domain.intType) {
         return .convert_i;
@@ -547,7 +547,7 @@ fn conversionOp(bd: *BodyDecoder, ty: i32) IrOp {
         return .convert_u;
     }
 
-    if (ty >= 0 and ty == domain.floatType) {
+    if (ty.isBuiltin(domain.floatType)) {
         return .convert_f;
     }
 
@@ -561,9 +561,9 @@ fn conversionOp(bd: *BodyDecoder, ty: i32) IrOp {
 /// As Verifier::findMathFunction and findStringFunction: Math's and
 /// String's methods have variants named with a leading underscore for
 /// arguments of the right types.
-fn fasterCall(bd: *BodyDecoder, ty: i32, mn: u32, b: Binding, argc: u32) Error!Binding {
+fn fasterCall(bd: *BodyDecoder, ty: TypeId, mn: u32, b: Binding, argc: u32) Error!Binding {
     const domain = bd.domain;
-    if (ty < 0 or (ty != domain.mathStatic and ty != domain.stringType)) {
+    if (!ty.isTraits() or (ty != domain.mathStatic and ty != domain.stringType)) {
         return b;
     }
 
@@ -574,7 +574,7 @@ fn fasterCall(bd: *BodyDecoder, ty: i32, mn: u32, b: Binding, argc: u32) Error!B
         return b;
     }
 
-    const m = traits.dispatch.get(traits.dispatchStart.get(@intCast(ty)) + faster.index());
+    const m = traits.dispatch.get(traits.dispatchStart.get(ty.index()) + faster.index());
     if (m < 0 or try traits.sign(domain, @intCast(m)) != 0) {
         return b;
     }
@@ -590,7 +590,7 @@ fn fasterCall(bd: *BodyDecoder, ty: i32, mn: u32, b: Binding, argc: u32) Error!B
         var k: u32 = 1;
         while (k <= argc) : (k += 1) {
             const t = bd.typeOf(bd.peek(argc - k + 1));
-            if (t == TYPE_Any or !types.isNumeric(domain, t)) {
+            if (t == .any or !types.isNumeric(domain, t)) {
                 return b;
             }
         }
@@ -622,7 +622,7 @@ pub fn callStatic(bd: *BodyDecoder, m: u32, argc: u32) Error!bool {
         return bd.fail(err);
     }
 
-    if (traits.receiverType.get(global) == TYPE_Any) {
+    if (traits.receiverType.get(global) == .any) {
         return bd.fail(C.kDanglingFunctionError);
     }
 
@@ -647,7 +647,7 @@ pub fn callSuper(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool {
 
     const obj = bd.peek(n);
     const base = try coerceSuper(bd, obj);
-    if (base < TYPE_Any) {
+    if (base == TypeId.failed) {
         return false;
     }
 
@@ -656,15 +656,15 @@ pub fn callSuper(bd: *BodyDecoder, opcode: Op, mn: u32, argc: u32) Error!bool {
         return false;
     }
 
-    var result = TYPE_Any;
+    var result: TypeId = .any;
     var m: i32 = -1;
     if (b.kind == .method) {
-        const err = try traits.resolve(domain, @intCast(base));
+        const err = try traits.resolve(domain, base.index());
         if (err != 0) {
             return bd.fail(err);
         }
 
-        m = traits.dispatch.get(traits.dispatchStart.get(@intCast(base)) + b.index());
+        m = traits.dispatch.get(traits.dispatchStart.get(base.index()) + b.index());
         if (m < 0) {
             return bd.fail(C.kCorruptABCError);
         }
@@ -710,7 +710,7 @@ pub fn getSuper(bd: *BodyDecoder, mn: u32) Error!bool {
 
     const obj = bd.peek(n);
     const base = try coerceSuper(bd, obj);
-    if (base < TYPE_Any) {
+    if (base == TypeId.failed) {
         return false;
     }
 
@@ -720,7 +720,7 @@ pub fn getSuper(bd: *BodyDecoder, mn: u32) Error!bool {
     }
 
     const propType = try readBinding(bd, base, b);
-    if (propType < TYPE_Any) {
+    if (propType == TypeId.failed) {
         return false;
     }
 

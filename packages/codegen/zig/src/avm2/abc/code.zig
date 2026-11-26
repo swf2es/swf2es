@@ -16,11 +16,13 @@ const Error = Allocator.Error;
 const memory = @import("../../memory.zig");
 const ir_ = @import("../ir/ir.zig");
 const Ir = ir_.Ir;
+const columnType = ir_.columnType;
+const typeColumn = ir_.typeColumn;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
 const Scope = traits_.Scope;
-const TYPE_Any = traits_.TYPE_Any;
+const TypeId = traits_.TypeId;
 const types = @import("../link/types.zig");
 const Abc = @import("abc.zig").Abc;
 const C = @import("constants.zig");
@@ -518,10 +520,10 @@ pub const BodyDecoder = struct {
             const to = abc.exceptionTo[h];
             const target = abc.exceptionTarget[h];
             const name = abc.exceptionName[h];
-            var ty = TYPE_Any;
+            var ty: TypeId = .any;
             if (typed and abc.exceptionType[h] != 0) {
                 ty = try properties.typeName(self, abc.exceptionType[h]);
-                if (ty < TYPE_Any) {
+                if (ty == TypeId.failed) {
                     return false;
                 }
             }
@@ -545,9 +547,9 @@ pub const BodyDecoder = struct {
             }
 
             if (typed) {
-                try self.handlerType.append(self.gpa, ty);
+                try self.handlerType.append(self.gpa, typeColumn(ty));
                 const scope = if (name == 0) domain.objectType() else try domain.catchTraits(self.index, h, name, ty);
-                try self.handlerScope.append(self.gpa, scope);
+                try self.handlerScope.append(self.gpa, typeColumn(scope));
             }
         }
 
@@ -596,7 +598,7 @@ pub const BodyDecoder = struct {
 
         var i = firstLocal;
         while (i < self.localCount) : (i += 1) {
-            self.setValue(i, TYPE_Any, 0);
+            self.setValue(i, .any, 0);
         }
 
         return true;
@@ -605,8 +607,8 @@ pub const BodyDecoder = struct {
     // Frame values: locals from 0, scope entries from localCount, the stack from
     // localCount + maxScope.
 
-    pub inline fn setValue(self: *BodyDecoder, i: u32, ty: i32, flags: u8) void {
-        self.valueType[i] = ty;
+    pub inline fn setValue(self: *BodyDecoder, i: u32, ty: TypeId, flags: u8) void {
+        self.valueType[i] = typeColumn(ty);
         self.valueFlags[i] = flags;
         if (i < self.localCount) {
             self.localsVersion += 1;
@@ -675,7 +677,7 @@ pub const BodyDecoder = struct {
     }
 
     /// Push null or undefined, of `type`, as what equalsNull compares with.
-    pub fn pushNullish(self: *BodyDecoder, ty: i32) bool {
+    pub fn pushNullish(self: *BodyDecoder, ty: TypeId) bool {
         const i = self.stackBase() + self.stack;
         self.setValue(i, ty, 0);
         self.origin[i] = ORIGIN_Nullish;
@@ -700,8 +702,8 @@ pub const BodyDecoder = struct {
         return self.stackBase() + self.stack -% n;
     }
 
-    pub inline fn typeOf(self: *const BodyDecoder, i: u32) i32 {
-        return self.valueType[i];
+    pub inline fn typeOf(self: *const BodyDecoder, i: u32) TypeId {
+        return columnType(self.valueType[i]);
     }
 
     pub inline fn isNotNull(self: *const BodyDecoder, i: u32) bool {
@@ -745,7 +747,7 @@ pub const BodyDecoder = struct {
                 continue;
             }
 
-            const merged = types.commonBase(self.domain, entryType, valueType);
+            const merged = typeColumn(types.commonBase(self.domain, columnType(entryType), columnType(valueType)));
             if (merged != entryType or mergedFlags != entryFlags) {
                 self.entryType[at + i] = merged;
                 self.entryFlags[at + i] = mergedFlags;
@@ -955,29 +957,29 @@ pub const BodyDecoder = struct {
     // Typed helpers, working on the stack before the instruction's depth change.
 
     /// Push a value; the instruction's stack effect sets the depth afterwards.
-    pub fn push(self: *BodyDecoder, ty: i32, flags: u8) bool {
+    pub fn push(self: *BodyDecoder, ty: TypeId, flags: u8) bool {
         self.setValue(self.stackBase() + self.stack, ty, flags);
         return true;
     }
 
     /// Replace the top `n` values with one.
-    pub fn popPush(self: *BodyDecoder, n: u32, ty: i32, flags: u8) bool {
+    pub fn popPush(self: *BodyDecoder, n: u32, ty: TypeId, flags: u8) bool {
         self.setValue(self.stackBase() + self.stack -% n, ty, flags);
         return true;
     }
 
     /// As Verifier::emitCoerce: value i becomes `type`, still null or not.
-    pub fn coerce(self: *BodyDecoder, i: u32, ty: i32) Error!void {
-        const changes = self.valueType[i] != ty;
+    pub fn coerce(self: *BodyDecoder, i: u32, ty: TypeId) Error!void {
+        const changes = self.typeOf(i) != ty;
         // A coercion of a value neither null nor undefined is not either.
         self.setValue(i, ty, self.valueFlags[i] & KNOWN);
-        if (self.emitPass and changes and ty != TYPE_Any) {
-            try self.emit(.ir_coerce, @intCast(i), @intCast(i), 1, 0, 0, ty, self.pc);
+        if (self.emitPass and changes and ty != .any) {
+            try self.emit(.ir_coerce, @intCast(i), @intCast(i), 1, 0, 0, typeColumn(ty), self.pc);
         }
     }
 
     /// As FrameState::setType from a conversion instruction: value i becomes `type`, without IR of its own.
-    pub fn retype(self: *BodyDecoder, i: u32, ty: i32) void {
+    pub fn retype(self: *BodyDecoder, i: u32, ty: TypeId) void {
         self.setValue(i, ty, self.valueFlags[i] & KNOWN);
     }
 
@@ -1001,7 +1003,7 @@ pub const BodyDecoder = struct {
     }
 
     /// As Verifier::peekType: the value `n` from the top must be exactly `type`.
-    pub fn peekType(self: *BodyDecoder, n: u32, ty: i32) bool {
+    pub fn peekType(self: *BodyDecoder, n: u32, ty: TypeId) bool {
         return if (self.typeOf(self.peek(n)) == ty) true else self.fail(C.kIllegalOperandTypeError);
     }
 
@@ -1245,7 +1247,7 @@ fn settleContests(domain: *Domain, index: u32) Error!bool {
         if (before == null or !before.?.equals(merged)) {
             const keep = try domain.gpa.create(Scope);
             keep.* = merged.*;
-            keep.types = try domain.gpa.dupe(i32, merged.types);
+            keep.types = try domain.gpa.dupe(TypeId, merged.types);
             keep.withs = try domain.gpa.dupe(u8, merged.withs);
             try domain.put(traits.functionMerged.at(g), keep);
             changed = true;

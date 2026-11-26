@@ -13,7 +13,9 @@ const instructions = @import("instructions.zig");
 const MethodEmitter = @import("method.zig").MethodEmitter;
 const structure = @import("structure.zig");
 const values = @import("values.zig");
-const IrOp = @import("../ir/ir.zig").Op;
+const ir_ = @import("../ir/ir.zig");
+const columnType = ir_.columnType;
+const IrOp = ir_.Op;
 
 fn u(r: i32) usize {
     return @intCast(r);
@@ -132,7 +134,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
             var n = i + 1;
             var ty = ir.type[i];
             while (n < last) {
-                if (floatType >= 0 and ty == floatType and debugRecord(ir.op[n])) {
+                if (columnType(ty).isBuiltin(floatType) and debugRecord(ir.op[n])) {
                     n += 1;
                 } else if (ir.dst[n] == dst and try keptAt(em, n, ty)) {
                     ty = ir.type[n];
@@ -148,7 +150,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
                     moves = n - i;
                 } else if (next == .dup) {
                     var set = n + 1;
-                    while (set < last and floatType >= 0 and ty == floatType) {
+                    while (set < last and columnType(ty).isBuiltin(floatType)) {
                         if (debugRecord(ir.op[set])) {
                             set += 1;
                         } else if (ir.dst[set] == dst + 1 and try keptAt(em, set, ty)) {
@@ -199,7 +201,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
         const holds = dst >= stack and
             em.target < 0 and
             em.pendingNull < 0 and
-            ir.type[i] != floatType and
+            columnType(ir.type[i]) != floatType and
             pureValue(em, i);
         const start = out.len();
         const marks = em.map.count();
@@ -610,7 +612,7 @@ fn pureValue(em: *MethodEmitter, i: u32) bool {
 /// Whether converting register r to `ty` is plain JavaScript on a number or Boolean: to int, uint, Number or Boolean.
 fn converts(em: *MethodEmitter, ty: i32, r: i32) bool {
     const from = em.builtinOf(r);
-    return switch (em.domain.builtin(ty)) {
+    return switch (em.domain.builtin(columnType(ty))) {
         .int, .uint, .boolean => values.isNumeric(em, r),
         .number => from == .int or from == .uint or from == .number,
         else => false,

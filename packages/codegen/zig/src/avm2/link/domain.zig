@@ -32,7 +32,7 @@ const hashPair = table.hashPair;
 const traits_ = @import("traits.zig");
 const Binding = traits_.Binding;
 const TraitsTable = traits_.TraitsTable;
-const TYPE_Any = traits_.TYPE_Any;
+const TypeId = traits_.TypeId;
 const TypeRef = traits_.TypeRef;
 const typenames = @import("typenames.zig");
 const types = @import("types.zig");
@@ -387,7 +387,7 @@ pub const Domain = struct {
     /// not change once its ABC links, and a link that fails, which reuses its
     /// traits' and its ABC's ids, clears them.
     bindingMemo: IdTable,
-    memoType: Rows(i32) = .{},
+    memoType: Rows(TypeId) = .{},
     memoAbc: Rows(u32) = .{},
     memoName: Rows(u32) = .{},
     memoBinding: Rows(traits_.Binding) = .{},
@@ -491,42 +491,45 @@ pub const Domain = struct {
     versionName: u32 = 0,
     nativeName: u32 = 0,
     apiName: u32 = 0,
-    // Builtin types by traits id, for the rules that treat them specially.
-    voidType: i32 = -1,
-    nullType: i32 = -1,
-    numberType: i32 = -1,
-    floatType: i32 = -1,
-    intType: i32 = -1,
-    uintType: i32 = -1,
-    booleanType: i32 = -1,
-    stringType: i32 = -1,
-    namespaceType: i32 = -1,
+    // Builtin types, for the rules that treat them specially: * while the
+    // builtin is absent (no builtin ABC has linked, or it has no such
+    // class), which is no type. A test that must not take * for an absent
+    // builtin says so by TypeId.isBuiltin.
+    voidType: TypeId = .any,
+    nullType: TypeId = .any,
+    numberType: TypeId = .any,
+    floatType: TypeId = .any,
+    intType: TypeId = .any,
+    uintType: TypeId = .any,
+    booleanType: TypeId = .any,
+    stringType: TypeId = .any,
+    namespaceType: TypeId = .any,
     /// XML's and XMLList's traits.
-    xmlType: i32 = -1,
-    xmlListType: i32 = -1,
+    xmlType: TypeId = .any,
+    xmlListType: TypeId = .any,
     /// QName's traits, whose == compares names as XML's compares content.
-    qnameType: i32 = -1,
+    qnameType: TypeId = .any,
     /// Class's traits, the type of a value that is a class.
-    classType: i32 = -1,
+    classType: TypeId = .any,
     vectorClass: i32 = -1,
-    vectorObjectType: i32 = -1,
-    vectorIntType: i32 = -1,
-    vectorUintType: i32 = -1,
-    vectorDoubleType: i32 = -1,
-    arrayType: i32 = -1,
-    functionType: i32 = -1,
+    vectorObjectType: TypeId = .any,
+    vectorIntType: TypeId = .any,
+    vectorUintType: TypeId = .any,
+    vectorDoubleType: TypeId = .any,
+    arrayType: TypeId = .any,
+    functionType: TypeId = .any,
     /// The traits of the Math class object, whose methods have faster variants.
-    mathStatic: i32 = -1,
+    mathStatic: TypeId = .any,
     /// The builtin ABC whose global's Math and Number slots are never null.
     builtinAbc: i32 = -1,
     /// Catch scope traits, by the ABC's index << 32 | its handler index.
     catchScopes: IdTable,
     catchKey: Rows(u64) = .{},
-    catchValue: Rows(i32) = .{},
+    catchValue: Rows(u32) = .{},
     /// Vector.<T> for other element types T, by T.
     vectorOf: IdTable,
-    vectorParam: Rows(i32) = .{},
-    vectorTraits: Rows(i32) = .{},
+    vectorParam: Rows(TypeId) = .{},
+    vectorTraits: Rows(u32) = .{},
 
     /// The live ABCs' weight and the others' still in the tables, as addWeights last added them up.
     liveWeight: u64 = 0,
@@ -696,7 +699,11 @@ pub const Domain = struct {
         var saved: [builtin_fields.len]i64 = undefined;
         inline for (builtin_fields, 0..) |name, k| {
             const value = @field(self, name);
-            saved[k] = if (@TypeOf(value) == bool) @intFromBool(value) else value;
+            saved[k] = switch (@TypeOf(value)) {
+                bool => @intFromBool(value),
+                TypeId => @backingInt(value),
+                else => value,
+            };
         }
 
         return saved;
@@ -704,7 +711,11 @@ pub const Domain = struct {
 
     fn restoreBuiltins(self: *Domain, saved: [builtin_fields.len]i64) void {
         inline for (builtin_fields, 0..) |name, k| {
-            @field(self, name) = if (@TypeOf(@field(self, name)) == bool) saved[k] != 0 else @intCast(saved[k]);
+            @field(self, name) = switch (@TypeOf(@field(self, name))) {
+                bool => saved[k] != 0,
+                TypeId => @fromBackingInt(@intCast(saved[k])),
+                else => @intCast(saved[k]),
+            };
         }
     }
 
@@ -741,13 +752,13 @@ pub const Domain = struct {
     pub fn loggedResolve(self: *Domain, t: u32) Allocator.Error!void {
         const traits = &self.traits;
         const kind = traits.kind.get(t);
-        if (kind.isOwned() and traits.param.get(t) == TYPE_Any) {
+        if (kind.isOwned() and traits.param.get(t) == .any) {
             try self.logged(.resolve, traits.abc.get(t), @backingInt(kind), traits.owner.get(t));
         }
     }
 
     /// Whether the machine type always holds a value: int, uint, Number and Boolean.
-    pub fn typeNotNull(self: *const Domain, type_: i32) bool {
+    pub fn typeNotNull(self: *const Domain, type_: TypeId) bool {
         const bt = self.builtin(type_);
         return bt == .int or
             bt == .uint or
@@ -757,44 +768,44 @@ pub const Domain = struct {
     }
 
     /// The traits of Class's instances, which class objects are.
-    pub fn classInstanceType(self: *const Domain) i32 {
+    pub fn classInstanceType(self: *const Domain) TypeId {
         // Class's, unlinked, reads as *, as no Class does.
-        return if (self.classClass < 0) TYPE_Any else self.classTraits.get(@intCast(self.classClass)).orAny();
+        return if (self.classClass < 0) .any else self.classTraits.get(@intCast(self.classClass)).orAny();
     }
 
     /// The class object traits of class `i` of ABC `index`.
-    pub fn staticTraitsOf(self: *const Domain, index: u32, i: u32) i32 {
+    pub fn staticTraitsOf(self: *const Domain, index: u32, i: u32) TypeId {
         // An unlinked class's reads as *.
         return self.classStatic.get(self.classStart.get(index) + i).orAny();
     }
 
     /// As Traits::itraits: for a class object's traits, its instances'; else *.
-    pub fn instanceTraitsOf(self: *const Domain, type_: i32) i32 {
+    pub fn instanceTraitsOf(self: *const Domain, type_: TypeId) TypeId {
         const traits = &self.traits;
-        if (type_ < 0 or traits.kind.get(@intCast(type_)) != .class) {
-            return TYPE_Any;
+        if (!type_.isTraits() or traits.kind.get(type_.index()) != .class) {
+            return .any;
         }
 
-        const t: u32 = @intCast(type_);
+        const t = type_.index();
         // An unlinked class's reads as *.
         return self.classTraits.get(self.classStart.get(traits.abc.get(t)) + traits.owner.get(t)).orAny();
     }
 
     /// As Verifier::checkTypeName: the type multiname `mn` of ABC `index` names,
     /// void included, and Vector.<T>, or * for another parameterized type;
-    /// below TYPE_Any on failure, with typeError set. AssemblyScript
+    /// TypeId.failed on failure, with typeError set. AssemblyScript
     /// recurses into a TypeName's parameter; this walks the chain down,
     /// keeping each level's class, and makes the types back up.
-    pub fn checkTypeName(self: *Domain, index: u32, multiname: u32) Allocator.Error!i32 {
+    pub fn checkTypeName(self: *Domain, index: u32, multiname: u32) Allocator.Error!TypeId {
         const pool = &self.abcs.get(index).pool;
         var classes_: std.ArrayList(i32) = .empty;
         var mn = multiname;
-        const innermost: i32 = while (true) {
+        const innermost: TypeId = while (true) {
             const isTypeName = pool.mnKind[mn] == .type_name;
             const c = typenames.resolveType(self, index, if (isTypeName) pool.mnA[mn] else mn);
             if (c < 0 and c != -C.kIllegalVoidError) {
                 self.typeError = -c;
-                return -2;
+                return TypeId.failed;
             }
 
             if (!isTypeName) {
@@ -805,7 +816,7 @@ pub const Domain = struct {
             try classes_.append(self.scratch, c);
             mn = pool.mnB[mn];
             if (mn == 0) {
-                break TYPE_Any;
+                break .any;
             }
         };
 
@@ -814,8 +825,9 @@ pub const Domain = struct {
         while (level > 0) {
             level -= 1;
             const c = classes_.items[level];
-            const t = if (c >= 0) try typenames.parameterized(self, c, param) else -1;
-            param = if (t < 0) TYPE_Any else t;
+            const t = if (c >= 0) try typenames.parameterized(self, c, param) else TypeId.failed;
+            // Not a Vector, or Vector.<*> absent: *.
+            param = if (t.isTraits()) t else .any;
         }
 
         return param;
@@ -969,7 +981,7 @@ pub const Domain = struct {
     /// As TraitsBindings::findBindingAndDeclarer: the initializer of the traits
     /// that declares what multiname `mn` of ABC `index` binds to on `type`, a
     /// protected member belonging to the first base that has it; -1 if none.
-    pub fn initOfDeclarer(self: *Domain, type_: i32, index: u32, mn: u32) i32 {
+    pub fn initOfDeclarer(self: *Domain, type_: TypeId, index: u32, mn: u32) i32 {
         const traits = &self.traits;
         var t = TypeRef.ofType(type_);
         while (t != .none) : (t = traits.base.get(t.index())) {
@@ -1016,24 +1028,24 @@ pub const Domain = struct {
     /// As Verifier::emitCallpropertySlot: what calling a class slot of type
     /// `slotType` with one argument does to it: the builtin conversions give
     /// int, uint, Number, Boolean or String, a user class coerces to it, and
-    /// anything else is a call (-2).
-    pub fn conversionOf(self: *const Domain, slotType: i32) i32 {
-        if (slotType < 0) {
-            return -2;
+    /// anything else is a call (TypeId.failed).
+    pub fn conversionOf(self: *const Domain, slotType: TypeId) TypeId {
+        if (!slotType.isTraits()) {
+            return TypeId.failed;
         }
 
-        if (self.floatType >= 0 and slotType == self.staticOf(self.floatType)) {
+        if (self.floatType != .any and slotType == self.staticOf(self.floatType)) {
             return self.floatType;
         }
 
-        for ([_]i32{ self.intType, self.uintType, self.numberType, self.booleanType, self.stringType }) |ty| {
-            if (ty >= 0 and slotType == self.staticOf(ty)) {
+        for ([_]TypeId{ self.intType, self.uintType, self.numberType, self.booleanType, self.stringType }) |ty| {
+            if (ty != .any and slotType == self.staticOf(ty)) {
                 return ty;
             }
         }
 
         const traits = &self.traits;
-        const s: u32 = @intCast(slotType);
+        const s = slotType.index();
         if (traits.kind.get(s) == .class and
             // No base reads as *, which classInstanceType gives with no Class.
             traits.base.get(s).orAny() == self.classInstanceType() and
@@ -1042,25 +1054,24 @@ pub const Domain = struct {
             return self.instanceTraitsOf(slotType);
         }
 
-        return -2;
+        return TypeId.failed;
     }
 
     /// Whether calling class slot `slotType` converts to a builtin primitive, never null.
-    pub fn isConversion(self: *const Domain, slotType: i32) bool {
+    pub fn isConversion(self: *const Domain, slotType: TypeId) bool {
         const converted = self.conversionOf(slotType);
-        return converted >= 0 and
-            (converted == self.intType or
-                converted == self.uintType or
-                converted == self.numberType or
-                converted == self.floatType or
-                converted == self.booleanType or
-                converted == self.stringType);
+        return converted.isBuiltin(self.intType) or
+            converted.isBuiltin(self.uintType) or
+            converted.isBuiltin(self.numberType) or
+            converted.isBuiltin(self.floatType) or
+            converted.isBuiltin(self.booleanType) or
+            converted.isBuiltin(self.stringType);
     }
 
     /// The class object traits of instance traits `type`.
-    pub fn staticOf(self: *const Domain, type_: i32) i32 {
+    pub fn staticOf(self: *const Domain, type_: TypeId) TypeId {
         const traits = &self.traits;
-        const t: u32 = @intCast(type_);
+        const t = type_.index();
         const index = traits.abc.get(t);
         // An unlinked class's reads as *.
         return self.classStatic.get(self.classStart.get(index) + traits.owner.get(t)).orAny();
@@ -1068,14 +1079,14 @@ pub const Domain = struct {
 
     /// The catch scope of handler `h` of ABC `index`, as Traits::newCatchTraits:
     /// one slot, named `name`, of the handler's exception type.
-    pub fn catchTraits(self: *Domain, index: u32, h: u32, name: u32, type_: i32) Allocator.Error!i32 {
+    pub fn catchTraits(self: *Domain, index: u32, h: u32, name: u32, type_: TypeId) Allocator.Error!TypeId {
         const key = (@as(u64, index) << 32) | h;
         const hash = hashPair(index, h);
         var slot = self.catchScopes.start(hash);
         while (self.catchScopes.at(slot) >= 0) : (slot = self.catchScopes.next(slot)) {
             const id: u32 = @intCast(self.catchScopes.at(slot));
             if (self.catchKey.get(id) == key) {
-                return self.catchValue.get(id);
+                return .of(self.catchValue.get(id));
             }
         }
 
@@ -1107,37 +1118,38 @@ pub const Domain = struct {
         traits.resolved.set(t, 1);
         const id = self.catchKey.len;
         try self.catchKey.push(gpa, key);
-        try self.catchValue.push(gpa, @intCast(t));
+        try self.catchValue.push(gpa, t);
         try self.catchScopes.insert(gpa, hash, id);
         self.captures += 1;
-        return @intCast(t);
+        return .of(t);
     }
 
-    /// The Vector.<T> made for `param`, or -1.
-    pub fn vectorFor(self: *const Domain, param: i32) i32 {
-        const hash = hashPair(@bitCast(param), 0);
+    /// The Vector.<T> made for `param`, or none.
+    pub fn vectorFor(self: *const Domain, param: TypeId) TypeRef {
+        const hash = hashPair(@bitCast(@backingInt(param)), 0);
         var slot = self.vectorOf.start(hash);
         while (self.vectorOf.at(slot) >= 0) : (slot = self.vectorOf.next(slot)) {
             const id: u32 = @intCast(self.vectorOf.at(slot));
             if (self.vectorParam.get(id) == param) {
-                return self.vectorTraits.get(id);
+                return .of(self.vectorTraits.get(id));
             }
         }
 
-        return -1;
+        return .none;
     }
 
-    pub fn setVectorFor(self: *Domain, param: i32, t: i32) Allocator.Error!void {
+    pub fn setVectorFor(self: *Domain, param: TypeId, t: u32) Allocator.Error!void {
         const id = self.vectorParam.len;
         try self.vectorParam.push(self.gpa, param);
         try self.vectorTraits.push(self.gpa, t);
-        try self.vectorOf.insert(self.gpa, hashPair(@bitCast(param), 0), id);
+        try self.vectorOf.insert(self.gpa, hashPair(@bitCast(@backingInt(param)), 0), id);
     }
 
-    pub fn builtinType(self: *const Domain, name: []const u8) i32 {
+    /// The type of the builtin class `name`, * for one absent or not linked
+    /// yet, as the builtin type fields hold it.
+    pub fn builtinType(self: *const Domain, name: []const u8) TypeId {
         const c = self.findBuiltin(name);
-        // -1 for a builtin absent or not linked yet, as the builtin type fields hold it.
-        return if (c < 0) -1 else @backingInt(self.classTraits.get(@intCast(c)));
+        return if (c < 0) .any else self.classTraits.get(@intCast(c)).orAny();
     }
 
     /// As DomainMgr::findBuiltinTraitsByName: the first class of the ABC being
@@ -1158,27 +1170,27 @@ pub const Domain = struct {
         return -1;
     }
 
-    pub fn objectType(self: *const Domain) i32 {
+    pub fn objectType(self: *const Domain) TypeId {
         // Object's, unlinked, reads as *, as no Object does.
-        return if (self.objectClass < 0) TYPE_Any else self.classTraits.get(@intCast(self.objectClass)).orAny();
+        return if (self.objectClass < 0) .any else self.classTraits.get(@intCast(self.objectClass)).orAny();
     }
 
     /// As Traits::getBuiltinType.
-    pub fn builtin(self: *const Domain, type_: i32) traits_.Builtin {
-        if (type_ == TYPE_Any) return .any;
+    pub fn builtin(self: *const Domain, type_: TypeId) traits_.Builtin {
+        if (type_ == .any) return .any;
         if (type_ == self.objectType()) return .object;
         if (type_ == self.voidType) return .void;
         if (type_ == self.booleanType) return .boolean;
         if (type_ == self.intType) return .int;
         if (type_ == self.uintType) return .uint;
-        if (type_ >= 0 and type_ == self.floatType) return .float;
+        if (type_.isBuiltin(self.floatType)) return .float;
         if (type_ == self.numberType) return .number;
         if (type_ == self.stringType) return .string;
         return if (type_ == self.namespaceType) .namespace else .other;
     }
 
     /// As Traits::isMachineType: Object, void, Boolean, int, uint and Number.
-    pub fn isMachineType(self: *const Domain, type_: i32) bool {
+    pub fn isMachineType(self: *const Domain, type_: TypeId) bool {
         const bt = self.builtin(type_);
         return switch (bt) {
             .object, .void, .boolean, .int, .uint, .number, .float => true,
@@ -1187,7 +1199,7 @@ pub const Domain = struct {
     }
 
     /// As Traits::isMachineCompatible: whether a and b have the same representation.
-    pub fn machineCompatible(self: *const Domain, a: i32, b: i32) bool {
+    pub fn machineCompatible(self: *const Domain, a: TypeId, b: TypeId) bool {
         if (a == b) {
             return true;
         }
@@ -1196,7 +1208,7 @@ pub const Domain = struct {
             return true;
         }
 
-        return a != TYPE_Any and b != TYPE_Any and !self.isMachineType(a) and !self.isMachineType(b);
+        return a != .any and b != .any and !self.isMachineType(a) and !self.isMachineType(b);
     }
 
     pub fn methodAbc(self: *const Domain, m: u32) u32 {
@@ -1217,14 +1229,14 @@ pub const Domain = struct {
     /// As PoolObject::getLegalDefaultValue: whether constant `value` of `kind`
     /// of ABC `index` may be the default of a slot or parameter of `type`; 0,
     /// or the VerifyError.
-    pub fn checkDefault(self: *const Domain, index: u32, value: u32, kind: C.Constant, type_: i32) i32 {
+    pub fn checkDefault(self: *const Domain, index: u32, value: u32, kind: C.Constant, type_: TypeId) i32 {
         // Legacy ABCs ignore the kind at index zero; AIR's float entry zero is NaN.
         const hasFloats = self.abcs.get(index).hasFloatSupport();
         if (value == 0 and (kind != .float or !hasFloats)) {
             return 0;
         }
 
-        const illegal = if (type_ == TYPE_Any) C.kCorruptABCError else C.kIllegalDefaultValue;
+        const illegal = if (type_ == .any) C.kCorruptABCError else C.kIllegalDefaultValue;
         if (kind == .float and !hasFloats) {
             return illegal;
         }

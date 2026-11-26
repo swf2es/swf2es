@@ -46,7 +46,7 @@ pub fn hasBoundEntry(em: *MethodEmitter, m: u32) bool {
             return false;
         }
 
-        if (refs.isClassRef(em, ty)) {
+        if (refs.isClassRef(em, ir_.typeColumn(ty))) {
             classes = true;
         }
     }
@@ -627,7 +627,7 @@ pub const MethodEmitter = struct {
         }
 
         if (coerce) {
-            try values.convert(self, "p", @intCast(p), ty, TYPE_Any, self.unboxed[p] != 0);
+            try values.convert(self, "p", @intCast(p), ir_.typeColumn(ty), TYPE_Any, self.unboxed[p] != 0);
         } else {
             try out.text("p");
             try out.uint(p);
@@ -665,7 +665,7 @@ pub const MethodEmitter = struct {
         }
 
         const bt = self.builtinOf(dst);
-        return self.domain.builtin(ir.c[i]) == .number and (bt == .int or bt == .uint);
+        return self.domain.builtin(ir_.columnType(ir.c[i])) == .number and (bt == .int or bt == .uint);
     }
 
     /// What a copy reads: a register, or the constant instruction `CONSTANT - copy` pushed.
@@ -787,7 +787,7 @@ pub const MethodEmitter = struct {
 
     /// The builtin type of register r's value now.
     pub fn builtinOf(self: *const MethodEmitter, r: i32) traits_.Builtin {
-        return self.domain.builtin(self.regType[@intCast(r)]);
+        return self.domain.builtin(ir_.columnType(self.regType[@intCast(r)]));
     }
 
     /// A new method's types: none yet.
@@ -964,8 +964,7 @@ pub const MethodEmitter = struct {
         const r = if (self.target >= 0) self.target else self.ir.dst[i];
         return self.unboxedLocal(r) or
             (r >= @as(i32, @intCast(self.ir.localCount + self.ir.maxScope)) and
-                self.domain.floatType >= 0 and
-                self.ir.type[i] == self.domain.floatType);
+                ir_.columnType(self.ir.type[i]).isBuiltin(self.domain.floatType));
     }
 
     pub fn clearRaw(self: *MethodEmitter, from: i32) void {
@@ -1025,8 +1024,7 @@ pub const MethodEmitter = struct {
         self.unboxResult = !number and self.unboxedTarget(i);
         self.rawResult = self.target < 0 and
             self.ir.dst[i] >= @as(i32, @intCast(self.ir.localCount + self.ir.maxScope)) and
-            self.domain.floatType >= 0 and
-            self.ir.type[i] == self.domain.floatType;
+            ir_.columnType(self.ir.type[i]).isBuiltin(self.domain.floatType);
         if (self.unboxResult) {
             try self.out.text("rt.toNumber(");
         }

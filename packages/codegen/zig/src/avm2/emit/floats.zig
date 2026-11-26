@@ -3,6 +3,7 @@
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
 const MethodEmitter = @import("method.zig").MethodEmitter;
+const ir_ = @import("../ir/ir.zig");
 
 /// Keep a local unboxed only when every read and write knows its float identity.
 pub fn floatLocals(em: *MethodEmitter) Error!void {
@@ -12,10 +13,12 @@ pub fn floatLocals(em: *MethodEmitter) Error!void {
     }
 
     @memset(em.unboxed[0..ir.localCount], 0);
-    const ty = em.domain.floatType;
-    if (!em.abc.hasFloatSupport() or ty < 0) {
+    const float = em.domain.floatType;
+    if (!em.abc.hasFloatSupport() or float == .any) {
         return;
     }
+
+    const ty = ir_.typeColumn(float);
 
     // Bit 2 stays set until a non-float use; bit 1 records a float value.
     for (0..ir.localCount) |r| {
@@ -69,7 +72,7 @@ pub fn floatLocals(em: *MethodEmitter) Error!void {
 
 /// Arithmetic whose operands and result are statically floats needs no runtime dispatch.
 pub fn floatOperation(em: *MethodEmitter, i: u32) Error!bool {
-    if (em.domain.floatType < 0 or em.ir.type[i] != em.domain.floatType) {
+    if (!ir_.columnType(em.ir.type[i]).isBuiltin(em.domain.floatType)) {
         return false;
     }
 
