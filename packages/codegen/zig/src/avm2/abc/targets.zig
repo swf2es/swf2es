@@ -12,6 +12,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Error = Allocator.Error;
+const ir_ = @import("../ir/ir.zig");
 const code_ = @import("code.zig");
 const BodyDecoder = code_.BodyDecoder;
 const NOT_NULL = code_.NOT_NULL;
@@ -211,10 +212,10 @@ pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!bool {
         const stack = bd.stack;
         const scope = bd.scope;
         const base = bd.stackBase();
-        const firstType = bd.valueType[base];
+        const firstType = bd.typeOf(base);
         const firstFlags = bd.valueFlags[base];
         const firstOrigin = bd.origin[base];
-        const ty = bd.handlerType.items[i];
+        const ty = ir_.columnType(bd.handlerType.items[i]);
         bd.setValue(base, ty, if (bd.domain.typeNotNull(ty)) NOT_NULL else 0);
         bd.stack = 1;
         bd.scope = 0;

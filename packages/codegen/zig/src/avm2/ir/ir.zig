@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ops = @import("../abc/opcodes.zig");
+const TypeId = @import("../link/traits.zig").TypeId;
 
 /// The IR's own instructions, beyond the ABC's opcodes: their names in Op
 /// and their numbers, from 0x100. The `.ir_*` tags used across emit/ are
@@ -100,6 +101,17 @@ pub fn opcodeName(op: Op) []const u8 {
 pub fn opcodeIs(op: Op, comptime is: fn (ops.Op) bool) bool {
     const b = @backingInt(op);
     return b < 0x100 and is(@fromBackingInt(@as(u8, @truncate(b))));
+}
+
+/// A type as an i32, as the IR's columns (type, c, entryType,
+/// handlerType), the verifier's frames and the emitters' registers hold
+/// it, and back: the one place the two meet, until those hold TypeId too.
+pub fn typeColumn(t: TypeId) i32 {
+    return @backingInt(t);
+}
+
+pub fn columnType(c: i32) TypeId {
+    return @fromBackingInt(c);
 }
 
 pub const Ir = struct {
