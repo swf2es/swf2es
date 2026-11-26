@@ -1297,6 +1297,7 @@ pub fn domainSaveBytes(gpa: Allocator) Allocator.Error![]const u8 {
 /// The bytes of live ABC `index`, as added, for domainLoadAbc; null, no address, for another.
 pub fn domainSavedAbcBytes(index: i32) Allocator.Error!?[]const u8 {
     const dom = try domain();
+    // The bound only makes the cast sound: savedLive checks the ABC's own.
     const i = indexIn(index, dom.abcs.len) orelse return null;
     return if (lifetime.savedLive(dom, i)) lifetime.savedBytes(dom, i) else null;
 }
