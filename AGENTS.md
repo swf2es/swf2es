@@ -206,6 +206,21 @@ node tests/golden/run.ts [--abcs] [--update]   # the generated code's digests (l
                               # tests' ABCs, conformance cases with and without line maps, as3pb, AVM1
                               # blocks) against tests/golden/digests.json; --abcs builds the ABCs ASC
                               # makes (kept in tests/golden/abcs/) again, as after a new case
+node tests/parity/run.ts [--reference <ref>] [suite...]   # old against new: a build of <ref>
+                              # (zig-last-parity by default; built once by this tree's pinned Zig into
+                              # ~/.cache/swf2es/parity/) and this tree's (built first where its sources
+                              # moved) fed the same calls on 45 suites (libraries, tests' ABCs, Ruffle's
+                              # corpus, the oracle's ABCs, mutated and fuzzed inputs, keys, lifetimes,
+                              # random exports), byte for byte, and the 0xAA build against this tree's;
+                              # every change to the compiler meant to keep its output runs it (not in CI).
+                              # pnpm build first; all 45 run only with the corpus fetched (fetch-ruffle.ts)
+                              # and the oracle's cache filled (by pnpm tamarin and pnpm test's conformance
+                              # runs); SWF2ES_LOCAL_SWFS adds
+                              # local SWFs, paths separated by ":" (";" on Windows), reported by number
+node tests/bench/codegen-compile.ts [--reference <ref>] [--runs N]   # compile time of a build of
+                              # <ref> against this tree's, interleaved, a warm-up pass each, N even
+                              # (8): the libraries, the conformance cases, AVM1 blocks,
+                              # SWF2ES_LOCAL_SWFS's SWFs and a rebuild; and both codegen.wasm's sizes
 pnpm --filter @swf2es/native build:wasm   # rebuild packages/native's wasm (compress, mp3, and render:
                               # bitmap, tessellate, lines) with the pinned Zig, after the zig tests;
                               # pnpm build only checks their inputs' digests
