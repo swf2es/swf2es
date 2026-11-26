@@ -1,5 +1,4 @@
-// method_body_info, checked like avmplus' parseMethodBodies
-// (assembly/avm2/abc/bodies.ts). Stack, local and scope sizes, exception
+// method_body_info, checked like avmplus' parseMethodBodies. Stack, local and scope sizes, exception
 // ranges and catch types are checked when the method is verified.
 const std = @import("std");
 const Allocator = std.mem.Allocator;

@@ -1,6 +1,5 @@
 // instance_info, class_info and script_info, checked like avmplus'
-// parseInstanceInfos, parseClassInfos and parseScriptInfos
-// (assembly/avm2/abc/classes.ts).
+// parseInstanceInfos, parseClassInfos and parseScriptInfos.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");

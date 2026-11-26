@@ -1,8 +1,7 @@
-// The test build's look at ABCs, for the node tests, as
-// assembly/testing/abc.ts writes it: the reader, the constant pool, an
-// ABC's tables as the parser reads them, and AVM2's opcode table. Strings
-// are written as output.writeDecoded writes them, so the wrapper reads the
-// string AssemblyScript made of each.
+// The test build's look at ABCs, for the node tests: the reader, the
+// constant pool, an ABC's tables as the parser reads them, and AVM2's
+// opcode table. Strings are written as output.writeDecoded writes them, so
+// the wrapper reads each as the JavaScript string it decodes to.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
@@ -31,7 +30,7 @@ pub const S32: u8 = 5;
 pub const D64: u8 = 6;
 pub const UTF8: u8 = 7;
 
-/// `bytes` followed by PADDING zero bytes, as AssemblyScript's padded() copies them.
+/// `bytes` followed by the PADDING zero bytes the reader may read past them.
 pub fn padded(gpa: Allocator, bytes: []const u8) Allocator.Error![]u8 {
     const data = try memory.allocZeroed(gpa, u8, @intCast(bytes.len + reader.PADDING));
     @memcpy(data[0..bytes.len], bytes);
@@ -68,7 +67,7 @@ pub fn readAll(gpa: Allocator, bytes: []const u8, kinds: []const u8) Allocator.E
     return values;
 }
 
-/// "0x16", as abc.ts's hex writes a byte.
+/// "0x16": a byte as the node tests expect it.
 fn writeHex(w: *Writer, b: u8) Writer.Error!void {
     try w.print("0x{x:0>2}", .{b});
 }
@@ -118,8 +117,8 @@ pub fn poolDump(gpa: Allocator, bytes: []const u8) Error![]const u8 {
     }
     for (1..pool.nsSetCount()) |i| {
         try w.print("nsset {d} ", .{i});
-        // Past the members read, as when a later set failed, AssemblyScript
-        // read past its table; nothing is written here.
+        // A set past the members read, as when a later set failed, ends at
+        // the table's end: nothing is written past it.
         const end = @min(pool.nsSetStart[i + 1], pool.nsSetMembers.len);
         var j = pool.nsSetStart[i];
         while (j < end) : (j += 1) {

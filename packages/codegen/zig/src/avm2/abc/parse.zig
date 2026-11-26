@@ -1,4 +1,5 @@
-// The ABC block parsed (assembly/avm2/abc/parse.ts).
+// The ABC block parsed: the constant pool, then each section in the
+// order avmplus' AbcParser reads them.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const abc_ = @import("abc.zig");

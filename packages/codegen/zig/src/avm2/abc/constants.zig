@@ -1,6 +1,6 @@
-// Constants of the ABC format and avmplus' VerifyError numbers, as
-// assembly/avm2/abc/constants.ts names them, so the files that use them
-// read alike: C.CONSTANT_Qname, C.kCorruptABCError.
+// Constants of the ABC format and avmplus' VerifyError numbers, named as
+// avmplus names them, so the files that use them read like avmplus':
+// C.CONSTANT_Qname, C.kCorruptABCError.
 // Constant kinds (avmplus core/ActionBlockConstants.h): of default values,
 // namespaces and multinames.
 pub const CONSTANT_Utf8: u8 = 0x01;

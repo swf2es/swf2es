@@ -1,4 +1,4 @@
-// traits_info, checked like avmplus' parseTraits (assembly/avm2/abc/traits.ts).
+// traits_info, checked like avmplus' parseTraits.
 // Name clashes, overrides and slot layout (Traits::verifyBindings) need the
 // base class, which may live in another ABC, so they are checked when
 // classes are linked.

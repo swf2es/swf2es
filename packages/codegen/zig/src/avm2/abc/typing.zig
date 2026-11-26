@@ -1,5 +1,5 @@
 // The typed half of each instruction's verification, as Verifier::verifyBlock
-// types it (assembly/avm2/abc/typing.ts): the types and null flags it leaves
+// types it: the types and null flags it leaves
 // its values with, the checks of its operands' types, and the scope chains
 // the classes and functions it creates capture. How it reaches properties
 // is properties.zig's.
@@ -570,8 +570,18 @@ fn kept(bd: *BodyDecoder, scope: *const Scope) Error!*Scope {
 }
 
 /// As the ScopeWriter's OP_newfunction: function m is created in the scope
-/// chain here (typing.ts tells how a function another method creates in
-/// another chain is contested rather than failing).
+/// chain here; a method bound to traits cannot be a function, and one
+/// created again must be created alike, unless it creates itself.
+///
+/// avmplus verifies each method as it first runs, and the first method to
+/// create a function gives it its scope chain: another method that creates
+/// it in another fails when it first runs. Verifying every method before
+/// any runs cannot know which runs first, so a function another method
+/// creates in another scope chain is contested rather than failing either:
+/// it is verified and compiled in their merged scope chain, and each of its
+/// creators claims it as it first runs, by its chain's index among them,
+/// the later in another throwing as avmplus would (see claims). One method
+/// that creates it in two chains fails, as avmplus fails it.
 fn captureFunction(bd: *BodyDecoder, m: u32) Error!bool {
     const domain = bd.domain;
     const traits = &domain.traits;

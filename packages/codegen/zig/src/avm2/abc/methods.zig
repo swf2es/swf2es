@@ -1,5 +1,5 @@
 // method_info and metadata_info, checked like avmplus' parseMethodInfos and
-// parseMetadataInfos (assembly/avm2/abc/methods.ts).
+// parseMetadataInfos.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");

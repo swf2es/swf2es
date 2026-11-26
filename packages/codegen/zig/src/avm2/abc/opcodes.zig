@@ -1,6 +1,5 @@
-// AVM2 instructions (AVM2 overview, chapter 5), as
-// assembly/avm2/abc/opcodes.ts has them: how each opcode's operands are
-// encoded, whether it can throw, its name and its stack effects.
+// AVM2 instructions (AVM2 overview, chapter 5): how each opcode's
+// operands are encoded, whether it can throw, its name and its stack effects.
 // tests/unit/codegen/opcodes.test.ts checks the table against avmplus'
 // core/opcodes.tbl.
 const std = @import("std");
@@ -411,7 +410,7 @@ pub const opcodePops = &tables.pops;
 pub const opcodePushes = &tables.pushes;
 pub const opcodeStack = &tables.stack;
 
-test "the table names and lays out the opcodes as opcodes.ts does" {
+test "the table names and lays out the opcodes" {
     try std.testing.expectEqualStrings("getsuper", opcodeNames[OP_getsuper]);
     try std.testing.expectEqual(OPERANDS_Illegal, opcodeOperands[0x00]);
     try std.testing.expectEqualStrings("0x00", opcodeNames[0x00]);

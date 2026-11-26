@@ -1,11 +1,11 @@
 // A parsed ABC block (AVM2 overview 4.2) as flat tables indexed like the
-// ABC's own arrays (assembly/avm2/abc/abc.ts). Variable-length parts live in
-// shared tables: entry i of a table owns items [start[i], start[i + 1]).
-// Fixed tables are exact slices, zero where nothing was read, as
-// AssemblyScript's StaticArrays are; the growing ones are counted, then
+// ABC's own arrays. Variable-length parts live in shared tables: entry i of
+// a table owns items [start[i], start[i + 1]). Fixed tables are exact
+// slices, zero where nothing was read; the growing ones are counted, then
 // allocated exact and filled (Lists). A table the parse did not reach is
-// empty, but those AssemblyScript starts with one entry (the start
-// tables), which `init` gives each ABC of its own.
+// empty, but a start table keeps its one entry, which `init` gives each
+// ABC of its own: start[n] ends the last of n entries, so a section never
+// read is one of no entries.
 const std = @import("std");
 const memory = @import("../../memory.zig");
 const ConstantPool = @import("pool.zig").ConstantPool;
@@ -261,7 +261,8 @@ pub const Abc = struct {
         return @bitCast(i);
     }
 
-    // Wrapped, as AssemblyScript's u32 sums cast to i32 are.
+    // Wrapped: on a hostile count the sum passes 2^32 and is read as the
+    // i32 it wraps to, an owner no trait has.
 
     pub inline fn classOwner(self: *const Abc, i: u32) i32 {
         return @bitCast(self.classCount() +% i);

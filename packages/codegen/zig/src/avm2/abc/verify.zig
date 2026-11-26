@@ -1,5 +1,5 @@
 // One instruction's checks, as Verifier::verifyBlock makes them and in its
-// order (assembly/avm2/abc/verify.ts): the operands that index the constant
+// order: the operands that index the constant
 // pool and the method's tables, the stack and scope depths, and what only
 // some opcodes check; then its types (typing.zig), and for an instruction
 // that wrote no IR of its own, the generic row the second pass writes.
@@ -267,7 +267,9 @@ fn verifySpecial(bd: *BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32) bool {
 }
 
 /// Whether method `m` of the ABC may be called statically: without types
-/// any may; with them, as avmplus' AbcEnv (verify.ts tells which).
+/// any may, as the structural checks cannot tell; with them, as avmplus'
+/// AbcEnv, one bound to a traits by a method, getter or setter, or a
+/// class's or its instances' initializer.
 fn callable(bd: *BodyDecoder, m: u32) bool {
     if (!bd.typed) {
         return true;

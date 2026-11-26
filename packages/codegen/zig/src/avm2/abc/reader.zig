@@ -1,5 +1,5 @@
 // Reads the primitive types of the ABC format (AVM2 overview, chapter 4.1),
-// as assembly/avm2/abc/reader.ts does.
+// as avmplus' AbcParser reads them.
 //
 // The input must be followed by PADDING readable bytes, as avmplus pads its
 // buffer, so a variable-length read checks the bounds once before and once

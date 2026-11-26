@@ -1,6 +1,5 @@
 // The constant pool (AVM2 overview 4.3), checked like avmplus'
-// AbcParser::parseCpool so the same ABC is accepted or rejected
-// (assembly/avm2/abc/pool.ts).
+// AbcParser::parseCpool so the same ABC is accepted or rejected.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
@@ -13,9 +12,8 @@ const Error = abc_.Error;
 /// Flat tables indexed like the ABC's pools; entry 0 of each is the
 /// implicit default. Strings stay byte ranges into the ABC, so only the
 /// names codegen uses get decoded. A table the parse did not reach keeps
-/// its default, one zero entry (two for nsSetStart), as AssemblyScript's
-/// does: each pool's own (`init`), never shared, so a write to one cannot
-/// reach another.
+/// its default, one zero entry (two for nsSetStart): each pool's own
+/// (`init`), never shared, so a write to one cannot reach another.
 pub const ConstantPool = struct {
     ints: []i32 = &.{},
     uints: []u32 = &.{},
