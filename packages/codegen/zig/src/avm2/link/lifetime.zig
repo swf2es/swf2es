@@ -258,20 +258,23 @@ pub fn wantsRebuild(dom: *Domain, part: u64, movedPart: u64, want: Want) bool {
     // The live tables are allocated in runs. Leave headroom for fragmented free
     // chunks, the verifier, and a scratch part alongside the rebuilt domain.
     const fits = liveTables + (liveTables >> 1) + part < available;
-    if (want == .move or want == .spare) {
-        // A spare is made once a move is half way due, to be there when it is.
-        const half: u6 = if (want == .spare) 1 else 0;
-        const worth = dead >= @max(@max(DEAD_Floor, size >> 4), live >> 2) >> half;
-        return ((worth and full(live + dead, reserve << half, size)) or
-            size >= @max(SHRINK_Floor, rebuilt << (2 - half))) and
-            (smaller or !fits) and
-            rebuilt < MOVE_Limit;
+    switch (want) {
+        .move, .spare => {
+            // A spare is made once a move is half way due, to be there when it is.
+            const half: u6 = if (want == .spare) 1 else 0;
+            const worth = dead >= @max(@max(DEAD_Floor, size >> 4), live >> 2) >> half;
+            return ((worth and full(live + dead, reserve << half, size)) or
+                size >= @max(SHRINK_Floor, rebuilt << (2 - half))) and
+                (smaller or !fits) and
+                rebuilt < MOVE_Limit;
+        },
+        .in_place, .in_place_beside_spare, .synchronous => {
+            return !(want == .in_place_beside_spare and smaller) and
+                deadTables >= @max(@max(@min(DEAD_Floor >> 1, liveTables), size >> 3), liveTables >> 1) and
+                (fits or want == .synchronous) and
+                !full(live, reserve, size);
+        },
     }
-
-    return !(want == .in_place_beside_spare and smaller) and
-        deadTables >= @max(@max(@min(DEAD_Floor >> 1, liveTables), size >> 3), liveTables >> 1) and
-        (fits or want == .synchronous) and
-        !full(live, reserve, size);
 }
 
 /// The estimated size used to decide whether to move a domain, for
