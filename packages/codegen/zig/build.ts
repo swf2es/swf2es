@@ -43,6 +43,22 @@ const MODULES: Record<string, string> = {
   "testing-poison": "dist-test/testing-poison.wasm",
 };
 const STAMPED = new Set(["codegen"]);
+/**
+ * What the AssemblyScript compiler's build left in the package, which a
+ * checkout from before the swap may still have and a pack would ship.
+ */
+const LEFTOVERS = [
+  "dist/codegen.js",
+  "dist/codegen.d.ts",
+  "dist/codegen.wasm.map",
+  "dist/codegen-zig.wasm",
+  "dist-test/codegen-as.wasm",
+  "dist-test/testing.js",
+  "dist-test/testing.d.ts",
+  "dist-test/testing-zig.wasm",
+  "dist-test/testing-zig-poison.wasm",
+  "dist-test-checked",
+];
 
 interface Digests {
   zig: string;
@@ -111,6 +127,27 @@ function report(started: number): void {
     return `${path} ${bytes.length} bytes`;
   });
   console.log(`zig: ${sizes.join(", ")} (${((performance.now() - started) / 1000).toFixed(1)} s)`);
+}
+
+for (const path of LEFTOVERS) {
+  rmSync(join(pkg, path), { recursive: true, force: true });
+}
+
+if (process.argv.includes("--names")) {
+  const prefix = mkdtempSync(join(swf2esCache(), "zig-codegen-out-"));
+  try {
+    runZig(here, ["build", "names", "--prefix", prefix], join(swf2esCache(), "zig-codegen-cache"));
+    mkdirSync(join(pkg, "dist-test"), { recursive: true });
+    copyFileSync(
+      join(prefix, "bin", "codegen-names.wasm"),
+      join(pkg, "dist-test", "codegen-names.wasm"),
+    );
+  } finally {
+    rmSync(prefix, { recursive: true, force: true });
+  }
+
+  console.log("zig: dist-test/codegen-names.wasm");
+  process.exit(0);
 }
 
 const started = performance.now();

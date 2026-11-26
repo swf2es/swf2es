@@ -1,6 +1,8 @@
 node_modules/
 dist/
 dist-test/
+# The AssemblyScript compiler's checked build, which older checkouts still have.
+dist-test-checked/
 *.tsbuildinfo
 oracle/out/
 tests/**/out/
