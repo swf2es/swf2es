@@ -19,8 +19,10 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
         return abc.fail(C.kCorruptABCError);
     }
 
-    const first = abc_.len(lists.traitName);
-    for (0..count) |_| {
+    // Each trait's method, where it binds one, for the check after them all.
+    const methods = try lists.scratch.alloc(i64, count);
+    @memset(methods, -1);
+    for (methods) |*method| {
         const name = r.u30_();
         if (r.failed) {
             return abc.fail(C.kCorruptABCError);
@@ -51,7 +53,7 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
             return abc.fail(if (r.failed) C.kCorruptABCError else C.kUnsupportedTraitsKindError);
         }
 
-        try lists.traitMetadataStart.append(lists.scratch, abc_.len(lists.traitMetadata));
+        lists.push("traitMetadataStart", lists.len("traitMetadata"));
         if (tag & C.ATTR_Metadata != 0) {
             const metadataCount = r.u30_();
             for (0..metadataCount) |_| {
@@ -60,7 +62,7 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
                     return abc.fail(C.kCorruptABCError);
                 }
 
-                try lists.traitMetadata.append(lists.scratch, metadata);
+                lists.push("traitMetadata", metadata);
             }
         }
 
@@ -82,25 +84,26 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
             }
         }
 
-        try lists.traitName.append(lists.scratch, name);
-        try lists.traitTag.append(lists.scratch, tag);
-        try lists.traitId.append(lists.scratch, id);
-        try lists.traitIndex.append(lists.scratch, index);
-        try lists.traitValue.append(lists.scratch, value);
-        try lists.traitValueKind.append(lists.scratch, valueKind);
+        if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
+            method.* = index;
+        }
+
+        lists.push("traitName", name);
+        lists.push("traitTag", tag);
+        lists.push("traitId", id);
+        lists.push("traitIndex", index);
+        lists.push("traitValue", value);
+        lists.push("traitValueKind", valueKind);
     }
 
     // As avmplus' makeMethodOf: a method belongs to at most one owner.
-    var t = first;
-    while (t < abc_.len(lists.traitName)) : (t += 1) {
-        const kind = lists.traitTag.items[t] & 0x0f;
-        if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
-            const method = lists.traitIndex.items[t];
-            if (abc.methodOwner[method] != -1) {
+    for (methods) |method| {
+        if (method >= 0) {
+            if (abc.methodOwner[@intCast(method)] != -1) {
                 return abc.fail(C.kCorruptABCError);
             }
 
-            abc.methodOwner[method] = owner;
+            abc.methodOwner[@intCast(method)] = owner;
         }
     }
 

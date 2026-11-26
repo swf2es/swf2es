@@ -12,7 +12,7 @@ const Reader = @import("reader.zig").Reader;
 const readTraits = @import("traits.zig").readTraits;
 
 pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocator.Error!bool {
-    abc.methodBody = try gpa.alloc(i32, abc.methodCount());
+    abc.methodBody = try lists.zeroed(i32, gpa, abc.methodBody, abc.methodCount());
     @memset(abc.methodBody, -1);
 
     // avmplus does not bound the count, so the tables grow body by body.
@@ -47,13 +47,13 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Al
         const codeStart: u32 = @intCast(r.pos);
         r.pos += codeLength;
 
-        const exceptionStart = abc_.len(lists.exceptionFrom);
+        const exceptionStart = lists.len("exceptionFrom");
         const exceptionCount = r.u30_();
         for (0..exceptionCount) |_| {
-            try lists.exceptionFrom.append(lists.scratch, r.u30_());
-            try lists.exceptionTo.append(lists.scratch, r.u30_());
-            try lists.exceptionTarget.append(lists.scratch, r.u30_());
-            try lists.exceptionType.append(lists.scratch, r.u30_());
+            lists.push("exceptionFrom", r.u30_());
+            lists.push("exceptionTo", r.u30_());
+            lists.push("exceptionTarget", r.u30_());
+            lists.push("exceptionType", r.u30_());
             const name = r.u30_();
             if (r.failed) {
                 return abc.fail(C.kCorruptABCError);
@@ -63,7 +63,7 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Al
                 return abc.fail(C.kCpoolIndexRangeError);
             }
 
-            try lists.exceptionName.append(lists.scratch, name);
+            lists.push("exceptionName", name);
         }
 
         const owner = abc.methodOwner[method];
@@ -75,16 +75,16 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Al
             return abc.fail(C.kDuplicateMethodBodyError);
         }
 
-        abc.methodBody[method] = @intCast(abc_.len(lists.bodyMethod));
-        try lists.bodyMethod.append(lists.scratch, method);
-        try lists.bodyMaxStack.append(lists.scratch, maxStack);
-        try lists.bodyLocalCount.append(lists.scratch, localCount);
-        try lists.bodyInitScopeDepth.append(lists.scratch, initScopeDepth);
-        try lists.bodyMaxScopeDepth.append(lists.scratch, maxScopeDepth);
-        try lists.bodyCodeStart.append(lists.scratch, codeStart);
-        try lists.bodyCodeLength.append(lists.scratch, codeLength);
-        try lists.bodyExceptionStart.append(lists.scratch, exceptionStart);
-        try lists.bodyTraitStart.append(lists.scratch, abc_.len(lists.traitName));
+        abc.methodBody[method] = @intCast(lists.len("bodyMethod"));
+        lists.push("bodyMethod", method);
+        lists.push("bodyMaxStack", maxStack);
+        lists.push("bodyLocalCount", localCount);
+        lists.push("bodyInitScopeDepth", initScopeDepth);
+        lists.push("bodyMaxScopeDepth", maxScopeDepth);
+        lists.push("bodyCodeStart", codeStart);
+        lists.push("bodyCodeLength", codeLength);
+        lists.push("bodyExceptionStart", exceptionStart);
+        lists.push("bodyTraitStart", lists.len("traitName"));
 
         // Every body has a traits list, empty unless the method needs an activation.
         if (!try readTraits(abc, lists, r, abc.activationOwner(method), abc.classCount())) {
@@ -92,7 +92,7 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Al
         }
     }
 
-    try lists.bodyExceptionStart.append(lists.scratch, abc_.len(lists.exceptionFrom));
-    try lists.bodyTraitStart.append(lists.scratch, abc_.len(lists.traitName));
+    lists.push("bodyExceptionStart", lists.len("exceptionFrom"));
+    lists.push("bodyTraitStart", lists.len("traitName"));
     return true;
 }

@@ -15,22 +15,22 @@ pub fn readMethods(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocat
         return abc.fail(C.kCorruptABCError);
     }
 
-    abc.methodReturnType = try memory.allocZeroed(gpa, u32, count);
-    abc.methodName = try memory.allocZeroed(gpa, u32, count);
-    abc.methodFlags = try memory.allocZeroed(gpa, u8, count);
-    abc.methodParamStart = try memory.allocZeroed(gpa, u32, count + 1);
-    abc.methodOptionalStart = try memory.allocZeroed(gpa, u32, count + 1);
-    abc.methodOwner = try memory.allocZeroed(gpa, i32, count);
+    abc.methodReturnType = try lists.zeroed(u32, gpa, abc.methodReturnType, count);
+    abc.methodName = try lists.zeroed(u32, gpa, abc.methodName, count);
+    abc.methodFlags = try lists.zeroed(u8, gpa, abc.methodFlags, count);
+    abc.methodParamStart = try lists.zeroed(u32, gpa, abc.methodParamStart, count + 1);
+    abc.methodOptionalStart = try lists.zeroed(u32, gpa, abc.methodOptionalStart, count + 1);
+    abc.methodOwner = try lists.zeroed(i32, gpa, abc.methodOwner, count);
 
     for (0..count) |i| {
         abc.methodOwner[i] = -1;
 
         const paramCount = r.u30_();
         abc.methodReturnType[i] = r.u30_();
-        abc.methodParamStart[i] = abc_.len(lists.paramTypes);
+        abc.methodParamStart[i] = lists.len("paramTypes");
         var j: u32 = 0;
         while (j < paramCount and !r.failed) : (j += 1) {
-            try lists.paramTypes.append(lists.scratch, r.u30_());
+            lists.push("paramTypes", r.u30_());
         }
 
         abc.methodName[i] = r.u30_();
@@ -44,13 +44,13 @@ pub fn readMethods(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocat
         }
 
         abc.methodFlags[i] = flags;
-        abc.methodOptionalStart[i] = abc_.len(lists.optionalValue);
+        abc.methodOptionalStart[i] = lists.len("optionalValue");
         if (flags & C.METHOD_HasOptional != 0) {
             const optionalCount = r.u30_();
             j = 0;
             while (j < optionalCount and !r.failed) : (j += 1) {
-                try lists.optionalValue.append(lists.scratch, r.u30_());
-                try lists.optionalKind.append(lists.scratch, @truncate(r.u8_()));
+                lists.push("optionalValue", r.u30_());
+                lists.push("optionalKind", @truncate(r.u8_()));
             }
 
             if (optionalCount == 0 or optionalCount > paramCount) {
@@ -71,8 +71,8 @@ pub fn readMethods(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocat
         }
     }
 
-    abc.methodParamStart[count] = abc_.len(lists.paramTypes);
-    abc.methodOptionalStart[count] = abc_.len(lists.optionalValue);
+    abc.methodParamStart[count] = lists.len("paramTypes");
+    abc.methodOptionalStart[count] = lists.len("optionalValue");
     return true;
 }
 
@@ -82,8 +82,8 @@ pub fn readMetadata(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Alloca
         return abc.fail(C.kCorruptABCError);
     }
 
-    abc.metadataName = try memory.allocZeroed(gpa, u32, count);
-    abc.metadataItemStart = try memory.allocZeroed(gpa, u32, count + 1);
+    abc.metadataName = try lists.zeroed(u32, gpa, abc.metadataName, count);
+    abc.metadataItemStart = try lists.zeroed(u32, gpa, abc.metadataItemStart, count + 1);
 
     for (0..count) |i| {
         const name = r.u30_();
@@ -96,7 +96,7 @@ pub fn readMetadata(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Alloca
         }
 
         abc.metadataName[i] = name;
-        abc.metadataItemStart[i] = abc_.len(lists.metadataKey);
+        abc.metadataItemStart[i] = lists.len("metadataKey");
 
         // Keys and values are string indices that avmplus does not check: all
         // the keys, then all the values, as avmplus' describeMetadataInfo reads
@@ -104,12 +104,12 @@ pub fn readMetadata(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Alloca
         const itemCount = r.u30_();
         var j: u32 = 0;
         while (j < itemCount and !r.failed) : (j += 1) {
-            try lists.metadataKey.append(lists.scratch, r.u30_());
+            lists.push("metadataKey", r.u30_());
         }
 
         j = 0;
         while (j < itemCount and !r.failed) : (j += 1) {
-            try lists.metadataValue.append(lists.scratch, r.u30_());
+            lists.push("metadataValue", r.u30_());
         }
 
         if (r.failed) {
@@ -117,6 +117,6 @@ pub fn readMetadata(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Alloca
         }
     }
 
-    abc.metadataItemStart[count] = abc_.len(lists.metadataKey);
+    abc.metadataItemStart[count] = lists.len("metadataKey");
     return true;
 }

@@ -2,62 +2,141 @@
 // ABC's own arrays (assembly/avm2/abc/abc.ts). Variable-length parts live in
 // shared tables: entry i of a table owns items [start[i], start[i + 1]).
 // Fixed tables are exact slices, zero where nothing was read, as
-// AssemblyScript's StaticArrays are; growing ones are built in Lists, in
-// the call's scratch, and kept as exact slices once the parse ends. A
-// table the parse did not reach is empty, but those AssemblyScript starts
-// with one entry (the start tables), which `init` gives each ABC of its
-// own.
+// AssemblyScript's StaticArrays are; the growing ones are counted, then
+// allocated exact and filled (Lists). A table the parse did not reach is
+// empty, but those AssemblyScript starts with one entry (the start
+// tables), which `init` gives each ABC of its own.
 const std = @import("std");
 const memory = @import("../../memory.zig");
 const ConstantPool = @import("pool.zig").ConstantPool;
 
-/// The tables an ABC's parse grows, in the call's scratch, as long as the
-/// parse lasts; `keep` copies them into the ABC's arena as exact slices,
-/// whatever the parse reached.
-pub const Lists = struct {
-    scratch: std.mem.Allocator,
-    paramTypes: std.ArrayList(u32) = .empty,
-    optionalValue: std.ArrayList(u32) = .empty,
-    optionalKind: std.ArrayList(u8) = .empty,
-    metadataKey: std.ArrayList(u32) = .empty,
-    metadataValue: std.ArrayList(u32) = .empty,
-    interfaces: std.ArrayList(u32) = .empty,
-    bodyMethod: std.ArrayList(u32) = .empty,
-    bodyMaxStack: std.ArrayList(u32) = .empty,
-    bodyLocalCount: std.ArrayList(u32) = .empty,
-    bodyInitScopeDepth: std.ArrayList(u32) = .empty,
-    bodyMaxScopeDepth: std.ArrayList(u32) = .empty,
-    bodyCodeStart: std.ArrayList(u32) = .empty,
-    bodyCodeLength: std.ArrayList(u32) = .empty,
-    bodyExceptionStart: std.ArrayList(u32) = .empty,
-    exceptionFrom: std.ArrayList(u32) = .empty,
-    exceptionTo: std.ArrayList(u32) = .empty,
-    exceptionTarget: std.ArrayList(u32) = .empty,
-    exceptionType: std.ArrayList(u32) = .empty,
-    exceptionName: std.ArrayList(u32) = .empty,
-    bodyTraitStart: std.ArrayList(u32) = .empty,
-    traitName: std.ArrayList(u32) = .empty,
-    traitTag: std.ArrayList(u8) = .empty,
-    traitId: std.ArrayList(u32) = .empty,
-    traitIndex: std.ArrayList(u32) = .empty,
-    traitValue: std.ArrayList(u32) = .empty,
-    traitValueKind: std.ArrayList(u8) = .empty,
-    traitMetadataStart: std.ArrayList(u32) = .empty,
-    traitMetadata: std.ArrayList(u32) = .empty,
+/// How many rows each table of Lists holds.
+pub const Counts = struct {
+    paramTypes: u32 = 0,
+    optionalValue: u32 = 0,
+    optionalKind: u32 = 0,
+    metadataKey: u32 = 0,
+    metadataValue: u32 = 0,
+    interfaces: u32 = 0,
+    bodyMethod: u32 = 0,
+    bodyMaxStack: u32 = 0,
+    bodyLocalCount: u32 = 0,
+    bodyInitScopeDepth: u32 = 0,
+    bodyMaxScopeDepth: u32 = 0,
+    bodyCodeStart: u32 = 0,
+    bodyCodeLength: u32 = 0,
+    bodyExceptionStart: u32 = 0,
+    exceptionFrom: u32 = 0,
+    exceptionTo: u32 = 0,
+    exceptionTarget: u32 = 0,
+    exceptionType: u32 = 0,
+    exceptionName: u32 = 0,
+    bodyTraitStart: u32 = 0,
+    traitName: u32 = 0,
+    traitTag: u32 = 0,
+    traitId: u32 = 0,
+    traitIndex: u32 = 0,
+    traitValue: u32 = 0,
+    traitValueKind: u32 = 0,
+    traitMetadataStart: u32 = 0,
+    traitMetadata: u32 = 0,
+};
 
-    pub fn keep(self: *const Lists, gpa: std.mem.Allocator, abc: *Abc) std.mem.Allocator.Error!void {
-        inline for (@typeInfo(Lists).@"struct".field_names) |name| {
-            if (comptime !std.mem.eql(u8, name, "scratch")) {
-                @field(abc, name) = try gpa.dupe(@typeInfo(@TypeOf(@field(abc, name))).pointer.child, @field(self, name).items);
-            }
+/// Lists' tables.
+pub const Items = struct {
+    paramTypes: []u32 = &.{},
+    optionalValue: []u32 = &.{},
+    optionalKind: []u8 = &.{},
+    metadataKey: []u32 = &.{},
+    metadataValue: []u32 = &.{},
+    interfaces: []u32 = &.{},
+    bodyMethod: []u32 = &.{},
+    bodyMaxStack: []u32 = &.{},
+    bodyLocalCount: []u32 = &.{},
+    bodyInitScopeDepth: []u32 = &.{},
+    bodyMaxScopeDepth: []u32 = &.{},
+    bodyCodeStart: []u32 = &.{},
+    bodyCodeLength: []u32 = &.{},
+    bodyExceptionStart: []u32 = &.{},
+    exceptionFrom: []u32 = &.{},
+    exceptionTo: []u32 = &.{},
+    exceptionTarget: []u32 = &.{},
+    exceptionType: []u32 = &.{},
+    exceptionName: []u32 = &.{},
+    bodyTraitStart: []u32 = &.{},
+    traitName: []u32 = &.{},
+    traitTag: []u8 = &.{},
+    traitId: []u32 = &.{},
+    traitIndex: []u32 = &.{},
+    traitValue: []u32 = &.{},
+    traitValueKind: []u8 = &.{},
+    traitMetadataStart: []u32 = &.{},
+    traitMetadata: []u32 = &.{},
+};
+
+/// The tables an ABC's parse grows across entries, whose sizes the ABC does
+/// not write up front (each method's parameters, each owner's traits): a
+/// first pass over what follows the pool only counts their rows, and the
+/// second fills them, allocated exact in the ABC's arena from those counts.
+/// The tables of a size the ABC writes first are allocated by the first
+/// pass and filled again, alike, by the second (zeroed).
+pub const Lists = struct {
+    /// Where a pass keeps what only it needs, as each owner's methods.
+    scratch: std.mem.Allocator,
+    /// Whether this pass only counts.
+    counting: bool,
+    lens: Counts = .{},
+    items: Items = .{},
+
+    /// Lists for the first pass, which counts.
+    pub fn counter(scratch: std.mem.Allocator) Lists {
+        return .{ .scratch = scratch, .counting = true };
+    }
+
+    /// Lists for the second pass, of the rows `counts` holds, in `gpa`.
+    pub fn filler(gpa: std.mem.Allocator, scratch: std.mem.Allocator, counts: Counts) std.mem.Allocator.Error!Lists {
+        var self: Lists = .{ .scratch = scratch, .counting = false };
+        inline for (@typeInfo(Items).@"struct".field_names) |name| {
+            @field(self.items, name) = try gpa.alloc(@typeInfo(@TypeOf(@field(self.items, name))).pointer.child, @field(counts, name));
+        }
+
+        return self;
+    }
+
+    /// A table of `rows` rows the ABC gives the count of first, zero: made by
+    /// the first pass, and `made`, which it made, zeroed again for the second.
+    pub fn zeroed(self: *const Lists, comptime T: type, gpa: std.mem.Allocator, made: []T, rows: u32) std.mem.Allocator.Error![]T {
+        if (self.counting) {
+            return memory.allocZeroed(gpa, T, rows);
+        }
+
+        std.debug.assert(made.len == rows);
+        @memset(made, 0);
+        return made;
+    }
+
+    /// Row `value` at the end of table `name`.
+    pub inline fn push(self: *Lists, comptime name: []const u8, value: @typeInfo(@FieldType(Items, name)).pointer.child) void {
+        const at = @field(self.lens, name);
+        if (!self.counting) {
+            @field(self.items, name)[at] = value;
+        }
+
+        @field(self.lens, name) = at + 1;
+    }
+
+    pub inline fn len(self: *const Lists, comptime name: []const u8) u32 {
+        return @field(self.lens, name);
+    }
+
+    /// The tables filled, as the ABC's: each exactly as long as the first pass counted.
+    pub fn keep(self: *const Lists, abc: *Abc) void {
+        inline for (@typeInfo(Items).@"struct".field_names) |name| {
+            std.debug.assert(@field(self.lens, name) == @field(self.items, name).len);
+            @field(abc, name) = @field(self.items, name);
         }
     }
 };
-
-/// A list's length, as the tables' u32 indices take it.
-pub inline fn len(list: anytype) u32 {
-    return @intCast(list.items.len);
-}
 
 pub const Abc = struct {
     /// 0, or the VerifyError number avmplus would throw; then the tables are incomplete.

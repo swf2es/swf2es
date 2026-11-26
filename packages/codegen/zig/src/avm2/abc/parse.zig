@@ -20,39 +20,45 @@ const Reader = @import("reader.zig").Reader;
 pub fn readAbc(gpa: Allocator, scratch: Allocator, data: []const u8, length: u32, builtin: bool) Allocator.Error!*Abc {
     const abc = try gpa.create(Abc);
     abc.* = try .init(gpa, length, builtin);
-    var lists: Lists = .{ .scratch = scratch };
-    try parse(gpa, abc, &lists, data, length);
-    try lists.keep(gpa, abc);
-    return abc;
-}
-
-/// readAbc's tables, the growing ones in `lists`; `abc.error` says where it stopped.
-fn parse(gpa: Allocator, abc: *Abc, lists: *Lists, data: []const u8, length: u32) Allocator.Error!void {
     var r: Reader = .init(data, 0, length);
     abc.minorVersion = r.u16_();
     abc.majorVersion = r.u16_();
     if (r.failed) {
         _ = abc.fail(C.kCorruptABCError);
-        return;
+        return abc;
     }
 
     if (!isSupportedVersion(abc.majorVersion, abc.minorVersion)) {
         _ = abc.fail(C.kInvalidMagicError);
-        return;
+        return abc;
     }
 
-    abc.pool = try readConstantPool(gpa, lists.scratch, &r, abc.hasFloatSupport());
+    abc.pool = try readConstantPool(gpa, scratch, &r, abc.hasFloatSupport());
     if (abc.pool.@"error" != 0) {
         _ = abc.fail(abc.pool.@"error");
-        return;
+        return abc;
     }
 
-    if (!try methods.readMethods(gpa, abc, lists, &r) or
-        !try methods.readMetadata(gpa, abc, lists, &r) or
-        !try classes.readInstances(gpa, abc, lists, &r) or
-        !try classes.readClasses(gpa, abc, lists, &r) or
-        !try classes.readScripts(gpa, abc, lists, &r) or
-        !try readMethodBodies(gpa, abc, lists, &r))
+    // What follows the pool twice: once counting the growing tables' rows,
+    // then filling them, allocated exact from the counts, so that the arena
+    // holds no more than they take.
+    var counter: Lists = .counter(scratch);
+    var again = r;
+    try tables(gpa, abc, &counter, &again);
+    var lists: Lists = try .filler(gpa, scratch, counter.lens);
+    try tables(gpa, abc, &lists, &r);
+    lists.keep(abc);
+    return abc;
+}
+
+/// The tables after the pool, the growing ones in `lists`; `abc.error` says where it stopped.
+fn tables(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader) Allocator.Error!void {
+    if (!try methods.readMethods(gpa, abc, lists, r) or
+        !try methods.readMetadata(gpa, abc, lists, r) or
+        !try classes.readInstances(gpa, abc, lists, r) or
+        !try classes.readClasses(gpa, abc, lists, r) or
+        !try classes.readScripts(gpa, abc, lists, r) or
+        !try readMethodBodies(gpa, abc, lists, r))
     {
         return;
     }
@@ -63,7 +69,7 @@ fn parse(gpa: Allocator, abc: *Abc, lists: *Lists, data: []const u8, length: u32
         return;
     }
 
-    try lists.traitMetadataStart.append(lists.scratch, abc_.len(lists.traitMetadata));
+    lists.push("traitMetadataStart", lists.len("traitMetadata"));
 }
 
 /// The versions avmplus' AbcParser::canParse accepts in Flash Player builds,
