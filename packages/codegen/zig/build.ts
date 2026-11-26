@@ -16,6 +16,9 @@
 //                               build with fresh caches, its digests written
 //   node zig/build.ts --verify  the same, failing where the inputs or a
 //                               module are not digests.json's: CI's check
+//   node zig/build.ts --names   dist-test/codegen-names.wasm, the compiler
+//                               with the name section, so that a trap's
+//                               stack names its functions (zig build names)
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {

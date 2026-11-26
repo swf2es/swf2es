@@ -59,10 +59,10 @@ pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on 
                               # failing tests by the lines they differ on, nearest to passing first
 node tests/player/corpus/check-references.ts [prefix...]   # the corpus's expected outputs vs Flash
 node tests/fuzz/abc.ts [cases, 2000] [seed, 1]   # malformed ABCs: codegen never traps, its modules
-                              # parse, JIT equals AOT (SWF2ES_CHECKED=1 for the checked build)
+                              # parse, JIT equals AOT (SWF2ES_CHECKED=1 on the 0xAA build)
 node tests/fuzz/avm1.ts [cases, 2000] [seed, 1]   # malformed AVM1 action blocks: the decoder
                               # and flow never trap, and decode a block the same after others
-                              # (SWF2ES_CHECKED=1 for the checked build)
+                              # (SWF2ES_CHECKED=1 on the 0xAA build)
 node tests/fuzz/compress.ts [cases, 2000] [seed, 1]   # malformed CWS, ZWS, zlib and LZMA: the
                               # decoders never trap, refuse with CompressedDataError, and a
                               # SWF that decodes has its prefix
@@ -199,11 +199,12 @@ node packages/codegen/zig/build.ts [--update | --verify]   # the compiler, as pn
                               # it (docs/zig-codegen.md); --update runs its inline tests (zig build
                               # test in packages/codegen/zig), builds with fresh caches and writes
                               # zig/digests.json, --verify fails where they differ (CI's codegen job)
-zig build names               # in packages/codegen/zig, with the pinned Zig (tools/zig.ts):
-                              # zig-out/bin/codegen-names.wasm, the compiler with the name section,
-                              # so that a trap's stack names its functions
+node packages/codegen/zig/build.ts --names   # dist-test/codegen-names.wasm, by the pinned Zig:
+                              # the compiler with the name section, so that a trap's stack names
+                              # its functions
 node tests/golden/run.ts [--update]   # the generated code's digests (libraries, the unit tests'
-                              # ABCs, conformance cases, AVM1 blocks) against tests/golden/digests.json
+                              # ABCs, conformance cases with and without line maps, the programs,
+                              # AVM1 blocks) against tests/golden/digests.json
 pnpm --filter @swf2es/native build:wasm   # rebuild packages/native's wasm (compress, mp3, and render:
                               # bitmap, tessellate, lines) with the pinned Zig, after the zig tests;
                               # pnpm build only checks their inputs' digests
