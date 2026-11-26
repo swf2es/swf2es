@@ -611,8 +611,8 @@ fn pureValue(em: *MethodEmitter, i: u32) bool {
 fn converts(em: *MethodEmitter, ty: i32, r: i32) bool {
     const from = em.builtinOf(r);
     return switch (em.domain.builtin(ty)) {
-        traits_.BUILTIN_Int, traits_.BUILTIN_Uint, traits_.BUILTIN_Boolean => values.isNumeric(em, r),
-        traits_.BUILTIN_Number => from == traits_.BUILTIN_Int or from == traits_.BUILTIN_Uint or from == traits_.BUILTIN_Number,
+        .int, .uint, .boolean => values.isNumeric(em, r),
+        .number => from == .int or from == .uint or from == .number,
         else => false,
     };
 }

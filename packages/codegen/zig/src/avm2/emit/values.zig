@@ -21,14 +21,14 @@ pub fn compare(em: *MethodEmitter, i: u32, op: IrOp, not: bool) Error!void {
     const out = &em.out;
     const a = em.src(i, 0);
     const b = em.src(i, 1);
-    const af = em.builtinOf(a) == traits_.BUILTIN_Float;
-    const bf = em.builtinOf(b) == traits_.BUILTIN_Float;
+    const af = em.builtinOf(a) == .float;
+    const bf = em.builtinOf(b) == .float;
     const numeric = (af or isNumeric(em, a)) and (bf or isNumeric(em, b));
     if (op == .strictequals and numeric and af != bf) {
         return out.text(if (not) "true" else "false");
     }
 
-    const strings = em.builtinOf(a) == traits_.BUILTIN_String and em.builtinOf(b) == traits_.BUILTIN_String;
+    const strings = em.builtinOf(a) == .string and em.builtinOf(b) == .string;
     const objects = byIdentity(em, a) and byIdentity(em, b);
     var js: []const u8 = "";
     var runtime: []const u8 = "";
@@ -87,33 +87,33 @@ fn byIdentity(em: *MethodEmitter, r: i32) bool {
         return true;
     }
 
-    if (domain.builtin(ty) != traits_.BUILTIN_Other or ty == domain.xmlType or ty == domain.xmlListType or ty == domain.qnameType) {
+    if (domain.builtin(ty) != .other or ty == domain.xmlType or ty == domain.xmlListType or ty == domain.qnameType) {
         return false;
     }
 
     const kind = domain.traits.kind.get(@intCast(ty));
-    return kind == traits_.TRAITS_Instance or kind == traits_.TRAITS_Class;
+    return kind == .instance or kind == .class;
 }
 
 /// Whether register r holds an int, uint, Number or Boolean now.
 pub fn isNumeric(em: *MethodEmitter, r: i32) bool {
-    return isNumber(em, r) or em.builtinOf(r) == traits_.BUILTIN_Boolean;
+    return isNumber(em, r) or em.builtinOf(r) == .boolean;
 }
 
 /// Whether register r holds a value of one of the primitive types now.
 fn isPrimitive(em: *MethodEmitter, r: i32) bool {
-    return isNumeric(em, r) or em.builtinOf(r) == traits_.BUILTIN_String;
+    return isNumeric(em, r) or em.builtinOf(r) == .string;
 }
 
 /// Whether add i is JavaScript's own `+` (values.ts tells when).
 pub fn concatenates(em: *MethodEmitter, i: u32) bool {
     const a = em.builtinOf(em.src(i, 0));
     const b = em.builtinOf(em.src(i, 1));
-    return (a == traits_.BUILTIN_String or b == traits_.BUILTIN_String) and primitive(a) and primitive(b);
+    return (a == .string or b == .string) and primitive(a) and primitive(b);
 }
 
-fn primitive(bt: u8) bool {
-    return bt == traits_.BUILTIN_String or bt == traits_.BUILTIN_Int or bt == traits_.BUILTIN_Uint or bt == traits_.BUILTIN_Boolean;
+fn primitive(bt: traits_.Builtin) bool {
+    return bt == .string or bt == .int or bt == .uint or bt == .boolean;
 }
 
 /// Whether multiply i is an int multiplication that wraps, as avmplus' JIT
@@ -134,7 +134,7 @@ pub fn wraps(em: *MethodEmitter, i: u32) bool {
         .convert_i, .coerce_i, .convert_u, .coerce_u => true,
         .ir_coerce => blk: {
             const bt = em.domain.builtin(ir.c[next]);
-            break :blk bt == traits_.BUILTIN_Int or bt == traits_.BUILTIN_Uint;
+            break :blk bt == .int or bt == .uint;
         },
         else => false,
     };
@@ -148,7 +148,7 @@ pub fn isStaticInit(em: *MethodEmitter, m: u32) bool {
 
 pub fn isNumber(em: *MethodEmitter, r: i32) bool {
     const bt = em.builtinOf(r);
-    return bt == traits_.BUILTIN_Int or bt == traits_.BUILTIN_Uint or bt == traits_.BUILTIN_Number;
+    return bt == .int or bt == .uint or bt == .number;
 }
 
 pub fn binary(em: *MethodEmitter, i: u32, operator: []const u8) Error!void {
@@ -222,8 +222,8 @@ pub fn keeps(em: *MethodEmitter, ty: i32, from: i32) Error!bool {
     const bt = domain.builtin(ty);
     const fromBt = domain.builtin(from);
     return ty == from or
-        bt == traits_.BUILTIN_Any or
-        (bt == traits_.BUILTIN_Number and (fromBt == traits_.BUILTIN_Int or fromBt == traits_.BUILTIN_Uint or fromBt == traits_.BUILTIN_Number)) or
+        bt == .any or
+        (bt == .number and (fromBt == .int or fromBt == .uint or fromBt == .number)) or
         try upcast(em, ty, from) or
         nullStays(em, ty, from);
 }
@@ -242,7 +242,7 @@ fn nullStays(em: *MethodEmitter, ty: i32, from: i32) bool {
     }
 
     const bt = em.domain.builtin(ty);
-    return bt == traits_.BUILTIN_String or bt == traits_.BUILTIN_Object or refs.isClassRef(em, ty);
+    return bt == .string or bt == .object or refs.isClassRef(em, ty);
 }
 
 /// The conversion instructions: the value of src as the type they give.
@@ -282,17 +282,17 @@ pub fn convert(em: *MethodEmitter, prefix: []const u8, r: i32, ty: i32, from: i3
     const domain = em.domain;
     const bt = domain.builtin(ty);
     const fromBt = domain.builtin(from);
-    if (prefix.len == 0 and fromBt == traits_.BUILTIN_Float) {
+    if (prefix.len == 0 and fromBt == .float) {
         switch (bt) {
-            traits_.BUILTIN_Float => if (unboxed) {
+            .float => if (unboxed) {
                 return em.numberReg(r);
             },
-            traits_.BUILTIN_Int, traits_.BUILTIN_Uint => {
+            .int, .uint => {
                 try em.numberReg(r);
-                return out.text(if (bt == traits_.BUILTIN_Int) " | 0" else " >>> 0");
+                return out.text(if (bt == .int) " | 0" else " >>> 0");
             },
-            traits_.BUILTIN_Number => return em.numberReg(r),
-            traits_.BUILTIN_Boolean => {
+            .number => return em.numberReg(r),
+            .boolean => {
                 try out.text("!!");
                 return em.numberReg(r);
             },
@@ -300,15 +300,15 @@ pub fn convert(em: *MethodEmitter, prefix: []const u8, r: i32, ty: i32, from: i3
         }
     }
 
-    if (ty == from or bt == traits_.BUILTIN_Any or nullStays(em, ty, from)) {
+    if (ty == from or bt == .any or nullStays(em, ty, from)) {
         return operand(em, prefix, r);
     }
 
-    const numeric = fromBt == traits_.BUILTIN_Int or fromBt == traits_.BUILTIN_Uint or fromBt == traits_.BUILTIN_Number;
+    const numeric = fromBt == .int or fromBt == .uint or fromBt == .number;
     switch (bt) {
-        traits_.BUILTIN_Float => {
+        .float => {
             try out.text(if (unboxed) "Math.fround(" else "rt.float(");
-            if (unboxed and !numeric and fromBt != traits_.BUILTIN_Boolean) {
+            if (unboxed and !numeric and fromBt != .boolean) {
                 try out.text("rt.toNumber(");
                 try operand(em, prefix, r);
                 try out.text(")");
@@ -318,7 +318,7 @@ pub fn convert(em: *MethodEmitter, prefix: []const u8, r: i32, ty: i32, from: i3
 
             try out.text(")");
         },
-        traits_.BUILTIN_Int => if (numeric or fromBt == traits_.BUILTIN_Boolean) {
+        .int => if (numeric or fromBt == .boolean) {
             try operand(em, prefix, r);
             try out.text(" | 0");
         } else {
@@ -326,7 +326,7 @@ pub fn convert(em: *MethodEmitter, prefix: []const u8, r: i32, ty: i32, from: i3
             try operand(em, prefix, r);
             try out.text(")");
         },
-        traits_.BUILTIN_Uint => if (numeric or fromBt == traits_.BUILTIN_Boolean) {
+        .uint => if (numeric or fromBt == .boolean) {
             try operand(em, prefix, r);
             try out.text(" >>> 0");
         } else {
@@ -334,14 +334,14 @@ pub fn convert(em: *MethodEmitter, prefix: []const u8, r: i32, ty: i32, from: i3
             try operand(em, prefix, r);
             try out.text(")");
         },
-        traits_.BUILTIN_Number => if (numeric) {
+        .number => if (numeric) {
             try operand(em, prefix, r);
         } else {
             try out.text("rt.toNumber(");
             try operand(em, prefix, r);
             try out.text(")");
         },
-        traits_.BUILTIN_Boolean => if (fromBt == traits_.BUILTIN_Float or fromBt == traits_.BUILTIN_Any or fromBt == traits_.BUILTIN_Object) {
+        .boolean => if (fromBt == .float or fromBt == .any or fromBt == .object) {
             try out.text("rt.toBoolean(");
             try operand(em, prefix, r);
             try out.text(")");
@@ -349,12 +349,12 @@ pub fn convert(em: *MethodEmitter, prefix: []const u8, r: i32, ty: i32, from: i3
             try out.text("!!");
             try operand(em, prefix, r);
         },
-        traits_.BUILTIN_String => {
+        .string => {
             try out.text("rt.coerceString(");
             try operand(em, prefix, r);
             try out.text(")");
         },
-        traits_.BUILTIN_Object => {
+        .object => {
             try out.text("rt.coerceObject(");
             try operand(em, prefix, r);
             try out.text(")");

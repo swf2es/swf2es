@@ -140,7 +140,7 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
 
     traits.slotCount.set(t, slotCount);
     traits.methodCount.set(t, methodCount);
-    if (traits.kind.get(t) == traits_.TRAITS_Instance and traits.isInterface.get(t) == 0) {
+    if (traits.kind.get(t) == .instance and traits.isInterface.get(t) == 0) {
         try bindInterfaces(traits, dom, t);
     }
 

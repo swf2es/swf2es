@@ -34,12 +34,19 @@ const TYPE_Any = traits_.TYPE_Any;
 const typenames = @import("typenames.zig");
 const types = @import("types.zig");
 
-pub const NS_Public: u8 = 0;
-pub const NS_PackageInternal: u8 = 1;
-pub const NS_Protected: u8 = 2;
-pub const NS_Explicit: u8 = 3;
-pub const NS_StaticProtected: u8 = 4;
-pub const NS_Private: u8 = 5;
+/// A namespace's type, as avmplus' Namespace::NamespaceType tells names
+/// apart. domainFound (an export) and the saved found entries carry it, so
+/// its values are fixed; non-exhaustive, as a found entry's is taken as
+/// given, as it was as a byte.
+pub const NsType = enum(u8) {
+    public = 0,
+    package_internal = 1,
+    protected = 2,
+    explicit = 3,
+    static_protected = 4,
+    private = 5,
+    _,
+};
 
 /// avmplus' ApiVersion values that swf2es needs; see core/api-versions.h.
 pub const API_AllVersions: u8 = 0;
@@ -52,23 +59,55 @@ pub const URI_None: u32 = 0xffffffff;
 
 /// An application domain's state: live; evicted, let go of until the host
 /// gives its ABCs again (see evict in lifetime.zig); or dropped for good.
-pub const DOMAIN_Live: u8 = 0;
-pub const DOMAIN_Evicted: u8 = 1;
-pub const DOMAIN_Dropped: u8 = 2;
+/// Saved with the domain, so its values are fixed; non-exhaustive, and a
+/// loaded save naming another is refused (lifetime.zig's consistent).
+pub const DomainState = enum(u8) {
+    live = 0,
+    evicted = 1,
+    dropped = 2,
+    _,
+
+    /// Whether it is one of the named states, not a corrupt number.
+    pub fn isNamed(state: DomainState) bool {
+        return switch (state) {
+            .live, .evicted, .dropped => true,
+            _ => false,
+        };
+    }
+
+    /// Of two states, the one further from live: dropped, then evicted.
+    pub fn furthest(a: DomainState, b: DomainState) DomainState {
+        return @fromBackingInt(@max(@backingInt(a), @backingInt(b)));
+    }
+};
 
 /// What an ABC weighs for each of its bytes before it links: them, and what parsing them took.
 pub const ABC_Weight: u64 = 3;
 
-/// The kinds of the log's entries (see Domain.logKind).
-pub const LOG_None: u8 = 0;
-/// A finding, by its index in the found tables.
-pub const LOG_Found: u8 = 1;
-/// Traits resolved, by their kind and owner in their ABC.
-pub const LOG_Resolve: u8 = 2;
-/// A method signed, by its index in its ABC.
-pub const LOG_Sign: u8 = 3;
-/// An ABC verified for the first time, or finding scopes for the first time.
-pub const LOG_Verify: u8 = 4;
+/// The kinds of the log's entries (see Domain.logKind). Saved and
+/// journaled, so their values are fixed; non-exhaustive, and an entry of
+/// another kind is skipped or refused where it is replayed, as before.
+pub const LogKind = enum(u8) {
+    /// An entry undone in place (a verification left before its end).
+    none = 0,
+    /// A finding, by its index in the found tables.
+    found = 1,
+    /// Traits resolved, by their kind and owner in their ABC.
+    resolve = 2,
+    /// A method signed, by its index in its ABC.
+    sign = 3,
+    /// An ABC verified for the first time, or finding scopes for the first time.
+    verify = 4,
+    _,
+
+    /// Whether it is one of the named kinds, not a corrupt number.
+    pub fn isNamed(kind: LogKind) bool {
+        return switch (kind) {
+            .none, .found, .resolve, .sign, .verify => true,
+            _ => false,
+        };
+    }
+};
 
 /// How many reads past the end of a namespace set's members the last call
 /// made, where AssemblyScript's unchecked read gives whatever memory is
@@ -226,7 +265,7 @@ pub fn addAbc(dom: *Domain, arena: *memory.Arena, bytes: []const u8, builtin: bo
 /// A log entry as it was before a truncation (Domain.keepTruncated).
 pub const Truncated = struct {
     entry: u32,
-    kind: u8,
+    kind: LogKind,
     at: u32,
     abc: u32,
     a: u32,
@@ -299,7 +338,7 @@ pub const Domain = struct {
     /// URIs a builtin ABC marks with a version: their unmarked public names are VM-internal.
     versioned: Rows(u8) = .{},
 
-    nsType: Rows(u8) = .{},
+    nsType: Rows(NsType) = .{},
     nsUri: Rows(u32) = .{},
     namespaces: IdTable,
 
@@ -363,8 +402,8 @@ pub const Domain = struct {
     /// Each domain's parent, -1 for the root, and its depth.
     domainParent: Rows(i32) = .{},
     domainDepth: Rows(u32) = .{},
-    /// Each domain's DOMAIN_ state: nothing sees what the ABCs of one not live define.
-    domainState: Rows(u8) = .{},
+    /// Each domain's state: nothing sees what the ABCs of one not live define.
+    domainState: Rows(DomainState) = .{},
     /// The domain of each ABC, and of each class name.
     abcDomain: Rows(u32) = .{},
     typeDomain: Rows(u32) = .{},
@@ -376,9 +415,9 @@ pub const Domain = struct {
     cachedBinding: Rows(i32) = .{},
     cachedClass: Rows(i32) = .{},
     cached: IdTable,
-    /// Each finding addFound recorded, as the runtime reported it (see LOG_Found).
+    /// Each finding addFound recorded, as the runtime reported it (see .found).
     foundDomain: Rows(u32) = .{},
-    foundKind: Rows(u8) = .{},
+    foundKind: Rows(NsType) = .{},
     foundUri: Rows([]const u8) = .{},
     foundName: Rows([]const u8) = .{},
     foundAbc: Rows(u32) = .{},
@@ -386,10 +425,10 @@ pub const Domain = struct {
     /// Each finding's entry in the log, in increasing order, as the findings are in the log's.
     foundEntry: Rows(u32) = .{},
     /// What the domain's tables hold that depends on when it happened, in
-    /// the order it happened (domain.ts tells what): a LOG_ kind, the ABC it
+    /// the order it happened (domain.ts tells what): a LogKind, the ABC it
     /// is of, and two numbers by kind; logAt, how many ABCs there were then,
     /// never decreases along the log.
-    logKind: Rows(u8) = .{},
+    logKind: Rows(LogKind) = .{},
     logAt: Rows(u32) = .{},
     logAbc: Rows(u32) = .{},
     logA: Rows(u32) = .{},
@@ -482,7 +521,7 @@ pub const Domain = struct {
         };
         try dom.domainParent.push(gpa, -1);
         try dom.domainDepth.push(gpa, 0);
-        try dom.domainState.push(gpa, DOMAIN_Live);
+        try dom.domainState.push(gpa, .live);
         try dom.domainEvicted.push(gpa, 0);
         return dom;
     }
@@ -645,11 +684,11 @@ pub const Domain = struct {
 
     /// Whether ABC `index` is of a live application domain, one neither evicted nor dropped.
     pub fn isLive(self: *const Domain, index: u32) bool {
-        return self.domainState.get(self.abcDomain.get(index)) == DOMAIN_Live;
+        return self.domainState.get(self.abcDomain.get(index)) == .live;
     }
 
     /// Append entry `kind` of ABC `abc` to the log.
-    pub fn logged(self: *Domain, kind: u8, abc: u32, a: u32, b: u32) Allocator.Error!void {
+    pub fn logged(self: *Domain, kind: LogKind, abc: u32, a: u32, b: u32) Allocator.Error!void {
         try self.logKind.push(self.gpa, kind);
         try self.logAt.push(self.gpa, self.abcs.len);
         try self.logAbc.push(self.gpa, abc);
@@ -661,19 +700,19 @@ pub const Domain = struct {
     pub fn loggedResolve(self: *Domain, t: u32) Allocator.Error!void {
         const traits = &self.traits;
         const kind = traits.kind.get(t);
-        if (kind >= traits_.TRAITS_Instance and kind <= traits_.TRAITS_Activation and traits.param.get(t) == TYPE_Any) {
-            try self.logged(LOG_Resolve, traits.abc.get(t), kind, traits.owner.get(t));
+        if (kind.isOwned() and traits.param.get(t) == TYPE_Any) {
+            try self.logged(.resolve, traits.abc.get(t), @backingInt(kind), traits.owner.get(t));
         }
     }
 
     /// Whether the machine type always holds a value: int, uint, Number and Boolean.
     pub fn typeNotNull(self: *const Domain, type_: i32) bool {
         const bt = self.builtin(type_);
-        return bt == traits_.BUILTIN_Int or
-            bt == traits_.BUILTIN_Uint or
-            bt == traits_.BUILTIN_Number or
-            bt == traits_.BUILTIN_Boolean or
-            bt == traits_.BUILTIN_Float;
+        return bt == .int or
+            bt == .uint or
+            bt == .number or
+            bt == .boolean or
+            bt == .float;
     }
 
     /// The traits of Class's instances, which class objects are.
@@ -689,7 +728,7 @@ pub const Domain = struct {
     /// As Traits::itraits: for a class object's traits, its instances'; else *.
     pub fn instanceTraitsOf(self: *const Domain, type_: i32) i32 {
         const traits = &self.traits;
-        if (type_ < 0 or traits.kind.get(@intCast(type_)) != traits_.TRAITS_Class) {
+        if (type_ < 0 or traits.kind.get(@intCast(type_)) != .class) {
             return TYPE_Any;
         }
 
@@ -788,7 +827,7 @@ pub const Domain = struct {
         }
 
         const t = traits.methodTraits.get(m);
-        return t >= 0 and traits.init.get(@intCast(t)) == @as(i32, @bitCast(m)) and traits.kind.get(@intCast(t)) != traits_.TRAITS_Script;
+        return t >= 0 and traits.init.get(@intCast(t)) == @as(i32, @bitCast(m)) and traits.kind.get(@intCast(t)) != .script;
     }
 
     /// As DomainMgr::findScriptInPoolByMultiname: the global object traits of
@@ -874,7 +913,7 @@ pub const Domain = struct {
             // As Namespace::isPublic: of the public kind, and with an empty URI.
             const ns = self.abcNs.get(index)[pool.nsSetMembers[m]];
             const uri = self.nsUri.get(ns);
-            if (self.nsType.get(ns) == NS_Public and (uri == URI_None or self.stringLength.get(uri) == 0)) {
+            if (self.nsType.get(ns) == .public and (uri == URI_None or self.stringLength.get(uri) == 0)) {
                 return true;
             }
         }
@@ -950,7 +989,7 @@ pub const Domain = struct {
 
         const traits = &self.traits;
         const s: u32 = @intCast(slotType);
-        if (traits.kind.get(s) == traits_.TRAITS_Class and
+        if (traits.kind.get(s) == .class and
             traits.base.get(s) == self.classInstanceType() and
             !self.abcs.get(traits.abc.get(s)).builtin)
         {
@@ -1001,7 +1040,7 @@ pub const Domain = struct {
         }
 
         const traits = &self.traits;
-        const t = try traits.create(gpa, traits_.TRAITS_Catch, index, h, -1, -1, 0, 0);
+        const t = try traits.create(gpa, .catch_scope, index, h, -1, -1, 0, 0);
         const start = traits.memberTraits.len;
         traits.memberStart.set(t, start);
         traits.memberEnd.set(t, start);
@@ -1076,23 +1115,26 @@ pub const Domain = struct {
     }
 
     /// As Traits::getBuiltinType.
-    pub fn builtin(self: *const Domain, type_: i32) u8 {
-        if (type_ == TYPE_Any) return traits_.BUILTIN_Any;
-        if (type_ == self.objectType()) return traits_.BUILTIN_Object;
-        if (type_ == self.voidType) return traits_.BUILTIN_Void;
-        if (type_ == self.booleanType) return traits_.BUILTIN_Boolean;
-        if (type_ == self.intType) return traits_.BUILTIN_Int;
-        if (type_ == self.uintType) return traits_.BUILTIN_Uint;
-        if (type_ >= 0 and type_ == self.floatType) return traits_.BUILTIN_Float;
-        if (type_ == self.numberType) return traits_.BUILTIN_Number;
-        if (type_ == self.stringType) return traits_.BUILTIN_String;
-        return if (type_ == self.namespaceType) traits_.BUILTIN_Namespace else traits_.BUILTIN_Other;
+    pub fn builtin(self: *const Domain, type_: i32) traits_.Builtin {
+        if (type_ == TYPE_Any) return .any;
+        if (type_ == self.objectType()) return .object;
+        if (type_ == self.voidType) return .void;
+        if (type_ == self.booleanType) return .boolean;
+        if (type_ == self.intType) return .int;
+        if (type_ == self.uintType) return .uint;
+        if (type_ >= 0 and type_ == self.floatType) return .float;
+        if (type_ == self.numberType) return .number;
+        if (type_ == self.stringType) return .string;
+        return if (type_ == self.namespaceType) .namespace else .other;
     }
 
     /// As Traits::isMachineType: Object, void, Boolean, int, uint and Number.
     pub fn isMachineType(self: *const Domain, type_: i32) bool {
         const bt = self.builtin(type_);
-        return (bt >= traits_.BUILTIN_Object and bt <= traits_.BUILTIN_Number) or bt == traits_.BUILTIN_Float;
+        return switch (bt) {
+            .object, .void, .boolean, .int, .uint, .number, .float => true,
+            else => false,
+        };
     }
 
     /// As Traits::isMachineCompatible: whether a and b have the same representation.
@@ -1115,7 +1157,7 @@ pub const Domain = struct {
     /// The namespace id of the public namespace, or -1 if no ABC has one.
     pub fn publicNamespace(self: *const Domain) i32 {
         const empty = self.findText("");
-        return if (empty < 0) -1 else self.findNamespace(NS_Public, @intCast(empty));
+        return if (empty < 0) -1 else self.findNamespace(.public, @intCast(empty));
     }
 
     /// The version of ABC `index`'s public namespace, as AvmCore::getPublicNamespace(pool).
@@ -1198,8 +1240,8 @@ pub const Domain = struct {
     }
 
     /// The id of a namespace, interning it; private namespaces are always new.
-    pub fn internNamespace(self: *Domain, type_: u8, uri: u32) Allocator.Error!u32 {
-        if (type_ != NS_Private) {
+    pub fn internNamespace(self: *Domain, type_: NsType, uri: u32) Allocator.Error!u32 {
+        if (type_ != .private) {
             const found = self.findNamespace(type_, uri);
             if (found >= 0) {
                 return @intCast(found);
@@ -1209,15 +1251,15 @@ pub const Domain = struct {
         const id = self.nsType.len;
         try self.nsType.push(self.gpa, type_);
         try self.nsUri.push(self.gpa, uri);
-        if (type_ != NS_Private) {
-            try self.namespaces.insert(self.gpa, hashPair(type_, uri), id);
+        if (type_ != .private) {
+            try self.namespaces.insert(self.gpa, hashPair(@backingInt(type_), uri), id);
         }
 
         return id;
     }
 
-    pub fn findNamespace(self: *const Domain, type_: u8, uri: u32) i32 {
-        const hash = hashPair(type_, uri);
+    pub fn findNamespace(self: *const Domain, type_: NsType, uri: u32) i32 {
+        const hash = hashPair(@backingInt(type_), uri);
         const ns = &self.namespaces;
         var slot = ns.start(hash);
         while (true) {
@@ -1305,14 +1347,14 @@ pub const Domain = struct {
         const id = self.domainParent.len;
         try self.domainParent.push(self.gpa, @intCast(parent));
         try self.domainDepth.push(self.gpa, self.domainDepth.get(parent) + 1);
-        try self.domainState.push(self.gpa, DOMAIN_Live);
+        try self.domainState.push(self.gpa, .live);
         try self.domainEvicted.push(self.gpa, 0);
         return id;
     }
 
     /// Whether `domain` sees what `other` defines: `other` is it or an ancestor, and live.
     pub fn sees(self: *const Domain, domain: u32, other: u32) bool {
-        if (self.domainState.get(other) != DOMAIN_Live) {
+        if (self.domainState.get(other) != .live) {
             return false;
         }
 
@@ -1443,9 +1485,9 @@ pub const Domain = struct {
     /// Record that `domain` has found the definition ABC `abc` gives `name`
     /// in the namespace of kind `type` and URI `uri`: by name, its script's
     /// binding, or as a type, its class. A name no ABC spells is not recorded.
-    pub fn addFound(self: *Domain, domain: u32, type_: u8, uri: []const u8, name: []const u8, abc: u32, asType: bool) Allocator.Error!void {
+    pub fn addFound(self: *Domain, domain: u32, type_: NsType, uri: []const u8, name: []const u8, abc: u32, asType: bool) Allocator.Error!void {
         if (domain >= self.domainParent.len or
-            self.domainState.get(domain) != DOMAIN_Live or
+            self.domainState.get(domain) != .live or
             abc >= self.abcs.len or
             !self.isLive(abc))
         {
@@ -1522,7 +1564,7 @@ pub const Domain = struct {
         try self.cached.insert(gpa, hashPair(nsU, nameU), id);
         self.clearBindingMemo();
         try self.foundEntry.push(gpa, self.logKind.len);
-        try self.logged(LOG_Found, abc, self.foundDomain.len, 0);
+        try self.logged(.found, abc, self.foundDomain.len, 0);
         try self.foundDomain.push(gpa, domain);
         try self.foundKind.push(gpa, type_);
         try self.foundUri.push(gpa, try gpa.dupe(u8, uri));
@@ -1545,6 +1587,6 @@ pub const Domain = struct {
 };
 
 /// *, Object and void are all represented as atoms.
-fn isAtom(bt: u8) bool {
-    return bt == traits_.BUILTIN_Any or bt == traits_.BUILTIN_Object or bt == traits_.BUILTIN_Void;
+fn isAtom(bt: traits_.Builtin) bool {
+    return bt == .any or bt == .object or bt == .void;
 }

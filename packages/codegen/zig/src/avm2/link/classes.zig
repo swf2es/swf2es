@@ -86,7 +86,7 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
 
         const base = dom.classBase.get(id);
         const protectedNs: i32 = if (flags.protected_ns) @intCast(ids[abc.instanceProtectedNs[i]]) else -1;
-        const t = try dom.traits.create(gpa, traits_.TRAITS_Instance, index, i, if (base >= 0) dom.classTraits.get(@intCast(base)) else -1, protectedNs, abc.instanceTraitStart[i], abc.instanceTraitStart[i + 1]);
+        const t = try dom.traits.create(gpa, .instance, index, i, if (base >= 0) dom.classTraits.get(@intCast(base)) else -1, protectedNs, abc.instanceTraitStart[i], abc.instanceTraitStart[i + 1]);
         dom.traits.isInterface.set(t, if (flags.interface) 1 else 0);
         dom.traits.interfaceStart.set(t, interfaces);
         dom.traits.interfaceEnd.set(t, dom.traits.interfaceList.len);
@@ -118,12 +118,12 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
         try dom.classInstance.push(gpa, 0xffffffff);
         try dom.classBase.push(gpa, -1);
         try dom.classFlags.push(gpa, .{ .final = true });
-        dom.voidType = @intCast(try dom.traits.create(gpa, traits_.TRAITS_Void, index, 0, -1, -1, 0, 0));
-        dom.nullType = @intCast(try dom.traits.create(gpa, traits_.TRAITS_Null, index, 0, -1, -1, 0, 0));
+        dom.voidType = @intCast(try dom.traits.create(gpa, .void, index, 0, -1, -1, 0, 0));
+        dom.nullType = @intCast(try dom.traits.create(gpa, .null, index, 0, -1, -1, 0, 0));
         try dom.classTraits.push(gpa, dom.voidType);
         try dom.classStatic.push(gpa, -1);
         findBuiltinTypes(dom);
-        const empty = try dom.internNamespace(domain_.NS_Public, try dom.internText(""));
+        const empty = try dom.internNamespace(.public, try dom.internText(""));
         try typenames.nameType(dom, empty, try dom.internText("void"), domain_.API_AllVersions, dom.voidClass, -1, 0);
         dom.transientName = try dom.internText("Transient");
         dom.versionName = try dom.internText("Version");
@@ -141,7 +141,7 @@ fn layoutStatics(dom: *Domain, index: u32) Allocator.Error!bool {
     const classTraits = if (dom.classClass >= 0) dom.classTraits.get(@intCast(dom.classClass)) else -1;
     for (0..abc.classCount()) |i_| {
         const i: u32 = @intCast(i_);
-        const t = try dom.traits.create(dom.gpa, traits_.TRAITS_Class, index, i, classTraits, dom.traits.protectedNs.get(@intCast(dom.classTraits.get(first + i))), abc.classTraitStart[i], abc.classTraitStart[i + 1]);
+        const t = try dom.traits.create(dom.gpa, .class, index, i, classTraits, dom.traits.protectedNs.get(@intCast(dom.classTraits.get(first + i))), abc.classTraitStart[i], abc.classTraitStart[i + 1]);
         dom.classStatic.set(first + i, @intCast(t));
         const err = try layout(&dom.traits, dom, t);
         if (err != 0) {
@@ -163,7 +163,7 @@ fn layoutScripts(dom: *Domain, index: u32) Allocator.Error!bool {
     try dom.scriptTraits.push(gpa, scripts);
     for (0..abc.scriptCount()) |s_| {
         const s: u32 = @intCast(s_);
-        const t = try dom.traits.create(gpa, traits_.TRAITS_Script, index, s, objectTraits, -1, abc.scriptTraitStart[s], abc.scriptTraitStart[s + 1]);
+        const t = try dom.traits.create(gpa, .script, index, s, objectTraits, -1, abc.scriptTraitStart[s], abc.scriptTraitStart[s + 1]);
         scripts[s] = t;
         const scope = try gpa.create(Scope);
         scope.* = .{};
@@ -191,7 +191,7 @@ fn layoutActivations(dom: *Domain, index: u32) Allocator.Error!bool {
         const flags = abc.methodFlags[abc.bodyMethod[b]];
         bodies[b] = -1;
         if (flags.need_activation or end > first) {
-            const t = try dom.traits.create(gpa, traits_.TRAITS_Activation, index, b, -1, -1, first, end);
+            const t = try dom.traits.create(gpa, .activation, index, b, -1, -1, first, end);
             bodies[b] = @intCast(t);
             const err = try layout(&dom.traits, dom, t);
             if (err != 0) {

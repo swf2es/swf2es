@@ -294,7 +294,7 @@ fn globalSearch(bd: *BodyDecoder) u32 {
         }
 
         switch (traits.kind.get(@intCast(t))) {
-            traits_.TRAITS_Class, traits_.TRAITS_Script, traits_.TRAITS_Activation, traits_.TRAITS_Catch => {},
+            .class, .script, .activation, .catch_scope => {},
             else => return from + 1,
         }
     }
@@ -452,7 +452,7 @@ pub fn setProperty(bd: *BodyDecoder, opcode: Op, mn: u32) Error!bool {
     // initializer is written as setproperty writes it: ReferenceError 1074.
     // A global's is left to initproperty: a SWF loaded again into the one
     // domain initializes its classes on the first load's global.
-    const late = kind == 3 and opcode == .initproperty and ty >= 0 and domain.traits.kind.get(@intCast(ty)) == traits_.TRAITS_Instance;
+    const late = kind == 3 and opcode == .initproperty and ty >= 0 and domain.traits.kind.get(@intCast(ty)) == .instance;
     const write: Op = if (late) .setproperty else opcode;
     return bd.emitOn(ir_.of(write), -1, @bitCast(obj), n, mn, 0, 0);
 }

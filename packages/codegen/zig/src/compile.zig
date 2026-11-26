@@ -151,7 +151,7 @@ pub fn domainChild(parent: i32) Allocator.Error!i32 {
 fn isLive(dom: *const Domain, appDomain: i32) bool {
     return appDomain >= 0 and
         appDomain < dom.domainParent.len and
-        dom.domainState.get(@intCast(appDomain)) == domain_.DOMAIN_Live;
+        dom.domainState.get(@intCast(appDomain)) == .live;
 }
 
 /// Drop application domain `appDomain` and its descendants, as the runtime
@@ -178,7 +178,7 @@ pub fn domainEvict(appDomain: i32) Allocator.Error!void {
 /// Application domain `appDomain`'s state: 0 live, 1 evicted, 2 dropped, -1 never made.
 pub fn domainState(appDomain: i32) Allocator.Error!i32 {
     const dom = try domain();
-    return if (appDomain >= 0 and appDomain < dom.domainState.len) dom.domainState.get(@intCast(appDomain)) else -1;
+    return if (appDomain >= 0 and appDomain < dom.domainState.len) @backingInt(dom.domainState.get(@intCast(appDomain))) else -1;
 }
 
 /// Give ABC `index`, of an evicted application domain, its bytes again, if
@@ -244,7 +244,7 @@ pub fn domainRevive(appDomain: i32, stepped: bool) Allocator.Error!i32 {
 pub fn domainFound(appDomain: i32, nsKind: i32, uri: []const u8, name: []const u8, abc: i32, asType: bool) Allocator.Error!void {
     abandon();
     forgetVerified();
-    try changed(Domain.addFound, .{ @as(u32, @bitCast(appDomain)), @as(u8, @truncate(@as(u32, @bitCast(nsKind)))), uri, name, @as(u32, @bitCast(abc)), asType });
+    try changed(Domain.addFound, .{ @as(u32, @bitCast(appDomain)), @as(domain_.NsType, @fromBackingInt(@as(u8, @truncate(@as(u32, @bitCast(nsKind)))))), uri, name, @as(u32, @bitCast(abc)), asType });
 }
 
 /// ABC `index` of the domain, or the last added for -1; -1 again where
@@ -781,24 +781,24 @@ fn writeSeen(out: *Output, seen: []const u32, at: u32) Allocator.Error!void {
 fn writeEntry(dom: *const Domain, gpa: Allocator, out: *Output, e: u32, own: u32, seen: []const u32, count: u32) Allocator.Error!bool {
     const kind = dom.logKind.get(e);
     const place = placeOf(seen, dom.logAbc.get(e));
-    if (kind == domain_.LOG_None or place < 0) {
+    if (kind == .none or place < 0) {
         return false;
     }
 
     const f = dom.logA.get(e);
-    const depth = if (kind == domain_.LOG_Found) depthOf(dom, own, dom.foundDomain.get(f)) else 0;
+    const depth = if (kind == .found) depthOf(dom, own, dom.foundDomain.get(f)) else 0;
     if (depth < 0) {
         return false;
     }
 
     try out.byte('\n');
-    try out.uint(kind);
+    try out.uint(@backingInt(kind));
     try out.byte(' ');
     try out.int(place);
     try out.byte(' ');
     try out.uint(count);
     try out.byte(' ');
-    if (kind != domain_.LOG_Found) {
+    if (kind != .found) {
         try out.uint(f);
         try out.byte(' ');
         try out.uint(dom.logB.get(e));
@@ -807,7 +807,7 @@ fn writeEntry(dom: *const Domain, gpa: Allocator, out: *Output, e: u32, own: u32
 
     try out.int(depth);
     try out.byte(' ');
-    try out.uint(dom.foundKind.get(f));
+    try out.uint(@backingInt(dom.foundKind.get(f)));
     try out.byte(' ');
     try out.uint(dom.foundAsType.get(f));
     try out.byte(' ');
@@ -1009,12 +1009,12 @@ pub fn domainLogSince(gpa: Allocator, mark: i32, index: i32) Allocator.Error![]c
     var e: u32 = @intCast(mark);
     while (e < dom.logKind.len) : (e += 1) {
         const kind = dom.logKind.get(e);
-        if (kind == domain_.LOG_None) {
+        if (kind == .none) {
             continue;
         }
 
         const place = placeOf(seen, dom.logAbc.get(e));
-        if (kind == domain_.LOG_Found or place < 0) {
+        if (kind == .found or place < 0) {
             return "!";
         }
 
@@ -1023,7 +1023,7 @@ pub fn domainLogSince(gpa: Allocator, mark: i32, index: i32) Allocator.Error![]c
         }
 
         lines += 1;
-        try out.uint(kind);
+        try out.uint(@backingInt(kind));
         try out.byte(' ');
         try out.int(place);
         try out.byte(' ');
@@ -1042,21 +1042,21 @@ pub fn journalBytes(gpa: Allocator, mark: u32) Allocator.Error!?[]const u8 {
     for (@min(mark, dom.logKind.len)..dom.logKind.len) |e_| {
         const e: u32 = @intCast(e_);
         const kind = dom.logKind.get(e);
-        if (kind == domain_.LOG_None) continue;
-        if (kind == domain_.LOG_Found) return null;
-        try words.appendSlice(gpa, &.{ kind, dom.logAbc.get(e), dom.logA.get(e), dom.logB.get(e) });
+        if (kind == .none) continue;
+        if (kind == .found) return null;
+        try words.appendSlice(gpa, &.{ @backingInt(kind), dom.logAbc.get(e), dom.logA.get(e), dom.logB.get(e) });
     }
     return std.mem.sliceAsBytes(words.items);
 }
 
 pub fn replayEntry(kind: u32, index: u32, a: u32, b: u32) Allocator.Error!bool {
     const dom = try domain();
-    if (kind > domain_.LOG_Verify or index >= dom.abcs.len or !dom.isLive(index)) return false;
+    if (kind > @backingInt(domain_.LogKind.verify) or index >= dom.abcs.len or !dom.isLive(index)) return false;
 
-    return changed(replayOne, .{ @as(u8, @intCast(kind)), index, a, b });
+    return changed(replayOne, .{ @as(domain_.LogKind, @fromBackingInt(@as(u8, @intCast(kind)))), index, a, b });
 }
 
-fn replayOne(dom: *Domain, kind: u8, index: u32, a: u32, b: u32) Allocator.Error!bool {
+fn replayOne(dom: *Domain, kind: domain_.LogKind, index: u32, a: u32, b: u32) Allocator.Error!bool {
     const rows = dom.rows();
     const ok = try replayed(dom, kind, index, a, b);
     lifetime.weigh(dom, index, rows);
@@ -1111,7 +1111,7 @@ fn replayLog(dom: *Domain, gpa: Allocator, log: []const u8, at: u32) Allocator.E
                 break;
             }
 
-            ok = try replayed(dom, @truncate(@as(u32, @bitCast(kind))), seen[@intCast(place)], @intCast(a), @intCast(b));
+            ok = try replayed(dom, @fromBackingInt(@as(u8, @truncate(@as(u32, @bitCast(kind))))), seen[@intCast(place)], @intCast(a), @intCast(b));
         }
     }
 
@@ -1120,27 +1120,28 @@ fn replayLog(dom: *Domain, gpa: Allocator, log: []const u8, at: u32) Allocator.E
 }
 
 /// Entry `kind` of ABC `abc` done again, as a rebuild replays one, its numbers checked against the ABC first.
-fn replayed(dom: *Domain, kind: u8, abc: u32, a: u32, b: u32) Allocator.Error!bool {
+fn replayed(dom: *Domain, kind: domain_.LogKind, abc: u32, a: u32, b: u32) Allocator.Error!bool {
     const info = dom.abcs.get(abc);
-    if (kind == domain_.LOG_Verify) {
+    if (kind == .verify) {
         _ = try code.verifyMethods(dom, abc);
         return true;
     }
 
-    if (kind == domain_.LOG_Sign) {
+    if (kind == .sign) {
         return b < info.methodCount() and try dom.traits.sign(dom, dom.methodStart.get(abc) + b) == 0;
     }
 
-    if (kind != domain_.LOG_Resolve or a < traits_.TRAITS_Instance or a > traits_.TRAITS_Activation) {
+    if (kind != .resolve) {
         return false;
     }
 
-    const owners: u32 = switch (a) {
-        traits_.TRAITS_Script => info.scriptCount(),
-        traits_.TRAITS_Activation => @intCast(dom.bodyTraits.get(abc).len),
+    const owned = traits_.TraitsKind.owned(a) orelse return false;
+    const owners: u32 = switch (owned) {
+        .script => info.scriptCount(),
+        .activation => @intCast(dom.bodyTraits.get(abc).len),
         else => info.classCount(),
     };
-    const t = if (b < owners) lifetime.traitsOf(dom, abc, a, b) else -1;
+    const t = if (b < owners) lifetime.traitsOf(dom, abc, owned, b) else -1;
     return t >= 0 and try dom.traits.resolve(dom, @intCast(t)) == 0;
 }
 

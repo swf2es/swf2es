@@ -189,11 +189,11 @@ pub fn commonBase(dom: *const Domain, a: i32, b: i32) i32 {
     }
 
     const traits = &dom.traits;
-    if (traits.kind.get(@intCast(a)) == traits_.TRAITS_Null and !dom.isMachineType(b)) {
+    if (traits.kind.get(@intCast(a)) == .null and !dom.isMachineType(b)) {
         return b;
     }
 
-    if (traits.kind.get(@intCast(b)) == traits_.TRAITS_Null and !dom.isMachineType(a)) {
+    if (traits.kind.get(@intCast(b)) == .null and !dom.isMachineType(a)) {
         return a;
     }
 
@@ -233,5 +233,5 @@ pub fn canAssign(dom: *const Domain, lhs: i32, rhs: i32) bool {
 /// As Traits::isNumeric: int, uint or Number.
 pub fn isNumeric(dom: *const Domain, type_: i32) bool {
     const bt = dom.builtin(type_);
-    return bt == traits_.BUILTIN_Int or bt == traits_.BUILTIN_Uint or bt == traits_.BUILTIN_Number or bt == traits_.BUILTIN_Float;
+    return bt == .int or bt == .uint or bt == .number or bt == .float;
 }

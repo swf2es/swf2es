@@ -42,7 +42,7 @@ pub fn hasBoundEntry(em: *MethodEmitter, m: u32) bool {
     var classes = false;
     for (0..traits.paramCount.get(m)) |p| {
         const ty = traits.paramType.get(start + @as(u32, @intCast(p)));
-        if (domain.builtin(ty) == traits_.BUILTIN_Float) {
+        if (domain.builtin(ty) == .float) {
             return false;
         }
 
@@ -58,7 +58,7 @@ pub fn hasBoundEntry(em: *MethodEmitter, m: u32) bool {
 pub fn isConstructor(em: *MethodEmitter, m: u32) bool {
     const traits = &em.domain.traits;
     const t = traits.methodTraits.get(m);
-    return t >= 0 and traits.kind.get(@intCast(t)) == traits_.TRAITS_Instance and traits.init.get(@intCast(t)) == @as(i32, @bitCast(m));
+    return t >= 0 and traits.kind.get(@intCast(t)) == .instance and traits.init.get(@intCast(t)) == @as(i32, @bitCast(m));
 }
 
 /// The deepest structured code a method is given; one deeper keeps the dispatcher.
@@ -665,7 +665,7 @@ pub const MethodEmitter = struct {
         }
 
         const bt = self.builtinOf(dst);
-        return self.domain.builtin(ir.c[i]) == traits_.BUILTIN_Number and (bt == traits_.BUILTIN_Int or bt == traits_.BUILTIN_Uint);
+        return self.domain.builtin(ir.c[i]) == .number and (bt == .int or bt == .uint);
     }
 
     /// What a copy reads: a register, or the constant instruction `CONSTANT - copy` pushed.
@@ -786,7 +786,7 @@ pub const MethodEmitter = struct {
     }
 
     /// The builtin type of register r's value now.
-    pub fn builtinOf(self: *const MethodEmitter, r: i32) u8 {
+    pub fn builtinOf(self: *const MethodEmitter, r: i32) traits_.Builtin {
         return self.domain.builtin(self.regType[@intCast(r)]);
     }
 
@@ -985,7 +985,7 @@ pub const MethodEmitter = struct {
             try self.literal(self.abc.pool.floats[self.ir.a[@intCast(CONSTANT - copy)]], true);
         } else if (self.unboxedLocal(which) or (copy >= NONE and self.rawFloat[@intCast(which)] != 0)) {
             try self.copied(which, false);
-        } else if (self.builtinOf(r) == traits_.BUILTIN_Float) {
+        } else if (self.builtinOf(r) == .float) {
             try self.out.text("rt.toNumber(");
             try self.reg(r);
             try self.out.text(")");

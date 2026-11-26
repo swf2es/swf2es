@@ -8,6 +8,7 @@ const memory = @import("../../memory.zig");
 const Abc = @import("../abc/abc.zig").Abc;
 const C = @import("../abc/constants.zig");
 const domain_ = @import("domain.zig");
+const NsType = domain_.NsType;
 const Domain = domain_.Domain;
 
 /// VM_INTERNAL is the last mark of the table a library was built with: 52
@@ -39,7 +40,7 @@ pub fn addNamespaces(dom: *Domain, abc: *const Abc, base: [*]const u8, strings: 
             highestMark = mark;
         }
 
-        if (abc.builtin and mark >= 0 and namespaceType(pool.nsKind[i]) == domain_.NS_Public) {
+        if (abc.builtin and mark >= 0 and namespaceType(pool.nsKind[i]) == .public) {
             const uri = try dom.internString(base[pool.strings[index].start..][0 .. pool.strings[index].len - 3]);
             try dom.put(dom.versioned.at(uri), 1);
         }
@@ -57,13 +58,13 @@ pub fn addNamespaces(dom: *Domain, abc: *const Abc, base: [*]const u8, strings: 
             version = @intCast(mark);
         }
 
-        if (ty == domain_.NS_Private) {
+        if (ty == .private) {
             version = domain_.API_AllVersions;
         } else if (index != 0 and abc.builtin) {
-            if ((mark < 0 and ty == domain_.NS_Public and dom.versioned.get(uri) != 0) or mark >= internalMark) {
+            if ((mark < 0 and ty == .public and dom.versioned.get(uri) != 0) or mark >= internalMark) {
                 version = domain_.API_Internal;
             }
-        } else if (index != 0 and ty == domain_.NS_Public) {
+        } else if (index != 0 and ty == .public) {
             version = dom.apiVersion;
         }
 
@@ -109,14 +110,14 @@ fn isAir(version: u8) bool {
     return version != domain_.API_FP_10_0 and version != 5 and version != 7;
 }
 
-pub fn namespaceType(kind: C.Constant) u8 {
+pub fn namespaceType(kind: C.Constant) NsType {
     return switch (kind) {
-        .package_internal_ns => domain_.NS_PackageInternal,
-        .protected_namespace => domain_.NS_Protected,
-        .explicit_namespace => domain_.NS_Explicit,
-        .static_protected_ns => domain_.NS_StaticProtected,
-        .private_ns => domain_.NS_Private,
-        else => domain_.NS_Public,
+        .package_internal_ns => .package_internal,
+        .protected_namespace => .protected,
+        .explicit_namespace => .explicit,
+        .static_protected_ns => .static_protected,
+        .private_ns => .private,
+        else => .public,
     };
 }
 

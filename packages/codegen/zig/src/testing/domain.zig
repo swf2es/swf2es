@@ -18,7 +18,7 @@ const ModuleEmitter = @import("../avm2/emit/module.zig").ModuleEmitter;
 const stack_names = @import("../avm2/emit/stack-names.zig");
 const IrOp = @import("../avm2/ir/ir.zig").Op;
 
-/// The domain's binding of `name` in the namespace of type `type` (NS_*) and
+/// The domain's binding of `name` in the namespace of type `type` (NsType) and
 /// URI `uri`, visible at `version` from application domain `appDomain`:
 /// "abc A script S trait T", or "none".
 pub fn domainFind(gpa: Allocator, type_: u8, uri: []const u8, name: []const u8, version: i32, appDomain: i32) Allocator.Error![]const u8 {
@@ -34,7 +34,7 @@ pub fn domainFind(gpa: Allocator, type_: u8, uri: []const u8, name: []const u8, 
         return "none";
     }
 
-    const ns = dom.findNamespace(type_, @intCast(uriId));
+    const ns = dom.findNamespace(@fromBackingInt(type_), @intCast(uriId));
     const b = if (ns < 0) -1 else dom.find(@intCast(ns), @intCast(nameId), @truncate(@as(u32, @bitCast(version))), @bitCast(appDomain));
     if (b < 0) {
         return "none";
@@ -548,7 +548,7 @@ fn writeType(w: *std.Io.Writer, dom: *const Domain, ty: i32, notNull: u8) std.Io
         const u: u32 = @intCast(t);
         const kind = traits.kind.get(u);
         const isVector = traits.param.get(u) != -1 or
-            (kind == traits_.TRAITS_Instance and traits.first.get(u) == traits.end.get(u) and
+            (kind == .instance and traits.first.get(u) == traits.end.get(u) and
                 traits.base.get(u) == dom.vectorObjectType and t != dom.vectorObjectType);
         if (!isVector) {
             break;
@@ -564,17 +564,17 @@ fn writeType(w: *std.Io.Writer, dom: *const Domain, ty: i32, notNull: u8) std.Io
     } else {
         const u: u32 = @intCast(t);
         switch (traits.kind.get(u)) {
-            traits_.TRAITS_Void => try w.writeAll("void"),
-            traits_.TRAITS_Null => try w.writeAll("null"),
-            traits_.TRAITS_Script => try w.writeAll("global"),
-            traits_.TRAITS_Activation => try w.writeAll("activation"),
-            traits_.TRAITS_Catch => try w.writeAll("catch"),
+            .void => try w.writeAll("void"),
+            .null => try w.writeAll("null"),
+            .script => try w.writeAll("global"),
+            .activation => try w.writeAll("activation"),
+            .catch_scope => try w.writeAll("catch"),
             else => |kind| {
                 const index = traits.abc.get(u);
                 const abc = dom.abcs.get(index);
                 const id = dom.nameOf(index, abc.instanceName[traits.owner.get(u)]);
                 try output.writeDecoded(w, dom.stringOf(id));
-                if (kind == traits_.TRAITS_Class) {
+                if (kind == .class) {
                     try w.writeByte('$');
                 }
             },
@@ -1146,7 +1146,7 @@ fn linkAll(source: Allocator) !void {
                 1 => try testing.expectEqual(1, try domain_.changed(d, a, Domain.childDomain, .{0})),
                 2 => try testing.expectEqual(0, try domain_.changed(d, a, domain_.addAbc, .{ a, &link_user, false, 1 })),
                 3 => try testing.expectEqual(1103, try domain_.changed(d, a, domain_.addAbc, .{ a, &link_failing, false, 0 })),
-                4 => try domain_.changed(d, a, Domain.addFound, .{ 1, 0, "", "A", 0, true }),
+                4 => try domain_.changed(d, a, Domain.addFound, .{ 1, .public, "", "A", 0, true }),
                 else => try testing.expectEqual(0, try domain_.changed(d, a, domainResolve, .{0})),
             }
         }
@@ -1219,7 +1219,7 @@ fn lifeStep(d: *Domain, a: *memory.Arena, step: u32) !void {
         2 => try testing.expectEqual(0, try domain_.changed(d, a, domain_.addAbc, .{ a, &link_user, false, 1 })),
         3 => try testing.expectEqual(1103, try domain_.changed(d, a, domain_.addAbc, .{ a, &link_failing, false, 0 })),
         4 => try testing.expectEqual(0, try domain_.changed(d, a, domain_.addAbc, .{ a, &link_wide, false, 0 })),
-        5 => try domain_.changed(d, a, Domain.addFound, .{ 1, 0, "", "A", 0, true }),
+        5 => try domain_.changed(d, a, Domain.addFound, .{ 1, .public, "", "A", 0, true }),
         6 => try testing.expectEqual(0, try domain_.changed(d, a, domainResolve, .{0})),
         7 => try testing.expectEqual(0, try domain_.changed(d, a, domain_.addAbc, .{ a, &link_created, false, 0 })),
         8 => try testing.expectEqualStrings("verified 2 of 2 bodies", try domain_.changed(d, a, domainVerifyAll, .{d.scratch})),
