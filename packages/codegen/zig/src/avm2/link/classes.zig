@@ -110,7 +110,7 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
 
     if (abc.builtin) {
         const floatType = dom.builtinType("float");
-        if (floatType >= 0) {
+        if (floatType != .any) {
             dom.floatType = floatType;
         }
     }
@@ -125,9 +125,10 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
         try dom.classInstance.push(gpa, 0xffffffff);
         try dom.classBase.push(gpa, -1);
         try dom.classFlags.push(gpa, .{ .final = true });
-        dom.voidType = @intCast(try dom.traits.create(gpa, .void, index, 0, .none, -1, 0, 0));
-        dom.nullType = @intCast(try dom.traits.create(gpa, .null, index, 0, .none, -1, 0, 0));
-        try dom.classTraits.push(gpa, .of(@intCast(dom.voidType)));
+        const void_ = try dom.traits.create(gpa, .void, index, 0, .none, -1, 0, 0);
+        dom.voidType = .of(void_);
+        dom.nullType = .of(try dom.traits.create(gpa, .null, index, 0, .none, -1, 0, 0));
+        try dom.classTraits.push(gpa, .of(void_));
         try dom.classStatic.push(gpa, .none);
         findBuiltinTypes(dom);
         const empty = try dom.internNamespace(.public, try dom.internText(""));
@@ -258,7 +259,7 @@ fn findBuiltinTypes(dom: *Domain) void {
     dom.arrayType = dom.builtinType("Array");
     dom.functionType = dom.builtinType("Function");
     const math = dom.findBuiltin("Math");
-    // -1 where Math is absent or not linked yet, as the builtin type fields hold it.
-    dom.mathStatic = if (math < 0) -1 else @backingInt(dom.classStatic.get(@intCast(math)));
+    // * where Math is absent or not linked yet, as the builtin type fields hold it.
+    dom.mathStatic = if (math < 0) .any else dom.classStatic.get(@intCast(math)).orAny();
     dom.builtinAbc = @intCast(dom.abcs.len - 1);
 }

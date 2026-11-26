@@ -152,11 +152,11 @@ fn bindInterfaces(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!vo
             const name = traits.memberName.get(m);
             const version = traits.memberVersion.get(m);
             const iKind = traits.memberBinding.get(m).kind;
-            if (traits_.compatibleKind(iKind, traits.find(@intCast(t), ns, name, version).kind)) {
+            if (traits_.compatibleKind(iKind, traits.find(.of(t), ns, name, version).kind)) {
                 continue;
             }
 
-            const p = if (publicNs >= 0) traits.find(@intCast(t), @intCast(publicNs), name, publicVersion) else Binding.none;
+            const p = if (publicNs >= 0) traits.find(.of(t), @intCast(publicNs), name, publicVersion) else Binding.none;
             if (traits_.compatibleKind(iKind, p.kind)) {
                 try traits.add(dom.gpa, t, ns, name, version, p);
             }

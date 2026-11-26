@@ -10,7 +10,7 @@
 // and initial values, method signatures, final methods, override signatures
 // and implemented interfaces.
 //
-// A type is a traits id, or TYPE_Any for *.
+// A type is a TypeId: a traits id, or * (any).
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
@@ -61,13 +61,50 @@ pub const TraitsKind = enum(u8) {
     }
 };
 
+/// A type: a traits id, or * (any). The lookups that can fail
+/// (Domain.checkTypeName, readBinding, typeName and the rest) answer
+/// `failed`, below *, and their callers compare it directly. The same i32
+/// as before.
+pub const TypeId = enum(i32) {
+    any = -1,
+    _,
+
+    /// A failed lookup's answer, -2. A declaration rather than a tag: no
+    /// table holds it.
+    pub const failed: TypeId = @fromBackingInt(-2);
+
+    /// The type of traits `t`.
+    pub fn of(t: u32) TypeId {
+        return @fromBackingInt(@intCast(t));
+    }
+
+    /// Its traits id; a type that is a traits'.
+    pub fn index(t: TypeId) u32 {
+        std.debug.assert(t.isTraits());
+        return @intCast(@backingInt(t));
+    }
+
+    /// Whether it is a traits': neither * nor failed.
+    pub fn isTraits(t: TypeId) bool {
+        return @backingInt(t) >= 0;
+    }
+
+    /// Whether it is builtin type `builtin`, one of Domain's builtin type
+    /// fields, which hold * while the builtin is absent: an absent builtin
+    /// is no type, so * is not it.
+    pub fn isBuiltin(t: TypeId, builtin: TypeId) bool {
+        return builtin != .any and t == builtin;
+    }
+};
+
+/// The verifier's and the IR's type as an i32, until they hold TypeId.
 pub const TYPE_Any: i32 = -1;
 
 /// A traits id that may be absent: a traits' base, a class's instance or
 /// class object traits, which a class has once it links. Its none is -1,
-/// the number a type id gives *, but it is no type: a ref becomes one by
-/// toType, which none has not, or by orAny, which says where an absent
-/// ref is read as *. The same i32 as before.
+/// the number of *, but it is no type: a ref becomes one by toType, which
+/// none has not, or by orAny, which says where an absent ref is read as *.
+/// The same i32 as before.
 pub const TypeRef = enum(i32) {
     none = -1,
     _,
@@ -76,9 +113,9 @@ pub const TypeRef = enum(i32) {
         return @fromBackingInt(@intCast(t));
     }
 
-    /// A type's traits: none for *, which has no traits.
-    pub fn ofType(type_: i32) TypeRef {
-        return if (type_ < 0) .none else of(@intCast(type_));
+    /// A type's traits: none for * and failed, which have no traits.
+    pub fn ofType(t: TypeId) TypeRef {
+        return if (t.isTraits()) of(t.index()) else .none;
     }
 
     /// Its traits id; a ref that is not none.
@@ -87,16 +124,16 @@ pub const TypeRef = enum(i32) {
         return @intCast(@backingInt(ref));
     }
 
-    /// As a type id; a ref that is not none.
-    pub fn toType(ref: TypeRef) i32 {
+    /// As a type; a ref that is not none.
+    pub fn toType(ref: TypeRef) TypeId {
         std.debug.assert(ref != .none);
-        return @backingInt(ref);
+        return @fromBackingInt(@backingInt(ref));
     }
 
-    /// As a type id, none as *: where an absent ref has always been read
-    /// as *, which each caller says.
-    pub fn orAny(ref: TypeRef) i32 {
-        return @backingInt(ref);
+    /// As a type, none as *: where an absent ref has always been read as
+    /// *, which each caller says.
+    pub fn orAny(ref: TypeRef) TypeId {
+        return @fromBackingInt(@backingInt(ref));
     }
 };
 
@@ -178,13 +215,13 @@ pub fn compatibleKind(base: BindingKind, over: BindingKind) bool {
 
 /// The scope chain a method is created in (avmplus' ScopeTypeChain): the
 /// types of its `size` entries, and whether each is a with scope. An `extra`
-/// type other than TYPE_Any constrains the method's first own scope, as for
+/// type other than * constrains the method's first own scope, as for
 /// class methods, whose `this` must be of their class.
 pub const Scope = struct {
     size: u32 = 0,
-    types: []i32 = &.{},
+    types: []TypeId = &.{},
     withs: []u8 = &.{},
-    extra: i32 = TYPE_Any,
+    extra: TypeId = .any,
 
     /// Where a contested function's creators' chains differ in length (merged):
     /// how many entries they share, the index of the one entry after them that
@@ -209,13 +246,13 @@ pub const Scope = struct {
             uneven = uneven or s.size != first.size;
             size = @min(size, s.size);
             if (s.extra != first.extra) {
-                extra = TYPE_Any;
+                extra = .any;
             }
         }
 
         const count = size + @intFromBool(uneven);
         const result = try gpa.create(Scope);
-        result.* = .{ .size = count, .types = try gpa.alloc(i32, count), .withs = try gpa.alloc(u8, count), .extra = extra };
+        result.* = .{ .size = count, .types = try gpa.alloc(TypeId, count), .withs = try gpa.alloc(u8, count), .extra = extra };
         for (0..size) |i| {
             const ty = first.types[i];
             var withs = first.withs[i];
@@ -228,13 +265,13 @@ pub const Scope = struct {
                 withs |= s.withs[i];
             }
 
-            result.types[i] = if (differs) TYPE_Any else ty;
+            result.types[i] = if (differs) .any else ty;
             result.withs[i] = if (differs) 1 else withs;
         }
 
         if (uneven) {
             result.pack = @intCast(size);
-            result.types[size] = TYPE_Any;
+            result.types[size] = .any;
             result.withs[size] = 1;
         }
 
@@ -283,8 +320,8 @@ pub const TraitsTable = struct {
     interfaceStart: Rows(u32) = .{},
     interfaceEnd: Rows(u32) = .{},
     interfaceList: Rows(u32) = .{},
-    /// For Vector.<T> with T other than int, uint, Number and *, T; else TYPE_Any.
-    param: Rows(i32) = .{},
+    /// For Vector.<T> with T other than int, uint, Number and *, T; else *.
+    param: Rows(TypeId) = .{},
     /// The initializer method (global id), or -1.
     init: Rows(i32) = .{},
     /// The scope chain the traits' methods are created in, once known.
@@ -302,7 +339,7 @@ pub const TraitsTable = struct {
     resolved: Rows(u8) = .{},
     slotStart: Rows(u32) = .{},
     dispatchStart: Rows(u32) = .{},
-    slotType: Rows(i32) = .{},
+    slotType: Rows(TypeId) = .{},
     slotSet: Rows(u8) = .{},
     dispatch: Rows(i32) = .{},
 
@@ -326,13 +363,13 @@ pub const TraitsTable = struct {
     /// A contested function's scope chain: its creators' where they agree, of any type where not.
     functionMerged: Rows(?*Scope) = .{},
     signed: Rows(u8) = .{},
-    returnType: Rows(i32) = .{},
-    receiverType: Rows(i32) = .{},
+    returnType: Rows(TypeId) = .{},
+    receiverType: Rows(TypeId) = .{},
     /// Parameter types, at paramType[paramStart ..], and how many are optional.
     paramStart: Rows(u32) = .{},
     paramCount: Rows(u32) = .{},
     optionalCount: Rows(u32) = .{},
-    paramType: Rows(i32) = .{},
+    paramType: Rows(TypeId) = .{},
 
     // The member name read by readName.
     nameNs: u32 = 0,
@@ -361,7 +398,7 @@ pub const TraitsTable = struct {
         try self.memberEnd.push(gpa, 0);
         try self.interfaceStart.push(gpa, 0);
         try self.interfaceEnd.push(gpa, 0);
-        try self.param.push(gpa, TYPE_Any);
+        try self.param.push(gpa, .any);
         try self.init.push(gpa, -1);
         try self.scope.push(gpa, null);
         try self.resolved.push(gpa, 0);
@@ -418,8 +455,8 @@ pub const TraitsTable = struct {
             try self.functionMerged.push(gpa, null);
             try self.ignoresRest.push(gpa, 0);
             try self.signed.push(gpa, 0);
-            try self.returnType.push(gpa, TYPE_Any);
-            try self.receiverType.push(gpa, TYPE_Any);
+            try self.returnType.push(gpa, .any);
+            try self.receiverType.push(gpa, .any);
             try self.paramStart.push(gpa, 0);
             try self.paramCount.push(gpa, 0);
             try self.optionalCount.push(gpa, 0);
@@ -474,7 +511,7 @@ pub const TraitsTable = struct {
     }
 
     /// As TraitsBindings::findBinding: t's own members, then its base's.
-    pub fn find(self: *const TraitsTable, type_: i32, ns: u32, name: u32, version: u8) Binding {
+    pub fn find(self: *const TraitsTable, type_: TypeId, ns: u32, name: u32, version: u8) Binding {
         return self.findFrom(.ofType(type_), ns, name, version);
     }
 
@@ -493,7 +530,7 @@ pub const TraitsTable = struct {
 
     /// As TraitsBindings::findBinding by name alone: the first member named
     /// `name` in any namespace of t or its bases.
-    pub fn findName(self: *const TraitsTable, type_: i32, name: u32) Binding {
+    pub fn findName(self: *const TraitsTable, type_: TypeId, name: u32) Binding {
         var t = TypeRef.ofType(type_);
         while (t != .none) : (t = self.base.get(t.index())) {
             const last = self.memberEnd.get(t.index());
@@ -775,7 +812,7 @@ pub const TraitsTable = struct {
         const abc = dom.abcs.get(index);
         const local = m - dom.methodStart.get(index);
         const returnType = try typenames.resolveTypeId(dom, index, abc.methodReturnType[local], true);
-        if (returnType < TYPE_Any) {
+        if (returnType == TypeId.failed) {
             return dom.typeError;
         }
 
@@ -784,7 +821,7 @@ pub const TraitsTable = struct {
         const start = self.paramType.len;
         for (0..count) |p| {
             const ty = try typenames.resolveTypeId(dom, index, abc.paramTypes[first + @as(u32, @intCast(p))], false);
-            if (ty < TYPE_Any) {
+            if (ty == TypeId.failed) {
                 self.paramType.truncate(start);
                 return dom.typeError;
             }
@@ -807,10 +844,10 @@ pub const TraitsTable = struct {
         // As avmplus' unchecked-function hack: a function with only untyped
         // parameters and result takes them all as optional.
         var optionalCount = optional;
-        if (self.methodFunction.get(m) != 0 and optional == 0 and returnType == TYPE_Any and count > 0) {
+        if (self.methodFunction.get(m) != 0 and optional == 0 and returnType == .any and count > 0) {
             var untyped = true;
             for (0..count) |p| {
-                untyped = untyped and self.paramType.get(start + @as(u32, @intCast(p))) == TYPE_Any;
+                untyped = untyped and self.paramType.get(start + @as(u32, @intCast(p))) == .any;
             }
 
             if (untyped) {
@@ -825,7 +862,7 @@ pub const TraitsTable = struct {
 
         const owner = self.methodTraits.get(m);
         try dom.put(self.returnType.at(m), returnType);
-        try dom.put(self.receiverType.at(m), if (owner >= 0) owner else dom.objectType());
+        try dom.put(self.receiverType.at(m), if (owner >= 0) TypeId.of(@intCast(owner)) else dom.objectType());
         try dom.put(self.paramStart.at(m), start);
         try dom.put(self.paramCount.at(m), count);
         try dom.put(self.optionalCount.at(m), optionalCount);

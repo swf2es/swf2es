@@ -8,7 +8,7 @@ const Domain = @import("domain.zig").Domain;
 const hashPair = @import("table.zig").hashPair;
 const traits_ = @import("traits.zig");
 const Binding = traits_.Binding;
-const TYPE_Any = traits_.TYPE_Any;
+const TypeId = traits_.TypeId;
 const TypeRef = traits_.TypeRef;
 
 /// As Multiname::isBinding: whether multiname `mn` of ABC `index` names
@@ -32,15 +32,15 @@ pub fn isBindingName(dom: *const Domain, index: u32, multiname: u32) bool {
 /// As avmplus' getBinding: the binding multiname `mn` of ABC `index` has on
 /// `type`, Binding.none, or Binding.ambiguous if it binds differently in two of
 /// its namespaces. The type's own members are searched before its base's.
-pub fn getBinding(dom: *Domain, index: u32, type_: i32, mn: u32) Allocator.Error!Binding {
+pub fn getBinding(dom: *Domain, index: u32, type_: TypeId, mn: u32) Allocator.Error!Binding {
     dom.changing();
-    if (type_ < 0) {
+    if (!type_.isTraits()) {
         return Binding.none;
     }
 
     // Answered before, as the verifier asks again and again (findProperty
     // tries each scope in turn, in every method).
-    const hash = hashPair(hashPair(@intCast(type_), index), mn);
+    const hash = hashPair(hashPair(type_.index(), index), mn);
     const memo = &dom.bindingMemo;
     var slot = memo.start(hash);
     while (true) {
@@ -76,7 +76,7 @@ pub fn getBinding(dom: *Domain, index: u32, type_: i32, mn: u32) Allocator.Error
 }
 
 /// getBinding, looked up.
-fn lookupBinding(dom: *const Domain, index: u32, type_: i32, multiname: u32) Binding {
+fn lookupBinding(dom: *const Domain, index: u32, type_: TypeId, multiname: u32) Binding {
     if (!isBindingName(dom, index, multiname)) {
         return Binding.none;
     }
@@ -160,38 +160,38 @@ pub fn getOwnBinding(dom: *Domain, index: u32, t: u32, multiname: u32) Binding {
 
 /// As Traits::readBinding: the type binding `b` holds on resolved `type`: a
 /// slot's type, a getter's return type, and * for anything else.
-pub fn bindingType(dom: *const Domain, type_: i32, b: Binding) i32 {
+pub fn bindingType(dom: *const Domain, type_: TypeId, b: Binding) TypeId {
     const kind = b.kind;
     const traits = &dom.traits;
-    const t: u32 = @intCast(type_);
+    const t = type_.index();
     if (kind == .variable or kind == .constant) {
         return traits.slotType.get(traits.slotStart.get(t) + b.index());
     }
 
     if (kind == .get or kind == .get_set) {
         const m = traits.dispatch.get(traits.dispatchStart.get(t) + b.index());
-        return if (m < 0) TYPE_Any else traits.returnType.get(@intCast(m));
+        return if (m < 0) .any else traits.returnType.get(@intCast(m));
     }
 
-    return TYPE_Any;
+    return .any;
 }
 
 /// As Verifier::findCommonBase: the nearest type both are, null merging with any non-machine type.
-pub fn commonBase(dom: *const Domain, a: i32, b: i32) i32 {
+pub fn commonBase(dom: *const Domain, a: TypeId, b: TypeId) TypeId {
     if (a == b) {
         return a;
     }
 
-    if (a == TYPE_Any or b == TYPE_Any) {
-        return TYPE_Any;
+    if (a == .any or b == .any) {
+        return .any;
     }
 
     const traits = &dom.traits;
-    if (traits.kind.get(@intCast(a)) == .null and !dom.isMachineType(b)) {
+    if (traits.kind.get(a.index()) == .null and !dom.isMachineType(b)) {
         return b;
     }
 
-    if (traits.kind.get(@intCast(b)) == .null and !dom.isMachineType(a)) {
+    if (traits.kind.get(b.index()) == .null and !dom.isMachineType(a)) {
         return a;
     }
 
@@ -205,16 +205,16 @@ pub fn commonBase(dom: *const Domain, a: i32, b: i32) i32 {
         }
     }
 
-    return TYPE_Any;
+    return .any;
 }
 
 /// As Traits::canAssign: a value of type `rhs` is already of type `lhs`.
-pub fn canAssign(dom: *const Domain, lhs: i32, rhs: i32) bool {
+pub fn canAssign(dom: *const Domain, lhs: TypeId, rhs: TypeId) bool {
     if (!dom.machineCompatible(lhs, rhs)) {
         return false;
     }
 
-    if (lhs == TYPE_Any) {
+    if (lhs == .any) {
         return true;
     }
 
@@ -229,7 +229,7 @@ pub fn canAssign(dom: *const Domain, lhs: i32, rhs: i32) bool {
 }
 
 /// As Traits::isNumeric: int, uint or Number.
-pub fn isNumeric(dom: *const Domain, type_: i32) bool {
+pub fn isNumeric(dom: *const Domain, type_: TypeId) bool {
     const bt = dom.builtin(type_);
     return bt == .int or bt == .uint or bt == .number or bt == .float;
 }

@@ -11,7 +11,7 @@ const Domain = @import("domain.zig").Domain;
 const traits_ = @import("traits.zig");
 const Binding = traits_.Binding;
 const TraitsTable = traits_.TraitsTable;
-const TYPE_Any = traits_.TYPE_Any;
+const TypeId = traits_.TypeId;
 const resolveTypeId = @import("typenames.zig").resolveTypeId;
 
 fn hasGetter(binding: Binding) bool {
@@ -35,7 +35,7 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
     const slots = traits.slotType.len;
     try dom.put(traits.slotStart.at(t), slots);
     for (0..slotCount) |_| {
-        try traits.slotType.push(gpa, TYPE_Any);
+        try traits.slotType.push(gpa, .any);
         try traits.slotSet.push(gpa, 0);
     }
 
@@ -91,13 +91,13 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
                 return C.kCorruptABCError;
             }
 
-            var ty: i32 = undefined;
+            var ty: TypeId = undefined;
             if (kind == .class) {
                 // A class not linked yet reads as *.
                 ty = dom.classStatic.get(dom.classStart.get(index) + abc.traitIndex[i]).orAny();
             } else {
                 ty = try resolveTypeId(dom, index, abc.traitIndex[i], false);
-                if (ty < TYPE_Any) {
+                if (ty == TypeId.failed) {
                     return dom.typeError;
                 }
             }
@@ -192,11 +192,11 @@ pub fn checkOverride(traits: *const TraitsTable, dom: *const Domain, t: u32, vir
     }
 
     const receiver = traits.receiverType.get(virt);
-    if (receiver == TYPE_Any or
-        !try traits.subtypeOf(dom.scratch, t, @intCast(receiver)) or
-        !dom.machineCompatible(@intCast(t), receiver))
+    if (receiver == .any or
+        !try traits.subtypeOf(dom.scratch, t, receiver.index()) or
+        !dom.machineCompatible(.of(t), receiver))
     {
-        if (dom.isMachineType(@intCast(t)) or receiver != dom.objectType()) {
+        if (dom.isMachineType(.of(t)) or receiver != dom.objectType()) {
             return false;
         }
     }
@@ -223,7 +223,7 @@ pub fn checkInterfaces(traits: *const TraitsTable, dom: *const Domain, t: u32, i
         var m = traits.memberStart.get(ifc);
         while (m < last) : (m += 1) {
             const iBinding = traits.memberBinding.get(m);
-            const cBinding = traits.find(@intCast(t), traits.memberNs.get(m), traits.memberName.get(m), traits.memberVersion.get(m));
+            const cBinding = traits.find(.of(t), traits.memberNs.get(m), traits.memberName.get(m), traits.memberVersion.get(m));
             const iKind = iBinding.kind;
             if (!traits_.compatibleKind(iKind, cBinding.kind)) {
                 return false;

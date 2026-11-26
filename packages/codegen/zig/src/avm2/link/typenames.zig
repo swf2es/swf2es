@@ -10,27 +10,27 @@ const domain_ = @import("domain.zig");
 const Domain = domain_.Domain;
 const hashPair = @import("table.zig").hashPair;
 const traits_ = @import("traits.zig");
-const TYPE_Any = traits_.TYPE_Any;
+const TypeId = traits_.TypeId;
 
-/// As PoolObject::resolveTypeName for a slot or parameter type: TYPE_Any
-/// for index 0, or the type; below TYPE_Any on failure, with typeError set.
+/// As PoolObject::resolveTypeName for a slot or parameter type: * for
+/// index 0, or the type; TypeId.failed on failure, with typeError set.
 /// AssemblyScript recurses into a TypeName's parameter; a chain of them
 /// (Vector.<Vector.<...>>) is as deep as the input makes it, so this walks
 /// down it keeping each level's base, then makes the types back up, in
 /// AssemblyScript's order.
-pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) Allocator.Error!i32 {
+pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) Allocator.Error!TypeId {
     const pool = &dom.abcs.get(index).pool;
     var bases: std.ArrayList(i32) = .empty;
     var mn = multiname;
     var void_ok = allowVoid;
-    const innermost: i32 = while (true) {
+    const innermost: TypeId = while (true) {
         if (mn == 0) {
-            break TYPE_Any;
+            break .any;
         }
 
         if (mn >= pool.multinameCount()) {
             dom.typeError = C.kCpoolIndexRangeError;
-            return -2;
+            return TypeId.failed;
         }
 
         if (pool.mnKind[mn] != .type_name) {
@@ -41,12 +41,12 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) 
                 }
 
                 dom.typeError = C.kIllegalVoidError;
-                return -2;
+                return TypeId.failed;
             }
 
             if (c < 0) {
                 dom.typeError = -c;
-                return -2;
+                return TypeId.failed;
             }
 
             // A class not linked yet reads as *.
@@ -56,7 +56,7 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) 
         const base = resolveType(dom, index, pool.mnA[mn]);
         if (base == -C.kAmbiguousBindingError) {
             dom.typeError = C.kAmbiguousBindingError;
-            return -2;
+            return TypeId.failed;
         }
 
         try bases.append(dom.scratch, base);
@@ -69,10 +69,11 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) 
     while (level > 0) {
         level -= 1;
         const base = bases.items[level];
-        const t = if (base >= 0) try parameterized(dom, base, param) else -1;
-        if (t < 0) {
+        const t = if (base >= 0) try parameterized(dom, base, param) else TypeId.failed;
+        // Not a Vector, or Vector.<*> absent.
+        if (!t.isTraits()) {
             dom.typeError = C.kClassNotFoundError;
-            return -2;
+            return TypeId.failed;
         }
 
         param = t;
@@ -83,10 +84,11 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) 
 
 /// As PoolObject::resolveParameterizedType: Vector.<T>, which avmplus has
 /// as its own classes for int, uint, Number and *, and otherwise makes as
-/// a subclass of Vector.<*>; -1 if `base` is not Vector.
-pub fn parameterized(dom: *Domain, base: i32, param: i32) Allocator.Error!i32 {
+/// a subclass of Vector.<*>; TypeId.failed if `base` is not Vector, and *
+/// for a builtin Vector absent.
+pub fn parameterized(dom: *Domain, base: i32, param: TypeId) Allocator.Error!TypeId {
     if (base != dom.vectorClass or base < 0) {
-        return -1;
+        return TypeId.failed;
     }
 
     switch (dom.builtin(param)) {
@@ -98,21 +100,21 @@ pub fn parameterized(dom: *Domain, base: i32, param: i32) Allocator.Error!i32 {
     }
 
     const made = dom.vectorFor(param);
-    if (made >= 0) {
-        return made;
+    if (made != .none) {
+        return made.toType();
     }
 
     // As Traits::newParameterizedITraits: a subclass of Vector.<*> with no members of its own.
     const traits = &dom.traits;
-    const objects: u32 = @intCast(dom.vectorObjectType);
+    const objects = dom.vectorObjectType.index();
     const t = try traits.create(dom.gpa, .instance, traits.abc.get(objects), traits.owner.get(objects), .of(objects), -1, 0, 0);
     traits.param.set(t, param);
     traits.slotCount.set(t, traits.slotCount.get(objects));
     traits.methodCount.set(t, traits.methodCount.get(objects));
     traits.memberStart.set(t, traits.memberTraits.len);
     traits.memberEnd.set(t, traits.memberTraits.len);
-    try dom.setVectorFor(param, @intCast(t));
-    return @intCast(t);
+    try dom.setVectorFor(param, t);
+    return .of(t);
 }
 
 /// As PoolObject::resolveTypeName for a base class or interface: the class
