@@ -132,6 +132,7 @@ test("a disabled field over a button lets the button take the hit, and its paren
 test("a posted move waits for a flush or the next other input, and only the last counts", () => {
   const stage = new Container();
   const scripting = {
+    fullScreen: { mouseLock: false },
     stageWidth: 100,
     stageHeight: 100,
     clipboard: new Clipboard(null),
@@ -167,6 +168,7 @@ test("sprite dragging follows the pointer in parent coordinates, clamps, and sto
   const second = new Container();
   parent.addChildAt(second, 1);
   const scripting = {
+    fullScreen: { mouseLock: false },
     stageWidth: 100,
     stageHeight: 100,
     mouseStageX: 10,
@@ -196,6 +198,7 @@ test("a touch drag begun with its point up waits for it, and the mouse neither m
   sprite.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 5, ty: 6 });
   stage.addChildAt(sprite, 0);
   const scripting = {
+    fullScreen: { mouseLock: false },
     stageWidth: 100,
     stageHeight: 100,
     mouseStageX: 0,
@@ -303,6 +306,7 @@ test("a stage resized from under a still pointer is picked again at the frame's 
   sprite.object.$buttonMode = true;
   setHitArea(sprite, area);
   const scripting = {
+    fullScreen: { mouseLock: false },
     stageWidth: 100,
     stageHeight: 100,
     mouseCursor: "auto",
@@ -337,6 +341,7 @@ test("a sprite in buttonMode with a hitArea shows its hand over the area", () =>
   sprite.object.$buttonMode = true;
   setHitArea(sprite, area);
   const scripting = {
+    fullScreen: { mouseLock: false },
     stageWidth: 100,
     stageHeight: 100,
     mouseCursor: "auto",
@@ -358,6 +363,7 @@ test("dropTarget is the topmost object drawn under the pointer as a drag moves a
   target.addChildAt(shape, 0);
   root.addChildAt(target, 0);
   const scripting = {
+    fullScreen: { mouseLock: false },
     stageWidth: 100,
     stageHeight: 100,
     mouseStageX: 10,
@@ -400,6 +406,7 @@ test("the cursor is a hand under a sprite in buttonMode, as useHandCursor says, 
   field.matrix.tx = 40;
   stage.addChildAt(field, 1);
   const scripting = {
+    fullScreen: { mouseLock: false },
     stageWidth: 100,
     stageHeight: 100,
     rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
@@ -461,6 +468,7 @@ test("Mouse.hide and show change the host cursor without changing pointer target
   button.hitTestState = area;
   stage.addChildAt(button, 0);
   const scripting = {
+    fullScreen: { mouseLock: false },
     stageWidth: 100,
     stageHeight: 100,
     mouseVisible: true,
@@ -497,6 +505,7 @@ test("a pointer event asks for a redraw only where it changes a button, focus or
   sprite.matrix.tx = 40;
   stage.addChildAt(sprite, 1);
   const scripting = {
+    fullScreen: { mouseLock: false },
     stageWidth: 100,
     stageHeight: 100,
     rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
@@ -555,6 +564,7 @@ test("a pointer down dispatches capture, target and bubble with target-local coo
   listen(child, false, "target");
   listen(root, false, "bubble");
   const scripting = {
+    fullScreen: { mouseLock: false },
     stageWidth: 100,
     stageHeight: 100,
     mouseStageX: 0,
@@ -649,6 +659,7 @@ test("roll events reach only the objects entered or left when the pointer change
   listen(left, "left");
   listen(right, "right");
   const scripting = {
+    fullScreen: { mouseLock: false },
     stageWidth: 100,
     stageHeight: 100,
     rt: {
@@ -1937,4 +1948,102 @@ test("pointer targets cover the translated viewport, including negative stage co
   equal(pointerTarget(stage, 96, 0, 192, 144, undefined, -96, -48), null);
   equal(pointerTarget(stage, 0, 96, 192, 144, undefined, -96, -48), null);
   equal(pointerTarget(stage, -12, -12, 192, 144), null);
+});
+
+async function mouseLockPlayer() {
+  const wasm = await WebAssembly.compile(
+    await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
+  );
+  const source = readFileSync(new URL("./MouseLockInput.as", import.meta.url), "utf8");
+  const abc = compileScripts([{ name: "MouseLockInput", source }], out).get(
+    "MouseLockInput",
+  ) as Uint8Array;
+  const lines: string[] = [];
+  const s = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await s.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(abc, 1, "MouseLockInput", 300, 200), s);
+  await player.start();
+  const pointer = player.pointer;
+  assert.ok(pointer);
+  return { player, s, pointer, lines };
+}
+
+test("a locked mouse delivers screen deltas to Stage at a stationary cursor", {
+  skip,
+}, async () => {
+  const { s, pointer, lines } = await mouseLockPlayer();
+  const point = { x: 20, y: 35 };
+
+  pointer.handle("move", point);
+  s.fullScreen.mouseLock = true;
+  pointer.post({ ...point, movementX: -50, movementY: -6 });
+  pointer.post({ ...point, movementX: -30, movementY: -5 });
+  pointer.flush();
+  pointer.post({ ...point, movementX: 30, movementY: 3 });
+  pointer.handle("down", { ...point, button: 0, buttons: 1 });
+  assert.equal(pointer.captured, true);
+  // The physical release happened while the window was unfocused.
+  pointer.handle("move", { ...point, buttons: 0, movementX: 7, movementY: -3 });
+  assert.equal(pointer.captured, false);
+  pointer.handle("down", { ...point, button: 2 });
+  pointer.wheel(point, 1);
+  // Leaving before the next frame discards the last locked sample.
+  pointer.post({ ...point, movementX: 99, movementY: 99 });
+  s.fullScreen.mouseLock = false;
+  pointer.flush();
+  pointer.handle("move", { x: 22, y: 35 });
+
+  // adl 51.3: event coordinates, motion deltas, and the Stage's mouse position.
+  assert.deepEqual(lines, [
+    "mouseMove box 20 35 20 35 0 0 20 35",
+    "mouseMove stage 0 0 0 0 -80 -11 -80 -11",
+    "mouseMove stage 0 0 0 0 30 3 30 3",
+    "mouseDown stage 0 0 0 0 0 0 0 0",
+    "mouseUp stage 0 0 0 0 0 0 0 0",
+    "click stage 0 0 0 0 0 0 0 0",
+    "mouseMove stage 0 0 0 0 7 -3 7 -3",
+    "rightMouseDown stage 0 0 0 0 0 0 0 0",
+    "mouseWheel stage 0 0 0 0 0 0 0 0",
+    "mouseMove box 22 35 22 35 0 0 22 35",
+  ]);
+});
+
+test("moves hit a child until the host confirms the lock", { skip }, async () => {
+  const { s, pointer, lines } = await mouseLockPlayer();
+  const point = { x: 20, y: 35, movementX: 2, movementY: 4 };
+  const requests: boolean[] = [];
+  s.fullScreen.onMouseLock = (wanted) => requests.push(wanted);
+  s.fullScreen.mouseLock = true;
+  assert.deepEqual(requests, [true]);
+  pointer.handle("move", point);
+  s.fullScreen.setMouseLocked(true);
+  pointer.handle("move", point);
+  assert.deepEqual(lines, [
+    "mouseMove box 20 35 20 35 0 0 20 35",
+    "mouseMove stage 0 0 0 0 2 4 2 4",
+  ]);
+});
+
+test("a queued move can unlock the mouse before the wheel picks a target", { skip }, async () => {
+  const { player, s, pointer, lines } = await mouseLockPlayer();
+  const point = { x: 20, y: 35 };
+  s.fullScreen.hostChanged(true);
+  s.fullScreen.mouseLock = true;
+  s.rt.setProperty(player.root.object, s.rt.publicName("unlockOnMove"), true);
+  pointer.post({ ...point, movementX: 2, movementY: 4 });
+  assert.equal(pointer.wheel(point, 1), true);
+  assert.equal(s.fullScreen.mouseLock, false);
+  assert.deepEqual(lines, [
+    "mouseMove stage 0 0 0 0 2 4 2 4",
+    "mouseMove box 20 35 20 35 0 0 20 35",
+    "mouseWheel box 20 35 20 35 0 0 20 35",
+  ]);
+});
+
+test("a locked wheel is taken when its only listener removes itself", { skip }, async () => {
+  const { player, s, pointer } = await mouseLockPlayer();
+  s.fullScreen.mouseLock = true;
+  s.rt.setProperty(player.root.object, s.rt.publicName("lastWheel"), true);
+  assert.equal(pointer.wheel({ x: 20, y: 35 }, 1), true);
+  assert.equal(pointer.wheel({ x: 20, y: 35 }, 1), false);
 });

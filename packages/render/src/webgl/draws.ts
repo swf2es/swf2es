@@ -15,7 +15,7 @@ import {
   SMOOTH,
   SNAP,
 } from "../scene.js";
-import type { GeometryAtlas, Place } from "./atlas.js";
+import { type GeometryAtlas, gathered, type Place } from "./atlas.js";
 import { FillBatches } from "./batches.js";
 import { setModeBlend } from "./composite.js";
 import type { GpuTextures } from "./gpu-textures.js";
@@ -785,7 +785,8 @@ export class Draws {
    * textures (FILL_TEXTURES, each with its sampling), RUN_MOST at most:
    * their runCounts, runOffsets and runRows (FILL_SLOT), and the units their
    * textures take in runUnits. Without WEBGL_multi_draw, a run is of
-   * geometries too large to merge (Place.batch), of geometries added this
+   * geometries that do not merge (Place.batch: too large, or short-lived
+   * and let go of after a single draw), of geometries added this
    * frame, or of stable ones alone, so that a stable run's merged copy is
    * drawn again while a part of it changes from frame to frame; and without
    * merging each fill is a run. A fill that samples the stage's pixel
@@ -798,7 +799,7 @@ export class Draws {
     const single = !this.multi;
     const most = this.multi || this.merging ? RUN_MOST : 1;
     const frame = this.atlas.frame;
-    // Without a multi-draw, what the run is of: geometries too large to merge, geometries added
+    // Without a multi-draw, what the run is of: geometries that do not merge, geometries added
     // this frame, or stable ones, whose merged copy later frames draw again.
     let kind = -1;
     let draws = 0;
@@ -848,6 +849,9 @@ export class Draws {
 
       this.runCounts[draws] = place.indices;
       this.runPlaces[draws] = place;
+      // A short-lived geometry drawn more than once keeps its arrays (atlas.ts, settle).
+      gathered(place, frame, j);
+
       this.runOffsets[draws] = place.indexStart * 4;
       this.runRows[draws] =
         scene.row[j] | (slot << FILL_SLOT) | (scene.sampler[j] & SNAP ? SNAP_BIT : 0);

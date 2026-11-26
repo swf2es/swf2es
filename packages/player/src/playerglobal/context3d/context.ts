@@ -68,8 +68,10 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       return;
     }
 
+    const resized =
+      entry.pendingBackBuffer || width !== entry.backend.width || height !== entry.backend.height;
     try {
-      entry.backend.configure(width, height, entry.depth, entry.aa, scale);
+      entry.backend.configure(width, height, entry.depth, entry.aa, scale, 0);
     } catch (error) {
       // What the GPU cannot give at the new size, it keeps at the old.
       if (!isContext3DError(error)) {
@@ -79,6 +81,13 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       return;
     }
 
+    entry.backWidth = width;
+    entry.backHeight = height;
+    entry.scale = scale;
+    entry.pendingBackBuffer = false;
+    if (resized) {
+      entry.hasBackBufferImage = false;
+    }
     entry.cleared = 0;
   });
 
@@ -144,11 +153,11 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     }
 
     get backBufferWidth(): number {
-      return contexts.get(this as unknown as AsObject)?.backend.width ?? 0;
+      return contexts.get(this as unknown as AsObject)?.backWidth ?? 0;
     }
 
     get backBufferHeight(): number {
-      return contexts.get(this as unknown as AsObject)?.backend.height ?? 0;
+      return contexts.get(this as unknown as AsObject)?.backHeight ?? 0;
     }
 
     declare $maxWidth: number | undefined;
@@ -204,8 +213,12 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       // it (WebGLContext3D), where AIR would refuse.
       const wide = !(drawnWidth >= 32 && drawnWidth <= entry.maxWidth);
       if (wide || !(drawnHeight >= 32 && drawnHeight <= entry.maxHeight)) {
-        // The back buffer it had is gone: clear refuses until another configure.
-        backend.unconfigure();
+        // Clear refuses until another configure. Recovery can still read the previous image.
+        if (!entry.hasBackBufferImage) {
+          backend.unconfigure();
+        }
+        entry.backWidth = 0;
+        entry.backHeight = 0;
         entry.width = 0;
         entry.height = 0;
         entry.best = false;
@@ -218,16 +231,25 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
           : s.rt.error("Error", 3781, 32, entry.maxHeight);
       }
 
+      // AIR exposes a new size immediately. Once drawn into, the GPU back buffer and its
+      // readback dimensions survive until the first nonempty clear of the back buffer itself.
       const changed =
-        drawnWidth !== backend.width ||
-        drawnHeight !== backend.height ||
+        drawnWidth !== entry.backWidth ||
+        drawnHeight !== entry.backHeight ||
         depth !== entry.depth ||
         aa !== entry.aa;
-      backend.configure(drawnWidth, drawnHeight, depth, aa, scale);
+      if (changed && entry.hasBackBufferImage) {
+        entry.pendingBackBuffer = true;
+      } else if (!entry.pendingBackBuffer && (changed || scale !== entry.scale)) {
+        backend.configure(drawnWidth, drawnHeight, depth, aa, scale, 0);
+      }
       if (changed) {
         entry.cleared = 0;
       }
 
+      entry.backWidth = drawnWidth;
+      entry.backHeight = drawnHeight;
+      entry.scale = scale;
       entry.depth = depth;
       entry.aa = aa;
       entry.width = width;
@@ -243,7 +265,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
       const backend = entry.backend;
       // Without error checking, as after a size refused, AIR clears nothing and says nothing.
-      if (backend.width === 0) {
+      if (entry.backWidth === 0) {
         if (this.$checking) {
           throw s.rt.error("Error", 3698);
         }
@@ -253,7 +275,12 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
       colorOutputs(entry);
       // AIR reads the mask's three low bits alone: 8 clears nothing, 15 clears all.
-      backend.clear(r, g, b, a, depth, mask & 7, stencil);
+      const bits = mask & 7;
+      if (entry.pendingBackBuffer && !entry.target && bits) {
+        backend.configure(entry.backWidth, entry.backHeight, entry.depth, entry.aa, entry.scale, 0);
+        entry.pendingBackBuffer = false;
+      }
+      backend.clear(r, g, b, a, depth, bits, stencil);
       // Only successful AS3 clears count, not the backend's allocation-time clear.
       if (entry.target) {
         entry.target.initialized = true;
@@ -264,8 +291,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
             resource.initialized = true;
           }
         }
-      } else {
-        entry.cleared |= mask & (entry.depth ? 7 : 1);
+      } else if (bits) {
+        entry.hasBackBufferImage = true;
+        entry.cleared |= bits & (entry.depth ? 7 : 1);
       }
     }
 
@@ -603,7 +631,11 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
           throw s.rt.error("Error", 3774);
         }
 
-        entry.backend.draw(buffer(object), first, count);
+        const indices = buffer(object);
+        // With error checking off AIR accepts a draw while the buffer awaits its clear.
+        if (entry.backWidth && (entry.target || !entry.pendingBackBuffer)) {
+          entry.backend.draw(indices, first, count);
+        }
       } catch (error) {
         if (isVertexOffsetError(error)) {
           throw s.rt.error("RangeError", 3610);
@@ -651,12 +683,16 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
       // AIR reads nothing, and checks nothing more, before the back buffer is configured.
       const backend = entry.backend;
-      if (backend.width === 0) {
+      if (entry.backWidth === 0) {
         return;
       }
 
       requireClear(entry);
       const store = storeOf(s, destination);
+      if (!entry.hasBackBufferImage) {
+        return;
+      }
+
       // AIR copies the back buffer's top-left corner to the destination's,
       // as much as both hold, and leaves the rest of the destination alone.
       const width = Math.min(store.width, backend.width);
@@ -676,7 +712,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       }
 
       // No back buffer: AIR still asks for the clear, then shows nothing and says nothing of it.
-      if (!entry.backend.width) {
+      if (!entry.backWidth) {
         const required = entry.depth ? 7 : 1;
         if (this.$checking && (entry.cleared & required) !== required) {
           throw s.rt.error("Error", 3692);

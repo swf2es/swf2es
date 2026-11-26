@@ -317,12 +317,34 @@ export class WebGLContext3D implements Context3D {
     this.gl.bindFramebuffer(target, framebuffer);
   }
 
-  configure(width: number, height: number, depth = false, antiAlias = 0, scale = 1): void {
-    configureBackBuffer(this, width, height, depth, antiAlias, scale);
+  /** @internal Restore the selected target after an allocation failed. */
+  restoreTargetFramebuffer(): void {
+    const framebuffer = this.renderTexture
+      ? targetFramebuffer(this.textureState(this.renderTexture))
+      : this.framebuffer;
+    this.bindFramebuffer(this.gl.FRAMEBUFFER, framebuffer);
+  }
+
+  configure(
+    width: number,
+    height: number,
+    depth = false,
+    antiAlias = 0,
+    scale = 1,
+    initialAlpha = 1,
+  ): void {
+    configureBackBuffer(this, width, height, depth, antiAlias, scale, initialAlpha);
   }
 
   unconfigure(): void {
     unconfigureBackBuffer(this);
+  }
+
+  /** @internal Initialize the new back buffer while keeping the selected texture target. */
+  clearBackBuffer(alpha: number): void {
+    this.target(true);
+    this.resolveDirty = true;
+    this.clearBuffers(0, 0, 0, alpha, 1, 7, 0, this.depthBuffer !== null);
   }
 
   clear(
@@ -335,6 +357,24 @@ export class WebGLContext3D implements Context3D {
     stencil = 0,
   ): void {
     this.target(false, (mask & 1) !== 0);
+    if (mask & 1) {
+      this.changedTarget();
+    }
+
+    const hasDepth = this.renderTexture ? this.renderDepth : this.depthBuffer !== null;
+    this.clearBuffers(red, green, blue, alpha, depth, mask, stencil, hasDepth);
+  }
+
+  private clearBuffers(
+    red: number,
+    green: number,
+    blue: number,
+    alpha: number,
+    depth: number,
+    mask: number,
+    stencil: number,
+    hasDepth: boolean,
+  ): void {
     const gl = this.gl;
     let bits = 0;
     if (mask & 1) {
@@ -346,7 +386,6 @@ export class WebGLContext3D implements Context3D {
         clearChannel(alpha),
       );
       bits |= gl.COLOR_BUFFER_BIT;
-      this.changedTarget();
     }
     if (mask & 2) {
       gl.clearDepth(depth);
@@ -358,7 +397,6 @@ export class WebGLContext3D implements Context3D {
     }
 
     // Flash clear writes depth even while draw-time depth writes are masked.
-    const hasDepth = this.renderTexture ? this.renderDepth : this.depthBuffer !== null;
     const overrideDepth = hasDepth && (mask & 2) !== 0 && !this.depthWrite;
     if (overrideDepth) {
       gl.depthMask(true);
@@ -1270,12 +1308,7 @@ export class WebGLContext3D implements Context3D {
           gl.deleteRenderbuffer(depthBuffer);
         }
         gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-        this.bindFramebuffer(
-          gl.FRAMEBUFFER,
-          this.renderTexture
-            ? targetFramebuffer(this.textureState(this.renderTexture))
-            : this.framebuffer,
-        );
+        this.restoreTargetFramebuffer();
         this.applyScissor();
         throw error;
       }

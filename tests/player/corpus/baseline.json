@@ -1631,7 +1631,7 @@
   "avm2/rectangle": {"matched":1095,"lines":1095,"traced":1095,"error":null},
   "avm2/regexp_constr": {"matched":148,"lines":148,"traced":148,"error":null},
   "avm2/regexp_exec": {"matched":19,"lines":19,"traced":19,"error":null},
-  "avm2/regexp_extended": {"matched":2,"lines":48,"traced":48,"error":null},
+  "avm2/regexp_extended": {"matched":48,"lines":48,"traced":48,"error":null},
   "avm2/regexp_multiargs": {"matched":1,"lines":1,"traced":1,"error":null},
   "avm2/regexp_test": {"matched":27,"lines":27,"traced":27,"error":null},
   "avm2/regexp_toString": {"matched":9,"lines":10,"traced":10,"error":null},
