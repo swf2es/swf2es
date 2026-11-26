@@ -4,7 +4,8 @@
 // the classes and functions it creates capture. How it reaches properties
 // is properties.zig's.
 const std = @import("std");
-const Error = std.mem.Allocator.Error;
+const errors = @import("errors.zig");
+const Error = errors.Error;
 const Diagnostics = @import("errors.zig").Diagnostics;
 const traits_ = @import("../link/traits.zig");
 const Binding = traits_.Binding;
@@ -27,7 +28,7 @@ fn notNullIf(bd: *BodyDecoder, ty: TypeId) Flags {
 /// The type effects and type checks of the instruction at `pc`, as in
 /// Verifier::verifyBlock, before the stack depth changes; `scope` is the
 /// scope depth before the instruction.
-pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32) Error!bool {
+pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32) Error!void {
     const domain = bd.domain;
     const top = bd.peek(1);
     switch (opcode) {
@@ -43,12 +44,12 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         .pushnamespace => return bd.push(domain.namespaceType, .{ .not_null = true }),
         .setlocal => {
             bd.setValue(a, bd.typeOf(top), bd.valueFlags[top].known());
-            return true;
+            return;
         },
         .getlocal => return bd.pushLocal(a),
         .newfunction => {
-            if (bd.emitPass and !try captureFunction(bd, a)) {
-                return false;
+            if (bd.emitPass) {
+                try captureFunction(bd, a);
             }
 
             bd.rowC = @bitCast(domain.methodStart.get(bd.index) + a);
@@ -56,9 +57,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         },
         .getlex => {
             // The scope object found is the receiver of the get.
-            if (!try p.findProperty(bd, .findpropstrict, a)) {
-                return false;
-            }
+            try p.findProperty(bd, .findpropstrict, a);
 
             bd.stack += 1;
             const got = try p.getProperty(bd, a, 1);
@@ -67,55 +66,46 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         },
         .findpropstrict, .findproperty => return p.findProperty(bd, opcode, a),
         .newclass => {
-            if (bd.emitPass and !try captureClass(bd, a)) {
-                return false;
+            if (bd.emitPass) {
+                try captureClass(bd, a);
             }
 
             try bd.coerce(top, domain.classInstanceType());
             bd.setValue(top, domain.staticTraitsOf(bd.index, a), .{ .not_null = true });
             bd.rowC = ir_.typeColumn(domain.staticTraitsOf(bd.index, a));
-            return true;
+            return;
         },
-        .finddef => return p.findDef(bd, a),
+        .finddef => p.findDef(bd, a),
         .setproperty, .initproperty => return p.setProperty(bd, opcode, a),
         .getproperty => {
-            const n = p.propertyDepth(bd, a, 1);
-            return n > 0 and try p.getProperty(bd, a, n);
+            const n = try p.propertyDepth(bd, a, 1);
+            return p.getProperty(bd, a, n);
         },
         .getdescendants => {
-            const n = p.propertyDepth(bd, a, 1);
-            if (n == 0) {
-                return false;
-            }
+            const n = try p.propertyDepth(bd, a, 1);
 
             try bd.checkNull(bd.peek(n));
             return bd.popPush(n, .any, .none);
         },
         .checkfilter, .convert_o => {
             try bd.checkNull(top);
-            return true;
+            return;
         },
         .deleteproperty => {
-            const n = p.propertyDepth(bd, a, 1);
-            if (n == 0) {
-                return false;
-            }
+            const n = try p.propertyDepth(bd, a, 1);
 
             try bd.checkNull(bd.peek(n));
             return bd.popPush(n, domain.booleanType, .{ .not_null = true });
         },
         .astype => {
             const t = try p.typeName(bd, a);
-            if (t == TypeId.failed) {
-                return false;
-            }
 
             if (!types.canAssign(domain, t, bd.typeOf(top))) {
                 const result = if (t != .any and domain.isMachineType(t)) domain.objectType() else t;
                 return bd.popPush(1, result, notNullIf(bd, result));
             }
 
-            return true;
+            return;
         },
         .astypelate => {
             var t = domain.instanceTraitsOf(bd.typeOf(bd.peek(1)));
@@ -128,33 +118,30 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         // The conversion is the instruction itself, which only retypes the value.
         .coerce => {
             const t = try p.typeName(bd, a);
-            if (t == TypeId.failed) {
-                return false;
-            }
 
             bd.rowC = ir_.typeColumn(t);
             bd.retype(top, t);
-            return true;
+            return;
         },
         .convert_b, .coerce_b => {
             bd.retype(top, domain.booleanType);
-            return true;
+            return;
         },
         .coerce_o => {
             bd.retype(top, domain.objectType());
-            return true;
+            return;
         },
         .coerce_a => {
             bd.retype(top, .any);
-            return true;
+            return;
         },
         .convert_i, .coerce_i => {
             bd.retype(top, domain.intType);
-            return true;
+            return;
         },
         .convert_u, .coerce_u => {
             bd.retype(top, domain.uintType);
-            return true;
+            return;
         },
         .convert_f => {
             if (domain.floatType == .any) {
@@ -162,32 +149,30 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             }
 
             bd.retype(top, domain.floatType);
-            return true;
+            return;
         },
         .unplus => {
             bd.retype(top, numericType(bd, bd.typeOf(top)));
-            return true;
+            return;
         },
         .convert_d, .coerce_d => {
             bd.retype(top, domain.numberType);
-            return true;
+            return;
         },
         .coerce_s => {
             bd.retype(top, domain.stringType);
-            return true;
+            return;
         },
         .iftrue, .iffalse => {
             try bd.coerce(top, domain.booleanType);
-            return true;
+            return;
         },
         .returnvalue => {
             try bd.coerce(top, domain.traits.returnType.get(bd.global));
-            return true;
+            return;
         },
         .istype => {
-            if (try p.typeName(bd, a) == TypeId.failed) {
-                return false;
-            }
+            _ = try p.typeName(bd, a);
 
             return bd.popPush(1, domain.booleanType, .{ .not_null = true });
         },
@@ -209,31 +194,22 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         },
         .callproperty, .callproplex, .callpropvoid => return p.callProperty(bd, opcode, a, b),
         .constructprop => {
-            const n = p.propertyDepth(bd, a, b +% 1);
-            if (n == 0) {
-                return false;
-            }
+            const n = try p.propertyDepth(bd, a, b +% 1);
 
             const obj = bd.peek(n);
             const ty = bd.typeOf(obj);
             const found = try p.binding(bd, ty, a);
-            if (found == Binding.ambiguous) {
-                return false;
-            }
 
             const ctraits = try p.readBinding(bd, ty, found);
-            if (ctraits == TypeId.failed) {
-                return false;
-            }
 
             try bd.checkNull(obj);
             bd.rowC = ir_.typeColumn(ctraits);
             const itraits = domain.instanceTraitsOf(ctraits);
-            const pushed = bd.popPush(n, itraits, .{ .not_null = itraits != .any });
+            bd.popPush(n, itraits, .{ .not_null = itraits != .any });
             // A name bound to a slot, as `new` of a script's class names one:
             // what the slot holds, constructed, with no lookup by name.
             const kind = found.kind;
-            if (pushed and (kind == .variable or kind == .constant) and n == b +% 1) {
+            if ((kind == .variable or kind == .constant) and n == b +% 1) {
                 // The constructor's signature, which the emitter coerces the
                 // arguments to; one that does not resolve fails no method here.
                 const init = if (itraits.isTraits()) domain.traits.init.get(itraits.index()) else -1;
@@ -244,46 +220,36 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
                 return bd.emitOn(.ir_construct_slot, @bitCast(obj), @bitCast(obj), n, found.index(), b, ir_.typeColumn(ctraits));
             }
 
-            return pushed;
+            return;
         },
         .applytype => return bd.popPush(a +% 1, .any, .{ .not_null = true }),
         .callsuper, .callsupervoid => return p.callSuper(bd, opcode, a, b),
         .getsuper => return p.getSuper(bd, a),
         .setsuper => {
-            const n = p.propertyDepth(bd, a, 2);
-            if (n == 0) {
-                return false;
-            }
+            const n = try p.propertyDepth(bd, a, 2);
 
             const obj = bd.peek(n);
-            if (try p.coerceSuper(bd, obj) == TypeId.failed) {
-                return false;
-            }
+            _ = try p.coerceSuper(bd, obj);
 
             try bd.checkNull(obj);
-            return true;
+            return;
         },
         .constructsuper => {
             const obj = bd.peek(a +% 1);
             const base = try p.coerceSuper(bd, obj);
-            if (base == TypeId.failed) {
-                return false;
-            }
 
             const init = domain.traits.init.get(base.index());
-            if (init >= 0 and !try p.coerceArgs(bd, @intCast(init), a)) {
-                return false;
+            if (init >= 0) {
+                try p.coerceArgs(bd, @intCast(init), a);
             }
 
             try bd.checkNull(obj);
-            return true;
+            return;
         },
         .newobject => {
             var n: u32 = 2;
             while (n <= 2 *% a) : (n += 2) {
-                if (!bd.peekType(n, domain.stringType)) {
-                    return false;
-                }
+                try bd.peekType(n, domain.stringType);
             }
 
             return bd.popPush(2 *% a, domain.objectType(), .{ .not_null = true });
@@ -299,7 +265,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             }
 
             bd.setValue(bd.localCount + scope, ty, .{ .not_null = true, .with = opcode == .pushwith });
-            return true;
+            return;
         },
         .newactivation => {
             const t = domain.bodyTraits.get(bd.index)[@intCast(bd.abc.methodBody[bd.method])];
@@ -320,7 +286,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             const outer = bd.outer;
             // avmplus names the index only where nothing was captured (Verifier.cpp).
             if (outer.size == 0) {
-                return bd.failWith(C.kGetScopeObjectBoundsError, a);
+                return bd.failWith(C.kGetScopeObjectBoundsError, a, 0);
             }
 
             if (a >= outer.size) {
@@ -329,53 +295,41 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
 
             return bd.push(outer.types[a], .{ .not_null = true });
         },
-        .getglobalscope => return p.globalScope(bd) != TypeId.failed,
+        .getglobalscope => _ = try p.globalScope(bd),
         .getglobalslot => {
-            const global = p.globalScope(bd);
-            if (global == TypeId.failed) {
-                return false;
-            }
+            const global = try p.globalScope(bd);
 
             // The global object pushed is replaced by the slot's value.
             const slotType = try p.slot(bd, global, a -% 1);
-            return slotType != TypeId.failed and bd.push(slotType, notNullIf(bd, slotType));
+            return bd.push(slotType, notNullIf(bd, slotType));
         },
         .setglobalslot => {
             const outer = bd.outer;
             const global = if (outer.size > 0) outer.types[0] else bd.typeOf(bd.localCount);
             const slotType = try p.slot(bd, global, a -% 1);
-            if (slotType == TypeId.failed) {
-                return false;
-            }
 
             try bd.coerce(top, slotType);
-            return true;
+            return;
         },
         .getslot => {
             const slotType = try p.slot(bd, bd.typeOf(top), a -% 1);
-            if (slotType == TypeId.failed) {
-                return false;
-            }
 
             try bd.checkNull(top);
             return bd.popPush(1, slotType, notNullIf(bd, slotType));
         },
         .setslot => {
             const slotType = try p.slot(bd, bd.typeOf(bd.peek(2)), a -% 1);
-            if (slotType == TypeId.failed) {
-                return false;
-            }
 
             try bd.coerce(top, slotType);
             try bd.checkNull(bd.peek(2));
-            return true;
+            return;
         },
         .dup => {
             const i = bd.stackBase() + bd.stack;
             _ = bd.push(bd.typeOf(top), bd.valueFlags[top].known());
             bd.origin[i] = bd.origin[top];
             bd.originWrite[i] = bd.originWrite[top];
-            return true;
+            return;
         },
         .swap => {
             const below = bd.peek(2);
@@ -383,7 +337,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             const flags = bd.valueFlags[top].known();
             bd.setValue(top, bd.typeOf(below), bd.valueFlags[below].known());
             bd.setValue(below, ty, flags);
-            return true;
+            return;
         },
         .lessthan, .greaterthan, .lessequals, .greaterequals => {
             // A comparison with a number compares numbers.
@@ -451,16 +405,16 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
                 const numeric = numericType(bd, bd.typeOf(top));
                 if (numeric != domain.numberType) {
                     bd.retype(top, numeric);
-                    return true;
+                    return;
                 }
             }
 
             try bd.coerce(top, domain.numberType);
-            return true;
+            return;
         },
         .increment_i, .decrement_i, .negate_i, .bitnot => {
             try bd.coerce(top, domain.intType);
-            return true;
+            return;
         },
         .add_i, .subtract_i, .multiply_i, .bitand, .bitor, .bitxor, .lshift, .rshift => {
             try bd.coerce(bd.peek(2), domain.intType);
@@ -472,8 +426,14 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             try bd.coerce(top, domain.intType);
             return bd.popPush(2, domain.uintType, .{ .not_null = true });
         },
-        .nextvalue, .nextname => return bd.peekType(1, domain.intType) and bd.popPush(2, .any, .none),
-        .hasnext => return bd.peekType(1, domain.intType) and bd.popPush(2, domain.intType, .{ .not_null = true }),
+        .nextvalue, .nextname => {
+            try bd.peekType(1, domain.intType);
+            return bd.popPush(2, .any, .none);
+        },
+        .hasnext => {
+            try bd.peekType(1, domain.intType);
+            return bd.popPush(2, domain.intType, .{ .not_null = true });
+        },
         .hasnext2 => {
             if (bd.typeOf(b) != domain.intType) {
                 return bd.fail(C.kIllegalOperandTypeError);
@@ -493,12 +453,12 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         .si8, .si16, .si32 => {
             try bd.coerce(bd.peek(2), domain.intType);
             try bd.coerce(top, domain.intType);
-            return true;
+            return;
         },
         .sf32, .sf64 => {
             try bd.coerce(bd.peek(2), domain.numberType);
             try bd.coerce(top, domain.intType);
-            return true;
+            return;
         },
         else => {},
     }
@@ -508,8 +468,6 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
     } else if (opcode.getLocalN()) |local| {
         return bd.pushLocal(local);
     }
-
-    return true;
 }
 
 /// ToNumeric may preserve a float returned by an object's valueOf.
@@ -582,7 +540,7 @@ fn kept(bd: *BodyDecoder, scope: *const Scope) Error!*Scope {
 /// creators claims it as it first runs, by its chain's index among them,
 /// the later in another throwing as avmplus would (see claims). One method
 /// that creates it in two chains fails, as avmplus fails it.
-fn captureFunction(bd: *BodyDecoder, m: u32) Error!bool {
+fn captureFunction(bd: *BodyDecoder, m: u32) Error!void {
     const domain = bd.domain;
     const traits = &domain.traits;
     const gpa = domain.gpa;
@@ -593,7 +551,7 @@ fn captureFunction(bd: *BodyDecoder, m: u32) Error!bool {
         // Created again in its own scope chain, as it may create itself: as created before.
         if (global == bd.global) {
             try bd.captured.append(bd.gpa, global);
-            return true;
+            return;
         }
 
         const scopes = traits.functionScopes.get(global).?;
@@ -629,7 +587,7 @@ fn captureFunction(bd: *BodyDecoder, m: u32) Error!bool {
         try bd.claims.append(bd.gpa, global);
         try bd.claims.append(bd.gpa, @intCast(index));
         try bd.captured.append(bd.gpa, global);
-        return true;
+        return;
     }
 
     if (traits.methodTraits.get(global) != .none) {
@@ -650,14 +608,14 @@ fn captureFunction(bd: *BodyDecoder, m: u32) Error!bool {
     try bd.claims.append(bd.gpa, global);
     try bd.claims.append(bd.gpa, 0);
     try bd.captured.append(bd.gpa, global);
-    return true;
+    return;
 }
 
 /// As the ScopeWriter's OP_newclass: the innermost scope must be the base
 /// class object; the class's static methods run in the scope chain here,
 /// its instance methods in that and the class object, once, and a class
 /// created again must be created alike. Both traits resolve.
-fn captureClass(bd: *BodyDecoder, i: u32) Error!bool {
+fn captureClass(bd: *BodyDecoder, i: u32) Error!void {
     const domain = bd.domain;
     const traits = &domain.traits;
     const ctraits = domain.staticTraitsOf(bd.index, i);
@@ -692,5 +650,5 @@ fn captureClass(bd: *BodyDecoder, i: u32) Error!bool {
 
     try domain.methodsOf(domain.scratch, ctraits.index(), &bd.captured);
     try domain.methodsOf(domain.scratch, itraits.index(), &bd.captured);
-    return true;
+    return;
 }
