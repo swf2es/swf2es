@@ -1636,8 +1636,12 @@ function calls(c: Compiler, r: Results, sequences: number, steps: number): void 
         case 3: {
           const k = below(seeds.length);
           const builtin = below(10) === 0;
-          const first = c.domainTraitsCount();
-          r.case(`${at}: add ${k} into ${d}, builtin ${builtin}`, () => add(seeds[k], builtin, d));
+          // Inside the case, where a build that panicked records it.
+          let first = 0;
+          r.case(`${at}: add ${k} into ${d}, builtin ${builtin}`, () => {
+            first = c.domainTraitsCount();
+            return add(seeds[k], builtin, d);
+          });
           r.case(`${at}: traits`, () =>
             r.blob(`${at}: traits`, Buffer.from(c.domainTraits(first))),
           );
