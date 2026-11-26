@@ -168,6 +168,8 @@ test "rows never move as the table grows, and each lands where at() finds it" {
     }
 }
 
+/// Tables as a domain's will be: rows added to several by one entry, all
+/// or none, and a scratch buffer grown in place meanwhile.
 const TestDomain = struct {
     names: Rows(u32) = .{},
     pairs: Rows([2]u64) = .{},

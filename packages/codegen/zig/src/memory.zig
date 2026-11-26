@@ -793,8 +793,6 @@ test "freed memory is poisoned in the poison build" {
     try testing.expectEqual(poison_byte, bytes[0]);
 }
 
-/// Tables as a domain's will be: rows added to several by one entry, all
-/// or none, and a scratch buffer grown in place meanwhile.
 /// Memory of every size from one wasm page to 120, so that memory runs
 /// out at every point of the entries: where a run can neither grow in
 /// place nor be taken, as when memory.grow fails. Each entry a later stage

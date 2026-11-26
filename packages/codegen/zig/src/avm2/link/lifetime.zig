@@ -30,7 +30,7 @@ fn full(weight: u64, reserve: u64, size: u64) bool {
     return weight + (weight >> 2) + (weight >> 3) + reserve >= size;
 }
 
-/// What takes the place of an ABC let go of in a rebuilt Domain (see vacate, stage 6).
+/// What takes the place of an ABC let go of in a rebuilt Domain (see vacate in rebuild.zig, stage 6).
 pub var no_abc: Abc = .{};
 
 /// Count what the domain's tables gained since they held `rows` as ABC `index`'s.

@@ -53,7 +53,7 @@ pub const NsType = enum(u8) {
     _,
 
     /// The one reading of a word, a save's or an export's: its low byte.
-    /// A save's word above 0xff is refused before (lifetime.zig's Words.kind).
+    /// A save's word above 0xff is refused before (saved.zig's SaveReader.kind).
     pub fn fromWord(word: u32) @This() {
         return @fromBackingInt(@as(u8, @truncate(word)));
     }
@@ -71,7 +71,7 @@ pub const URI_None: u32 = 0xffffffff;
 /// An application domain's state: live; evicted, let go of until the host
 /// gives its ABCs again (see evict in lifetime.zig); or dropped for good.
 /// Saved with the domain, so its values are fixed; non-exhaustive, and a
-/// loaded save naming another is refused (lifetime.zig's consistent).
+/// loaded save naming another is refused (saved.zig's consistent).
 pub const DomainState = enum(u8) {
     live = 0,
     evicted = 1,
@@ -79,7 +79,7 @@ pub const DomainState = enum(u8) {
     _,
 
     /// The one reading of a word, a save's or an export's: its low byte.
-    /// A save's word above 0xff is refused before (lifetime.zig's Words.kind).
+    /// A save's word above 0xff is refused before (saved.zig's SaveReader.kind).
     pub fn fromWord(word: u32) @This() {
         return @fromBackingInt(@as(u8, @truncate(word)));
     }
@@ -112,7 +112,7 @@ pub const ABC_Weight: u64 = 3;
 /// The kinds of the log's entries (see Domain.logKind). Saved and
 /// journaled, so their values are fixed. Non-exhaustive: a loaded save's
 /// entry of another kind, or a word above 0xff, is refused at load
-/// (lifetime.zig's Words.kind and consistent); journal text's is refused
+/// (saved.zig's SaveReader.kind and consistent); journal text's is refused
 /// by replayEntry, which takes no kind past verify, and by replayed, which
 /// does only verify, sign and resolve.
 pub const LogKind = enum(u8) {
@@ -129,7 +129,7 @@ pub const LogKind = enum(u8) {
     _,
 
     /// The one reading of a word, a save's or an export's: its low byte.
-    /// A save's word above 0xff is refused before (lifetime.zig's Words.kind).
+    /// A save's word above 0xff is refused before (saved.zig's SaveReader.kind).
     pub fn fromWord(word: u32) @This() {
         return @fromBackingInt(@as(u8, @truncate(word)));
     }
