@@ -36,13 +36,12 @@ pub fn slotMember(out: *Output, slot: u32) Error!void {
 
 /// Whether typeRef writes type t as T[k], a class's instances; else a literal.
 pub fn isClassRef(e: *MethodEmitter, t: TypeId) bool {
-    const ty = t;
     // What typeExpr writes as a literal stays one.
-    const bt = if (!ty.isTraits()) .any else e.domain.builtin(ty);
-    return ty.isTraits() and
+    const bt = if (!t.isTraits()) .any else e.domain.builtin(t);
+    return t.isTraits() and
         (bt == .other or bt == .namespace) and
-        ty != e.domain.voidType and
-        e.domain.traits.kind.get(ty.index()) == .instance;
+        t != e.domain.voidType and
+        e.domain.traits.kind.get(t.index()) == .instance;
 }
 
 /// Type t in a method: an entry of the module's table T for a class or

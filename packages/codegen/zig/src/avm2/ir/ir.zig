@@ -110,6 +110,18 @@ pub fn typeOperand(t: TypeId) i32 {
     return @backingInt(t);
 }
 
+/// No register: the dst of an instruction that writes none, the src of
+/// one that reads none. Registers are i32, as the emitters count with them.
+pub const no_register: i32 = -1;
+
+/// A block's entry flags for one value: the verifier's first two (Flags).
+pub const EntryFlags = packed struct(u8) {
+    not_null: bool = false,
+    /// A with scope's.
+    with: bool = false,
+    _: u6 = 0,
+};
+
 pub const Ir = struct {
     gpa: Allocator,
     count: u32 = 0,
@@ -120,10 +132,12 @@ pub const Ir = struct {
     srcCount: []u32 = &.{},
     a: []u32 = &.{},
     b: []u32 = &.{},
+    /// Its meaning depends on the op: read it through cType, cMethod,
+    /// cLastCase or cScopeSearch, which say which ops use it how.
     c: []i32 = &.{},
     /// The type of dst after the instruction, and whether it is known not null.
     type: []TypeId = &.{},
-    notNull: []u8 = &.{},
+    notNull: []bool = &.{},
     /// The ABC offset of the instruction it comes from.
     pc: []u32 = &.{},
 
@@ -136,9 +150,9 @@ pub const Ir = struct {
     blockScope: []u32 = &.{},
 
     /// Each block's entry state: frameSize types and flags from block *
-    /// frameSize, flag 1 for known not null and 2 for a with scope.
+    /// frameSize.
     entryType: []TypeId = &.{},
-    entryFlags: []u8 = &.{},
+    entryFlags: []EntryFlags = &.{},
 
     /// Exception handlers: the ABC range they cover, their block, exception type and catch scope type.
     handlerCount: u32 = 0,
@@ -170,6 +184,39 @@ pub const Ir = struct {
         }
 
         return @fromBackingInt(self.c[i]);
+    }
+
+    /// Operand c as a method (domain-wide id), or -1 for none: the getter
+    /// ir_call_getter calls, the setter ir_call_setter calls, the method
+    /// callmethod, ir_call_interface and ir_call_super call.
+    pub inline fn cMethod(self: *const Ir, i: u32) i32 {
+        if (options.checks) {
+            const op = self.op[i];
+            std.debug.assert(op == .ir_call_getter or op == .ir_call_setter or op == .callmethod or op == .ir_call_interface or op == .ir_call_super);
+        }
+
+        return self.c[i];
+    }
+
+    /// Operand c as lookupswitch's last case: its cases are
+    /// cases[b .. b + c + 1].
+    pub inline fn cLastCase(self: *const Ir, i: u32) u32 {
+        if (options.checks) {
+            std.debug.assert(self.op[i] == .lookupswitch);
+        }
+
+        return @bitCast(self.c[i]);
+    }
+
+    /// Operand c of ir_find_prop_global and its strict form: 0, or 1 + the
+    /// first local scope to search by what it is at run time.
+    pub inline fn cScopeSearch(self: *const Ir, i: u32) u32 {
+        if (options.checks) {
+            const op = self.op[i];
+            std.debug.assert(op == .ir_find_prop_global or op == .ir_find_prop_global_strict);
+        }
+
+        return @bitCast(self.c[i]);
     }
 
     pub fn reset(self: *Ir, localCount: u32, maxScope: u32, frameSize: u32) void {
@@ -219,7 +266,7 @@ pub const Ir = struct {
         self.b[i] = b;
         self.c[i] = c;
         self.type[i] = .any;
-        self.notNull[i] = 0;
+        self.notNull[i] = false;
         self.pc[i] = pc;
         return i;
     }
@@ -244,7 +291,7 @@ pub const Ir = struct {
         if (used + size > self.entryType.len) {
             const capacity = @max(used + size, self.entryType.len * 2);
             const types_to = try gpa.alloc(TypeId, capacity);
-            const flags_to = try gpa.alloc(u8, capacity);
+            const flags_to = try gpa.alloc(EntryFlags, capacity);
             @memcpy(types_to[0..used], self.entryType[0..used]);
             @memcpy(flags_to[0..used], self.entryFlags[0..used]);
             self.entryType = types_to;
@@ -253,8 +300,7 @@ pub const Ir = struct {
 
         for (0..size) |i| {
             self.entryType[used + i] = types[i];
-            // Not null and with, the first two bits.
-            self.entryFlags[used + i] = @as(u8, @bitCast(flags[i])) & 3;
+            self.entryFlags[used + i] = .{ .not_null = flags[i].not_null, .with = flags[i].with };
         }
 
         self.blockFirst[k] = self.count;

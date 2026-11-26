@@ -4,6 +4,7 @@
 // comparisons and conditional branches, and the conversions, as avmplus'
 // coercions.
 const std = @import("std");
+const options = @import("options");
 const Error = std.mem.Allocator.Error;
 const traits_ = @import("../link/traits.zig");
 const TypeId = traits_.TypeId;
@@ -203,8 +204,13 @@ pub fn isTypedConversion(op: IrOp) bool {
     };
 }
 
-/// The type conversion instruction i, `op`, gives; one isTypedConversion holds of.
+/// The type conversion instruction i, `op`, gives. Its callers test
+/// isTypedConversion first: no other op gives a type of its own.
 pub fn conversionType(em: *MethodEmitter, op: IrOp, i: u32) TypeId {
+    if (options.checks) {
+        std.debug.assert(isTypedConversion(op));
+    }
+
     const domain = em.domain;
     return switch (op) {
         .convert_i, .coerce_i => domain.intType,
@@ -216,7 +222,7 @@ pub fn conversionType(em: *MethodEmitter, op: IrOp, i: u32) TypeId {
         .coerce_o => domain.objectType(),
         .coerce => em.ir.cType(i),
         .coerce_a => .any,
-        else => unreachable,
+        else => @panic("conversionType of an op isTypedConversion rejects"),
     };
 }
 

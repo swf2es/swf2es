@@ -134,12 +134,12 @@ pub fn object(em: *MethodEmitter, i: u32, op: IrOp) Error!bool {
         .ir_find_prop_global, .ir_find_prop_global_strict => {
             const strict = op == .ir_find_prop_global_strict;
             try em.assign(i, false);
-            if (ir.c[i] > 0) {
+            if (ir.cScopeSearch(i) > 0) {
                 // The local scopes from c - 1 first, by what each is at run time.
                 try out.text(if (strict) "rt.findLocalStrict(M[" else "rt.findLocal(M[");
                 try out.uint(a);
                 try out.text("], [");
-                const first: u32 = @as(u32, @intCast(ir.c[i])) - 1;
+                const first = ir.cScopeSearch(i) - 1;
                 var d = first;
                 while (d < em.scopeDepth) : (d += 1) {
                     if (d > first) {
@@ -198,13 +198,13 @@ pub fn object(em: *MethodEmitter, i: u32, op: IrOp) Error!bool {
         },
         .ir_call_getter => {
             try em.assign(i, false);
-            if (try vectorLength(em, src, ir.c[i])) {
+            if (try vectorLength(em, src, ir.cMethod(i))) {
                 try receiver(em, src);
                 try out.text(".$a.length");
                 return true;
             }
 
-            if (stringLength(em, src, ir.c[i])) {
+            if (stringLength(em, src, ir.cMethod(i))) {
                 try receiver(em, src);
                 try out.text(".length");
                 return true;
@@ -212,20 +212,20 @@ pub fn object(em: *MethodEmitter, i: u32, op: IrOp) Error!bool {
 
             try virtual(em, a, src, 0, -1);
         },
-        .ir_call_setter => try virtual(em, a, src, 1, ir.c[i]),
+        .ir_call_setter => try virtual(em, a, src, 1, ir.cMethod(i)),
         .callmethod => {
             if (ir.dst[i] >= 0) {
                 try em.assign(i, false);
             }
 
-            try virtual(em, a, src, ir.b[i], ir.c[i]);
+            try virtual(em, a, src, ir.b[i], ir.cMethod(i));
         },
         .ir_call_interface => {
             if (ir.dst[i] >= 0) {
                 try em.assign(i, false);
             }
 
-            if (ir.b[i] <= em.domain.traits.paramCount.get(@intCast(ir.c[i]))) {
+            if (ir.b[i] <= em.domain.traits.paramCount.get(@intCast(ir.cMethod(i)))) {
                 try interfaceCall(em, a, src, ir.b[i]);
                 return true;
             }
@@ -323,7 +323,7 @@ pub fn object(em: *MethodEmitter, i: u32, op: IrOp) Error!bool {
             // The base's method itself, its arguments coerced already: its entry
             // for bound calls, where it has one.
             try out.text("sup.$it.proto.");
-            try out.text(if (hasBoundEntry(em, @bitCast(ir.c[i]))) "$b" else "$m");
+            try out.text(if (hasBoundEntry(em, @bitCast(ir.cMethod(i)))) "$b" else "$m");
             try out.uint(a);
             try out.text(".call(");
             em.usesSup = true;
@@ -834,9 +834,8 @@ fn name(em: *MethodEmitter, a: u32, from: i32) Error!void {
 const Kind = enum { none, Int, Uint, Double, Float, Object };
 
 /// The kind of Vector type t's elements.
-fn vectorKind(em: *MethodEmitter, type_: TypeId) Error!Kind {
+fn vectorKind(em: *MethodEmitter, t: TypeId) Error!Kind {
     const domain = em.domain;
-    const t = type_;
     if (!t.isTraits()) {
         return .none;
     }
@@ -1170,8 +1169,7 @@ fn virtual(em: *MethodEmitter, disp: u32, src: i32, argc: u32, m: i32) Error!voi
     const out = &em.out;
     const ty = em.regType[u(src)];
     // XML's methods look names up in the default XML namespace.
-    const t = ty;
-    if (t == em.domain.xmlType or t == em.domain.xmlListType) {
+    if (ty == em.domain.xmlType or ty == em.domain.xmlListType) {
         em.seesDxns = true;
     }
 

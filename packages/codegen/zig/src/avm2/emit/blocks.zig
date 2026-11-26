@@ -40,7 +40,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
 
     em.scopeDepth = ir.blockScope[k];
     for (0..em.scopeDepth) |d| {
-        em.scopeWith[d] = (ir.entryFlags[entry + ir.localCount + d] & 2) >> 1;
+        em.scopeWith[d] = @intFromBool(ir.entryFlags[entry + ir.localCount + d].with);
     }
 
     // A block may be entered from any region, so it sets its own first.
@@ -97,7 +97,7 @@ pub fn blockBody(em: *MethodEmitter, k: u32) Error!void {
             try boxRaw(em, ir.src[i]);
             try copyFor(em, ir.a[i], ir.src[i]);
             var c: u32 = 0;
-            while (c <= @as(u32, @bitCast(ir.c[i]))) : (c += 1) {
+            while (c <= ir.cLastCase(i)) : (c += 1) {
                 try copyFor(em, ir.cases[ir.b[i] + c], ir.src[i]);
             }
         } else if (op == .jump) {
