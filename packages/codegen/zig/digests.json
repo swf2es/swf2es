@@ -1,9 +1,9 @@
 {
   "zig": "0.17.0",
-  "inputs": "84caa435e9fd7b49c44cea36e70273151d347f6e7a1f94ef35b15480cff58c20",
+  "inputs": "35a60696dc6aa3f4328a6b66316945e1adbbcb60c230f436ca509b861e29658b",
   "modules": {
-    "dist/codegen.wasm": "6f43d9477a12f5c87c20c9cc1b1fe6ddd2cc6ef03db8597f12c45e655f1f1db4",
-    "dist-test/testing.wasm": "991ee069b1bfe91e6dbae92b2e36daeb125d1ddca927b4d59dfbf126ca3ce9b5",
-    "dist-test/testing-poison.wasm": "18267ad668442047cb309eeb105a2f31bb3689cd1eea6023cbd137fbb3c450dc"
+    "dist/codegen.wasm": "9177f344c7539353b9d4923a194632c6308c1b8a7c568c4523bd20e4c9b9ce71",
+    "dist-test/testing.wasm": "b4898894d21ec152325cc731fbe88c011edbe239588c6ae79af901e78a1a032b",
+    "dist-test/testing-poison.wasm": "01ef8bedd2b65a7211f7b55ec21c9b2bf4afd1746fc4300471e675d45a5c9875"
   }
 }

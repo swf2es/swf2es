@@ -1267,7 +1267,7 @@ function parseEntries(text: string): Map<number, string> {
   return entries;
 }
 
-/** What domainWantsCompact is asked (see wantsRebuild in zig/src/avm2/link/lifetime.zig). */
+/** What domainWantsCompact is asked: lifetime.zig's Want, by number (a unit test holds them alike). */
 const WANT_InPlace = 0;
 const WANT_InPlaceBesideSpare = 1;
 const WANT_Move = 2;
