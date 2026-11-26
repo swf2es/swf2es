@@ -113,7 +113,7 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: u8) Error!bool {
             }
         },
         ops.OP_dxns => {
-            if (bd.methodFlags & C.METHOD_SetsDxns == 0) {
+            if (!bd.methodFlags.sets_dxns) {
                 return bd.fail(C.kIllegalSetDxns);
             }
 
@@ -242,7 +242,7 @@ fn verifySpecial(bd: *BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32) bool {
         ops.OP_pushfloat => if (a == 0 or a >= pool.floats.len) bd.fail(C.kCpoolIndexRangeError) else true,
         ops.OP_pushdouble => if (a == 0 or a >= pool.doubles.len) bd.fail(C.kCpoolIndexRangeError) else true,
         ops.OP_pushnamespace => if (a == 0 or a >= pool.nsCount()) bd.fail(C.kCpoolIndexRangeError) else true,
-        ops.OP_dxnslate => if (bd.methodFlags & C.METHOD_SetsDxns != 0) true else bd.fail(C.kIllegalSetDxns),
+        ops.OP_dxnslate => if (bd.methodFlags.sets_dxns) true else bd.fail(C.kIllegalSetDxns),
         ops.OP_getlex => if (runtimeParts(pool, a) != 0) bd.fail(C.kIllegalOpMultinameError) else true,
         ops.OP_finddef => if (code_.isBinding(pool, a)) true else bd.fail(C.kIllegalOpMultinameError),
         ops.OP_callproperty, ops.OP_callproplex, ops.OP_callpropvoid, ops.OP_constructprop, ops.OP_callsuper, ops.OP_callsupervoid, ops.OP_getsuper, ops.OP_setsuper => {
@@ -250,7 +250,7 @@ fn verifySpecial(bd: *BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32) bool {
         },
         ops.OP_newfunction => if (a >= abc.methodCount()) bd.fail(C.kMethodInfoExceedsCountError) else true,
         ops.OP_newclass => if (a >= abc.classCount()) bd.fail(C.kClassInfoExceedsCountError) else true,
-        ops.OP_newactivation => if (bd.methodFlags & C.METHOD_NeedActivation != 0) true else bd.fail(C.kInvalidNewActivationError),
+        ops.OP_newactivation => if (bd.methodFlags.need_activation) true else bd.fail(C.kInvalidNewActivationError),
         ops.OP_newcatch => if (a >= bd.handlerCount) bd.fail(C.kInvalidNewActivationError) else true,
         ops.OP_pushscope, ops.OP_pushwith => {
             if (bd.scope + 1 > bd.maxScope) {

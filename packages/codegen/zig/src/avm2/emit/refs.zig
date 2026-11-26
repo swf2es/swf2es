@@ -118,12 +118,12 @@ fn className_(e: *MethodEmitter, t: u32) Error!void {
     const abc = domain.abcs.get(index);
     const pool = &abc.pool;
     var mn = abc.instanceName[traits.owner.get(t)];
-    if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+    if (pool.mnKind[mn] == .type_name) {
         mn = pool.mnA[mn];
     }
 
     var ns = pool.mnA[mn];
-    if (pool.mnKind[mn] == C.CONSTANT_Multiname) {
+    if (pool.mnKind[mn] == .multiname) {
         ns = domain_.firstMember(pool, ns);
     }
 
@@ -228,12 +228,12 @@ pub fn className(e: *MethodEmitter, traits: *const TraitsTable, t: u32) Error![]
     const abc = domain.abcs.get(index);
     const pool = &abc.pool;
     var mn = abc.instanceName[traits.owner.get(t)];
-    if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+    if (pool.mnKind[mn] == .type_name) {
         mn = pool.mnA[mn];
     }
 
     var ns = pool.mnA[mn];
-    if (pool.mnKind[mn] == C.CONSTANT_Multiname) {
+    if (pool.mnKind[mn] == .multiname) {
         ns = domain_.firstMember(pool, ns);
     }
 
@@ -248,10 +248,10 @@ pub fn poolString(e: *MethodEmitter, index: u32) Error!void {
 
 /// A constant of default-value kind `kind`, index `value`, for a slot or
 /// parameter of `type`; value 0 is the type's own default.
-pub fn constant(e: *MethodEmitter, value: u32, kind: u8, type_: i32) Error!void {
+pub fn constant(e: *MethodEmitter, value: u32, kind: C.Constant, type_: i32) Error!void {
     const out = &e.out;
     const pool = &e.abc.pool;
-    if (kind == C.CONSTANT_Float and e.abc.hasFloatSupport()) {
+    if (kind == .float and e.abc.hasFloatSupport()) {
         const bt = e.domain.builtin(type_);
         const numeric = bt == traits_.BUILTIN_Int or bt == traits_.BUILTIN_Uint or bt == traits_.BUILTIN_Number;
         if (!numeric) {
@@ -270,7 +270,7 @@ pub fn constant(e: *MethodEmitter, value: u32, kind: u8, type_: i32) Error!void 
         return defaultOf(e, type_);
     }
 
-    if (type_ >= 0 and type_ == e.domain.floatType and kind != C.CONSTANT_Float) {
+    if (type_ >= 0 and type_ == e.domain.floatType and kind != .float) {
         try out.text("rt.float(");
         try constant(e, value, kind, TYPE_Any);
         try out.text(")");

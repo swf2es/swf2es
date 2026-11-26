@@ -109,13 +109,13 @@ fn isAir(version: u8) bool {
     return version != domain_.API_FP_10_0 and version != 5 and version != 7;
 }
 
-pub fn namespaceType(kind: u8) u8 {
+pub fn namespaceType(kind: C.Constant) u8 {
     return switch (kind) {
-        C.CONSTANT_PackageInternalNs => domain_.NS_PackageInternal,
-        C.CONSTANT_ProtectedNamespace => domain_.NS_Protected,
-        C.CONSTANT_ExplicitNamespace => domain_.NS_Explicit,
-        C.CONSTANT_StaticProtectedNs => domain_.NS_StaticProtected,
-        C.CONSTANT_PrivateNs => domain_.NS_Private,
+        .package_internal_ns => domain_.NS_PackageInternal,
+        .protected_namespace => domain_.NS_Protected,
+        .explicit_namespace => domain_.NS_Explicit,
+        .static_protected_ns => domain_.NS_StaticProtected,
+        .private_ns => domain_.NS_Private,
         else => domain_.NS_Public,
     };
 }

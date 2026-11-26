@@ -181,7 +181,7 @@ pub const BodyDecoder = struct {
 
     // The method being verified and the frame state of the block being decoded.
     method: u32 = 0,
-    methodFlags: u8 = 0,
+    methodFlags: C.MethodFlags = .{},
     maxStack: u32 = 0,
     localCount: u32 = 0,
     maxScope: u32 = 0,
@@ -480,7 +480,7 @@ pub const BodyDecoder = struct {
             return false;
         }
 
-        if (self.methodFlags & (C.METHOD_NeedRest | C.METHOD_NeedArguments) != 0) {
+        if (self.methodFlags.need_rest or self.methodFlags.need_arguments) {
             return self.checkLocal(params + 1);
         }
 
@@ -582,7 +582,7 @@ pub const BodyDecoder = struct {
         }
 
         var firstLocal = count + 1;
-        if (self.methodFlags & (C.METHOD_NeedRest | C.METHOD_NeedArguments) != 0) {
+        if (self.methodFlags.need_rest or self.methodFlags.need_arguments) {
             self.setValue(firstLocal, domain.arrayType, NOT_NULL);
             firstLocal += 1;
         }

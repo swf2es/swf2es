@@ -333,7 +333,7 @@ pub const Domain = struct {
     classInstance: Rows(u32) = .{},
     /// The base class's id, or -1.
     classBase: Rows(i32) = .{},
-    classFlags: Rows(u8) = .{},
+    classFlags: Rows(C.InstanceFlags) = .{},
     /// The traits of the class's instances, and of the class object; -1 for void.
     classTraits: Rows(i32) = .{},
     classStatic: Rows(i32) = .{},
@@ -707,7 +707,7 @@ pub const Domain = struct {
         var classes_: std.ArrayList(i32) = .empty;
         var mn = multiname;
         const innermost: i32 = while (true) {
-            const isTypeName = pool.mnKind[mn] == C.CONSTANT_TypeName;
+            const isTypeName = pool.mnKind[mn] == .type_name;
             const c = typenames.resolveType(self, index, if (isTypeName) pool.mnA[mn] else mn);
             if (c < 0 and c != -C.kIllegalVoidError) {
                 self.typeError = -c;
@@ -745,7 +745,7 @@ pub const Domain = struct {
         const abc = self.abcs.get(index);
         const local = m - self.methodStart.get(index);
         const flags = abc.methodFlags[local];
-        if (flags & (C.METHOD_NeedRest | C.METHOD_NeedArguments) != 0) {
+        if (flags.need_rest or flags.need_arguments) {
             return true;
         }
 
@@ -765,8 +765,8 @@ pub const Domain = struct {
 
         var i = traits.first.get(t);
         while (i < traits.end.get(t)) : (i += 1) {
-            const kind = abc.traitTag[i] & 0x0f;
-            if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
+            const kind = abc.traitTag[i].kind;
+            if (kind.bindsMethod()) {
                 try out.append(gpa, methods + abc.traitIndex[i]);
             }
         }
@@ -797,14 +797,14 @@ pub const Domain = struct {
     pub fn findScript(self: *const Domain, index: u32, multiname: u32) i32 {
         const pool = &self.abcs.get(index).pool;
         var mn = multiname;
-        if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+        if (pool.mnKind[mn] == .type_name) {
             mn = pool.mnA[mn];
         }
 
         const ids = self.abcNs.get(index);
         const versions = self.abcNsVersion.get(index);
         const name = self.abcString.get(index)[pool.mnB[mn]];
-        if (pool.mnKind[mn] == C.CONSTANT_Qname) {
+        if (pool.mnKind[mn] == .qname) {
             const ns = pool.mnA[mn];
             return self.scriptOf(self.find(ids[ns], name, versions[ns], self.abcDomain.get(index)));
         }
@@ -864,7 +864,7 @@ pub const Domain = struct {
     pub fn hasPublicNamespace(self: *const Domain, index: u32, mn: u32) bool {
         const pool = &self.abcs.get(index).pool;
         const kind = pool.mnKind[mn];
-        if (kind != C.CONSTANT_Multiname and kind != C.CONSTANT_MultinameL and kind != C.CONSTANT_MultinameLA) {
+        if (kind != .multiname and kind != .multiname_l and kind != .multiname_la) {
             return false;
         }
 
@@ -922,7 +922,7 @@ pub const Domain = struct {
     pub fn nameOf(self: *const Domain, index: u32, multiname: u32) u32 {
         const pool = &self.abcs.get(index).pool;
         var mn = multiname;
-        if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+        if (pool.mnKind[mn] == .type_name) {
             mn = pool.mnA[mn];
         }
 
@@ -996,7 +996,7 @@ pub const Domain = struct {
         const gpa = self.gpa;
         const pool = &self.abcs.get(index).pool;
         var mn = name;
-        if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+        if (pool.mnKind[mn] == .type_name) {
             mn = pool.mnA[mn];
         }
 
@@ -1006,7 +1006,7 @@ pub const Domain = struct {
         traits.memberStart.set(t, start);
         traits.memberEnd.set(t, start);
         var ns = pool.mnA[mn];
-        if (pool.mnKind[mn] == C.CONSTANT_Multiname) {
+        if (pool.mnKind[mn] == .multiname) {
             ns = firstMember(pool, ns);
         }
 
@@ -1126,15 +1126,15 @@ pub const Domain = struct {
     /// As PoolObject::getLegalDefaultValue: whether constant `value` of `kind`
     /// of ABC `index` may be the default of a slot or parameter of `type`; 0,
     /// or the VerifyError.
-    pub fn checkDefault(self: *const Domain, index: u32, value: u32, kind: u8, type_: i32) i32 {
+    pub fn checkDefault(self: *const Domain, index: u32, value: u32, kind: C.Constant, type_: i32) i32 {
         // Legacy ABCs ignore the kind at index zero; AIR's float entry zero is NaN.
         const hasFloats = self.abcs.get(index).hasFloatSupport();
-        if (value == 0 and (kind != C.CONSTANT_Float or !hasFloats)) {
+        if (value == 0 and (kind != .float or !hasFloats)) {
             return 0;
         }
 
         const illegal = if (type_ == TYPE_Any) C.kCorruptABCError else C.kIllegalDefaultValue;
-        if (kind == C.CONSTANT_Float and !hasFloats) {
+        if (kind == .float and !hasFloats) {
             return illegal;
         }
 
@@ -1274,14 +1274,14 @@ pub const Domain = struct {
             var t = abc.scriptTraitStart[script];
             while (t < end) : (t += 1) {
                 var mn = abc.traitName[t];
-                if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+                if (pool.mnKind[mn] == .type_name) {
                     mn = pool.mnA[mn];
                 }
 
                 const name = strings[pool.mnB[mn]];
                 var first = pool.mnA[mn];
                 var version = versions[first];
-                if (pool.mnKind[mn] == C.CONSTANT_Multiname) {
+                if (pool.mnKind[mn] == .multiname) {
                     const set = pool.mnA[mn];
                     const last = pool.nsSetStart[set + 1];
                     first = firstMember(pool, set);

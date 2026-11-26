@@ -43,14 +43,14 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
             }
 
             const b: u32 = @intCast(base);
-            if (dom.classFlags.get(b) & C.INSTANCE_Final != 0 or
+            if (dom.classFlags.get(b).final or
                 base == dom.classClass or
                 (base == dom.functionClass and !abc.builtin))
             {
                 return abc.fail(C.kCannotExtendFinalClass);
             }
 
-            if (dom.classFlags.get(b) & C.INSTANCE_Interface != 0) {
+            if (dom.classFlags.get(b).interface) {
                 return abc.fail(C.kCannotExtendError);
             }
 
@@ -67,7 +67,7 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
                 return abc.fail(-t);
             }
 
-            if (dom.classFlags.get(@intCast(t)) & C.INSTANCE_Interface == 0) {
+            if (!dom.classFlags.get(@intCast(t)).interface) {
                 dom.traits.interfaceList.truncate(interfaces);
                 return abc.fail(C.kCannotImplementError);
             }
@@ -75,7 +75,7 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
             try dom.traits.interfaceList.push(gpa, @bitCast(dom.classTraits.get(@intCast(t))));
         }
 
-        if (flags & C.INSTANCE_Interface != 0 and baseName != 0) {
+        if (flags.interface and baseName != 0) {
             return abc.fail(C.kCannotExtendError);
         }
 
@@ -85,9 +85,9 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
         }
 
         const base = dom.classBase.get(id);
-        const protectedNs: i32 = if (flags & C.INSTANCE_ProtectedNs != 0) @intCast(ids[abc.instanceProtectedNs[i]]) else -1;
+        const protectedNs: i32 = if (flags.protected_ns) @intCast(ids[abc.instanceProtectedNs[i]]) else -1;
         const t = try dom.traits.create(gpa, traits_.TRAITS_Instance, index, i, if (base >= 0) dom.classTraits.get(@intCast(base)) else -1, protectedNs, abc.instanceTraitStart[i], abc.instanceTraitStart[i + 1]);
-        dom.traits.isInterface.set(t, if (flags & C.INSTANCE_Interface != 0) 1 else 0);
+        dom.traits.isInterface.set(t, if (flags.interface) 1 else 0);
         dom.traits.interfaceStart.set(t, interfaces);
         dom.traits.interfaceEnd.set(t, dom.traits.interfaceList.len);
         dom.classTraits.set(id, @intCast(t));
@@ -96,7 +96,7 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
             return abc.fail(err);
         }
 
-        try bindMethods(dom, t, @bitCast(abc.instanceInit[i]), (flags & C.INSTANCE_Final) != 0);
+        try bindMethods(dom, t, @bitCast(abc.instanceInit[i]), flags.final);
 
         try typenames.nameInstance(dom, index, i);
     }
@@ -117,7 +117,7 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
         try dom.classAbc.push(gpa, index);
         try dom.classInstance.push(gpa, 0xffffffff);
         try dom.classBase.push(gpa, -1);
-        try dom.classFlags.push(gpa, C.INSTANCE_Final);
+        try dom.classFlags.push(gpa, .{ .final = true });
         dom.voidType = @intCast(try dom.traits.create(gpa, traits_.TRAITS_Void, index, 0, -1, -1, 0, 0));
         dom.nullType = @intCast(try dom.traits.create(gpa, traits_.TRAITS_Null, index, 0, -1, -1, 0, 0));
         try dom.classTraits.push(gpa, dom.voidType);
@@ -190,7 +190,7 @@ fn layoutActivations(dom: *Domain, index: u32) Allocator.Error!bool {
         const end = abc.bodyTraitStart[b + 1];
         const flags = abc.methodFlags[abc.bodyMethod[b]];
         bodies[b] = -1;
-        if (flags & C.METHOD_NeedActivation != 0 or end > first) {
+        if (flags.need_activation or end > first) {
             const t = try dom.traits.create(gpa, traits_.TRAITS_Activation, index, b, -1, -1, first, end);
             bodies[b] = @intCast(t);
             const err = try layout(&dom.traits, dom, t);
@@ -217,13 +217,13 @@ fn bindMethods(dom: *Domain, t: u32, init: i32, final: bool) Allocator.Error!voi
     var i = traits.first.get(t);
     while (i < traits.end.get(t)) : (i += 1) {
         const tag = abc.traitTag[i];
-        const kind = tag & 0x0f;
-        if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
+        const kind = tag.kind;
+        if (kind.bindsMethod()) {
             // A method of this ABC's, whose rows its link added.
             const m = methods + abc.traitIndex[i];
             traits.methodTraits.set(m, @intCast(t));
             traits.methodVirtual.set(m, 1);
-            traits.methodFinal.set(m, if (tag & C.ATTR_Final != 0 or final) 1 else 0);
+            traits.methodFinal.set(m, if (tag.final or final) 1 else 0);
         }
     }
 

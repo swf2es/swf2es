@@ -69,7 +69,7 @@ pub fn readMethodBodies(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, di
         }
 
         const owner = abc.methodOwner[method];
-        if (owner >= 0 and @as(u32, @intCast(owner)) < abc.classCount() and abc.instanceFlags[@intCast(owner)] & C.INSTANCE_Interface != 0) {
+        if (owner >= 0 and @as(u32, @intCast(owner)) < abc.classCount() and abc.instanceFlags[@intCast(owner)].interface) {
             return diag.fail(C.kIllegalInterfaceMethodBodyError);
         }
 

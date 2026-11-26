@@ -24,7 +24,7 @@ pub fn readInstances(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag:
 
     abc.instanceName = try lists.zeroed(u32, gpa, abc.instanceName, count);
     abc.instanceSuper = try lists.zeroed(u32, gpa, abc.instanceSuper, count);
-    abc.instanceFlags = try lists.zeroed(u8, gpa, abc.instanceFlags, count);
+    abc.instanceFlags = try lists.zeroed(C.InstanceFlags, gpa, abc.instanceFlags, count);
     abc.instanceProtectedNs = try lists.zeroed(u32, gpa, abc.instanceProtectedNs, count);
     abc.instanceInterfaceStart = try lists.zeroed(u32, gpa, abc.instanceInterfaceStart, count + 1);
     abc.instanceInit = try lists.zeroed(u32, gpa, abc.instanceInit, count);
@@ -48,9 +48,9 @@ pub fn readInstances(gpa: Allocator, abc: *Abc, lists: *Lists, r: *Reader, diag:
             return diag.fail(if (r.failed) C.kCorruptABCError else C.kCpoolIndexRangeError);
         }
 
-        const flags: u8 = @truncate(r.u8_());
+        const flags = r.byteAs(C.InstanceFlags);
         var protectedNs: u32 = 0;
-        if (flags & C.INSTANCE_ProtectedNs != 0) {
+        if (flags.protected_ns) {
             protectedNs = r.u30_();
             if (protectedNs >= pool.nsCount()) {
                 return diag.fail(if (r.failed) C.kCorruptABCError else C.kCpoolIndexRangeError);

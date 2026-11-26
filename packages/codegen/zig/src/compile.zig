@@ -579,7 +579,7 @@ fn emitEach(dom: *Domain, gpa: Allocator, bodies: []const u8, reuse: bool, index
         }
 
         const method = abc.bodyMethod[body];
-        if (results[body] != 0 or abc.methodFlags[method] & C.METHOD_Native != 0) {
+        if (results[body] != 0 or abc.methodFlags[method].native) {
             continue;
         }
 

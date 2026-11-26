@@ -67,9 +67,15 @@ pub fn readAll(gpa: Allocator, bytes: []const u8, kinds: []const u8) Allocator.E
     return values;
 }
 
-/// "0x16": a byte as the node tests expect it.
-fn writeHex(w: *Writer, b: u8) Writer.Error!void {
-    try w.print("0x{x:0>2}", .{b});
+/// "0x16": a byte as the node tests expect it; a kind or flags as the
+/// byte the ABC has.
+fn writeHex(w: *Writer, b: anytype) Writer.Error!void {
+    const byte: u8 = switch (@typeInfo(@TypeOf(b))) {
+        .@"enum" => @backingInt(b),
+        .@"struct" => @bitCast(b),
+        else => b,
+    };
+    try w.print("0x{x:0>2}", .{byte});
 }
 
 /// The constant pool of a whole ABC block, one entry a line: "int 1 -5",
@@ -267,7 +273,7 @@ fn dumpTraits(lines: *Lines, abc: *const Abc, owner: []const u8, index: u32, sta
     const w = lines.w;
     var t = start;
     while (t < end) : (t += 1) {
-        const tag = abc.traitTag[t];
+        const tag: u8 = @bitCast(abc.traitTag[t]);
         try lines.next();
         try w.print("  trait {s} {d} name={d} kind={d} attr=", .{ owner, index, abc.traitName[t], tag & 0x0f });
         try writeHex(w, tag & 0xf0);

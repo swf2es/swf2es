@@ -432,13 +432,13 @@ pub const TraitsTable = struct {
         const pool = &abc.pool;
         const versions = dom.abcNsVersion.get(index);
         var mn = abc.traitName[i];
-        if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+        if (pool.mnKind[mn] == .type_name) {
             mn = pool.mnA[mn];
         }
 
         var ns = pool.mnA[mn];
         var version = versions[ns];
-        if (pool.mnKind[mn] == C.CONSTANT_Multiname) {
+        if (pool.mnKind[mn] == .multiname) {
             const set = ns;
             const last = pool.nsSetStart[set + 1];
             ns = domain_.firstMember(pool, set);

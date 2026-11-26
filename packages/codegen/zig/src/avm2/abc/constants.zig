@@ -1,59 +1,111 @@
-// Constants of the ABC format and avmplus' VerifyError numbers, named as
-// avmplus names them, so the files that use them read like avmplus':
-// C.CONSTANT_Qname, C.kCorruptABCError.
-// Constant kinds (avmplus core/ActionBlockConstants.h): of default values,
-// namespaces and multinames.
-pub const CONSTANT_Utf8: u8 = 0x01;
-pub const CONSTANT_Int: u8 = 0x03;
-pub const CONSTANT_UInt: u8 = 0x04;
-pub const CONSTANT_PrivateNs: u8 = 0x05;
-pub const CONSTANT_Double: u8 = 0x06;
-pub const CONSTANT_Float: u8 = 0x02;
-pub const CONSTANT_Qname: u8 = 0x07;
-pub const CONSTANT_Namespace: u8 = 0x08;
-pub const CONSTANT_Multiname: u8 = 0x09;
-pub const CONSTANT_False: u8 = 0x0a;
-pub const CONSTANT_True: u8 = 0x0b;
-pub const CONSTANT_Null: u8 = 0x0c;
-pub const CONSTANT_QnameA: u8 = 0x0d;
-pub const CONSTANT_MultinameA: u8 = 0x0e;
-pub const CONSTANT_RTQname: u8 = 0x0f;
-pub const CONSTANT_RTQnameA: u8 = 0x10;
-pub const CONSTANT_RTQnameL: u8 = 0x11;
-pub const CONSTANT_RTQnameLA: u8 = 0x12;
-pub const CONSTANT_PackageNamespace: u8 = 0x16;
-pub const CONSTANT_PackageInternalNs: u8 = 0x17;
-pub const CONSTANT_ProtectedNamespace: u8 = 0x18;
-pub const CONSTANT_ExplicitNamespace: u8 = 0x19;
-pub const CONSTANT_StaticProtectedNs: u8 = 0x1a;
-pub const CONSTANT_MultinameL: u8 = 0x1b;
-pub const CONSTANT_MultinameLA: u8 = 0x1c;
-pub const CONSTANT_TypeName: u8 = 0x1d;
+// Constants of the ABC format and avmplus' VerifyError numbers. The kinds
+// and flags are Zig types whose values are the ABC's bytes; the VerifyError
+// numbers keep avmplus' names, so the files that use them read like
+// avmplus': C.kCorruptABCError.
 
-// Method flags (method_info.flags).
-pub const METHOD_NeedArguments: u8 = 0x01;
-pub const METHOD_NeedActivation: u8 = 0x02;
-pub const METHOD_NeedRest: u8 = 0x04;
-pub const METHOD_SetsDxns: u8 = 0x40;
-pub const METHOD_HasOptional: u8 = 0x08;
-pub const METHOD_Native: u8 = 0x20;
-pub const METHOD_HasParamNames: u8 = 0x80;
+/// A constant's kind (avmplus core/ActionBlockConstants.h): of a default
+/// value, a namespace or a multiname, one number space as in avmplus.
+/// Non-exhaustive, as the ABC writes it: a byte no kind names is one of
+/// the unnamed values, which every switch must reject.
+pub const Constant = enum(u8) {
+    utf8 = 0x01,
+    float = 0x02,
+    int = 0x03,
+    uint = 0x04,
+    private_ns = 0x05,
+    double = 0x06,
+    qname = 0x07,
+    namespace = 0x08,
+    multiname = 0x09,
+    false = 0x0a,
+    true = 0x0b,
+    null = 0x0c,
+    qname_a = 0x0d,
+    multiname_a = 0x0e,
+    rtqname = 0x0f,
+    rtqname_a = 0x10,
+    rtqname_l = 0x11,
+    rtqname_la = 0x12,
+    package_namespace = 0x16,
+    package_internal_ns = 0x17,
+    protected_namespace = 0x18,
+    explicit_namespace = 0x19,
+    static_protected_ns = 0x1a,
+    multiname_l = 0x1b,
+    multiname_la = 0x1c,
+    type_name = 0x1d,
+    _,
 
-// Instance flags (instance_info.flags).
-pub const INSTANCE_Final: u8 = 0x02;
-pub const INSTANCE_Interface: u8 = 0x04;
-pub const INSTANCE_ProtectedNs: u8 = 0x08;
+    /// Whether it is a namespace's kind.
+    pub fn isNamespace(self: Constant) bool {
+        return switch (self) {
+            .namespace,
+            .package_namespace,
+            .package_internal_ns,
+            .protected_namespace,
+            .explicit_namespace,
+            .static_protected_ns,
+            .private_ns,
+            => true,
+            else => false,
+        };
+    }
+};
 
-// Trait kinds (low 4 bits of traits_info.kind) and attributes (high 4 bits).
-pub const TRAIT_Slot: u8 = 0;
-pub const TRAIT_Method: u8 = 1;
-pub const TRAIT_Getter: u8 = 2;
-pub const TRAIT_Setter: u8 = 3;
-pub const TRAIT_Class: u8 = 4;
-pub const TRAIT_Const: u8 = 6;
-pub const ATTR_Final: u8 = 0x10;
-pub const ATTR_Override: u8 = 0x20;
-pub const ATTR_Metadata: u8 = 0x40;
+/// method_info.flags.
+pub const MethodFlags = packed struct(u8) {
+    need_arguments: bool = false,
+    need_activation: bool = false,
+    need_rest: bool = false,
+    has_optional: bool = false,
+    /// avmplus' IGNORE_REST, which nothing here reads.
+    ignore_rest: bool = false,
+    native: bool = false,
+    sets_dxns: bool = false,
+    has_param_names: bool = false,
+};
+
+/// instance_info.flags.
+pub const InstanceFlags = packed struct(u8) {
+    sealed: bool = false,
+    final: bool = false,
+    interface: bool = false,
+    protected_ns: bool = false,
+    _: u4 = 0,
+};
+
+/// A trait's kind, the low four bits of its tag (AVM2 overview 4.8.1).
+/// Kind 5, a function, is one avmplus does not read, as no other kind may
+/// be either.
+pub const TraitKind = enum(u4) {
+    slot = 0,
+    method = 1,
+    getter = 2,
+    setter = 3,
+    class = 4,
+    constant = 6,
+    _,
+
+    /// Whether it binds a method: a method or an accessor.
+    pub fn bindsMethod(self: TraitKind) bool {
+        return self == .method or self == .getter or self == .setter;
+    }
+
+    /// Whether it binds a slot: a var, a const or a class.
+    pub fn bindsSlot(self: TraitKind) bool {
+        return self == .slot or self == .constant or self == .class;
+    }
+};
+
+/// traits_info.kind: the trait's kind, then its attributes; the top bit,
+/// which no attribute names, is kept as read.
+pub const TraitTag = packed struct(u8) {
+    kind: TraitKind,
+    final: bool,
+    override: bool,
+    metadata: bool,
+    _: u1,
+};
 
 // VerifyError numbers avmplus reports (core/ErrorConstants.h), so a rejected
 // ABC fails the same way it does in avmshell. 1008 is a ReferenceError.

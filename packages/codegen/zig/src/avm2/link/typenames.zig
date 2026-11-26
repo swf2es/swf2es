@@ -33,7 +33,7 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) 
             return -2;
         }
 
-        if (pool.mnKind[mn] != C.CONSTANT_TypeName) {
+        if (pool.mnKind[mn] != .type_name) {
             const c = resolveType(dom, index, mn);
             if (c == -C.kIllegalVoidError) {
                 if (void_ok) {
@@ -124,7 +124,7 @@ pub fn parameterized(dom: *Domain, base: i32, param: i32) Allocator.Error!i32 {
 /// deeper one fails, which this walks in a loop.
 pub fn resolveType(dom: *const Domain, index: u32, multiname: u32) i32 {
     const pool = &dom.abcs.get(index).pool;
-    if (pool.mnKind[multiname] != C.CONSTANT_TypeName) {
+    if (pool.mnKind[multiname] != .type_name) {
         return resolvePlain(dom, index, multiname);
     }
 
@@ -133,7 +133,7 @@ pub fn resolveType(dom: *const Domain, index: u32, multiname: u32) i32 {
     var mn = multiname;
     while (base >= 0 and pool.mnB[mn] != 0) {
         mn = pool.mnB[mn];
-        if (pool.mnKind[mn] != C.CONSTANT_TypeName) {
+        if (pool.mnKind[mn] != .type_name) {
             const t = resolvePlain(dom, index, mn);
             return if (t < 0) t else outer;
         }
@@ -158,10 +158,10 @@ fn resolvePlain(dom: *const Domain, index: u32, mn: u32) i32 {
     const versions = dom.abcNsVersion.get(index);
     const nameIndex = pool.mnB[mn];
     var found: i32 = -1;
-    if (kind == C.CONSTANT_Qname and pool.mnA[mn] != 0 and nameIndex != 0) {
+    if (kind == .qname and pool.mnA[mn] != 0 and nameIndex != 0) {
         const ns = pool.mnA[mn];
         found = findType(dom, index, ids[ns], strings[nameIndex], versions[ns]);
-    } else if (kind == C.CONSTANT_Multiname and nameIndex != 0) {
+    } else if (kind == .multiname and nameIndex != 0) {
         const set = pool.mnA[mn];
         const last = pool.nsSetStart[set + 1];
         var m = pool.nsSetStart[set];
@@ -239,12 +239,12 @@ pub fn nameInstance(dom: *Domain, index: u32, i: u32) Allocator.Error!void {
     const abc = dom.abcs.get(index);
     const pool = &abc.pool;
     var mn = abc.instanceName[i];
-    if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+    if (pool.mnKind[mn] == .type_name) {
         mn = pool.mnA[mn];
     }
 
     var ns = pool.mnA[mn];
-    if (pool.mnKind[mn] == C.CONSTANT_Multiname) {
+    if (pool.mnKind[mn] == .multiname) {
         ns = domain_.firstMember(pool, ns);
     }
 
@@ -268,18 +268,18 @@ pub fn addClassNames(dom: *Domain, index: u32) Allocator.Error!void {
     const end = abc.scriptTraitStart[abc.scriptCount()];
     var t = first;
     while (t < end) : (t += 1) {
-        if ((abc.traitTag[t] & 0x0f) != C.TRAIT_Class) {
+        if (abc.traitTag[t].kind != .class) {
             continue;
         }
 
         var mn = abc.traitName[t];
-        if (pool.mnKind[mn] == C.CONSTANT_TypeName) {
+        if (pool.mnKind[mn] == .type_name) {
             mn = pool.mnA[mn];
         }
 
         var ns = pool.mnA[mn];
         var version = versions[ns];
-        if (pool.mnKind[mn] == C.CONSTANT_Multiname) {
+        if (pool.mnKind[mn] == .multiname) {
             const set = ns;
             const last = pool.nsSetStart[set + 1];
             ns = domain_.firstMember(pool, set);

@@ -8,6 +8,7 @@
 // read is one of no entries.
 const std = @import("std");
 const memory = @import("../../memory.zig");
+const C = @import("constants.zig");
 const ConstantPool = @import("pool.zig").ConstantPool;
 const Range = @import("pool.zig").Range;
 
@@ -82,7 +83,7 @@ pub const Lists = struct {
         }
 
         std.debug.assert(made.len == rows);
-        @memset(made, 0);
+        @memset(std.mem.sliceAsBytes(made), 0);
         return made;
     }
 
@@ -111,28 +112,6 @@ pub const Lists = struct {
     }
 };
 
-/// A trait's kind, the low four bits of its tag (AVM2 overview 4.8.1).
-/// Kind 5, a function, is one avmplus does not read, as no other kind may
-/// be either.
-pub const TraitKind = enum(u4) {
-    slot = 0,
-    method = 1,
-    getter = 2,
-    setter = 3,
-    class = 4,
-    constant = 6,
-    _,
-
-    pub fn of(tag: u8) TraitKind {
-        return @fromBackingInt(@intCast(@as(u4, @truncate(tag))));
-    }
-
-    /// Whether it binds a method: a method or an accessor.
-    pub fn bindsMethod(self: TraitKind) bool {
-        return self == .method or self == .getter or self == .setter;
-    }
-};
-
 pub const Abc = struct {
     /// 0, or the VerifyError number avmplus would throw; then the tables are incomplete.
     @"error": i32 = 0,
@@ -153,12 +132,12 @@ pub const Abc = struct {
     methodReturnType: []u32 = &.{},
     /// String index of the method's debug name; not checked by avmplus.
     methodName: []u32 = &.{},
-    methodFlags: []u8 = &.{},
+    methodFlags: []C.MethodFlags = &.{},
     methodParamStart: []u32 = &.{},
     paramTypes: []u32 = &.{},
     methodOptionalStart: []u32 = &.{},
     optionalValue: []u32 = &.{},
-    optionalKind: []u8 = &.{},
+    optionalKind: []C.Constant = &.{},
     /// The owner (see instanceOwner .. activationOwner) a method is bound to, or -1.
     methodOwner: []i32 = &.{},
 
@@ -173,7 +152,7 @@ pub const Abc = struct {
     instanceName: []u32 = &.{},
     /// Multiname of the base class; 0 if there is none.
     instanceSuper: []u32 = &.{},
-    instanceFlags: []u8 = &.{},
+    instanceFlags: []C.InstanceFlags = &.{},
     /// Namespace index; 0 if the class has no protected namespace.
     instanceProtectedNs: []u32 = &.{},
     instanceInterfaceStart: []u32 = &.{},
@@ -208,14 +187,14 @@ pub const Abc = struct {
     // traits_info of every instance, class, script and method activation, in that order.
     traitName: []u32 = &.{},
     /// Kind in the low 4 bits, attributes in the high 4.
-    traitTag: []u8 = &.{},
+    traitTag: []C.TraitTag = &.{},
     /// Slot id, or disp id for methods.
     traitId: []u32 = &.{},
     /// Type multiname (slots), class index or method index.
     traitIndex: []u32 = &.{},
     /// Constant pool index of a slot's default value; 0 if none.
     traitValue: []u32 = &.{},
-    traitValueKind: []u8 = &.{},
+    traitValueKind: []C.Constant = &.{},
     traitMetadataStart: []u32 = &.{},
     traitMetadata: []u32 = &.{},
     instanceTraitStart: []u32 = &.{},
@@ -279,8 +258,8 @@ pub const Abc = struct {
     }
 
     /// Trait `t`'s kind.
-    pub inline fn traitKind(self: *const Abc, t: u32) TraitKind {
-        return .of(self.traitTag[t]);
+    pub inline fn traitKind(self: *const Abc, t: u32) C.TraitKind {
+        return self.traitTag[t].kind;
     }
 
     pub inline fn bodyCount(self: *const Abc) u32 {

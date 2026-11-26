@@ -6,7 +6,6 @@ const std = @import("std");
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;
-const TraitKind = abc_.TraitKind;
 const errors = @import("errors.zig");
 const Diagnostics = errors.Diagnostics;
 const Rejected = errors.Rejected;
@@ -37,19 +36,19 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
             return diag.fail(nameError);
         }
 
-        const tag: u8 = @truncate(r.u8_());
-        const kind: TraitKind = .of(tag);
+        const tag = r.byteAs(C.TraitTag);
+        const kind = tag.kind;
         var id: u32 = 0;
         var index: u32 = 0;
         var value: u32 = 0;
-        var valueKind: u8 = 0;
+        var valueKind: C.Constant = @fromBackingInt(@intCast(0));
         switch (kind) {
             .slot, .constant => {
                 id = r.u30_();
                 index = r.u30_();
                 value = r.u30_();
                 if (value != 0) {
-                    valueKind = @truncate(r.u8_());
+                    valueKind = r.byteAs(C.Constant);
                 }
             },
             .class, .method, .getter, .setter => {
@@ -60,7 +59,7 @@ pub fn readTraits(abc: *Abc, lists: *Lists, r: *Reader, owner: i32, classesDefin
         }
 
         lists.push("traitMetadataStart", lists.len("traitMetadata"));
-        if (tag & C.ATTR_Metadata != 0) {
+        if (tag.metadata) {
             const metadataCount = r.u30_();
             for (0..metadataCount) |_| {
                 const metadata = r.u30_();

@@ -70,8 +70,8 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
     var i = traits.first.get(t);
     while (i < traits.end.get(t)) : (i += 1) {
         const tag = abc.traitTag[i];
-        const kind = tag & 0x0f;
-        if (kind == C.TRAIT_Slot or kind == C.TRAIT_Const or kind == C.TRAIT_Class) {
+        const kind = tag.kind;
+        if (kind.bindsSlot()) {
             const id = abc.traitId[i];
             var slot: u32 = undefined;
             if (id == 0 or !early) {
@@ -91,7 +91,7 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
             }
 
             var ty: i32 = undefined;
-            if (kind == C.TRAIT_Class) {
+            if (kind == .class) {
                 ty = dom.classStatic.get(dom.classStart.get(index) + abc.traitIndex[i]);
             } else {
                 ty = try resolveTypeId(dom, index, abc.traitIndex[i], false);
@@ -102,20 +102,20 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
 
             traits.slotType.set(slots + slot, ty);
             traits.slotSet.set(slots + slot, 1);
-        } else if (kind == C.TRAIT_Method or kind == C.TRAIT_Getter or kind == C.TRAIT_Setter) {
+        } else if (kind.bindsMethod()) {
             traits.readName(dom, index, i);
             const b = traits.own(t, traits.nameNs, traits.nameId, traits.nameVersion);
             if (b == traits_.BIND_None) {
                 continue;
             }
 
-            const d = (b >> 3) + @intFromBool(kind == C.TRAIT_Setter);
+            const d = (b >> 3) + @intFromBool(kind == .setter);
             const baseBinding = overridden(traits, t, traits.nameNs, traits.nameNsVersion, traits.nameId, tag);
             if (baseBinding > 0) {
                 const bb: u32 = @intCast(baseBinding);
                 if ((bb & 7) == traits_.BKIND_Method or
-                    (hasGetter(bb) and kind == C.TRAIT_Getter) or
-                    (hasSetter(bb) and kind == C.TRAIT_Setter))
+                    (hasGetter(bb) and kind == .getter) or
+                    (hasSetter(bb) and kind == .setter))
                 {
                     const virt = traits.dispatch.get(traits.dispatchStart.get(@intCast(base)) + d);
                     if (virt >= 0 and traits.methodFinal.get(@intCast(virt)) != 0) {
@@ -141,8 +141,8 @@ pub fn checkInitialValues(traits: *const TraitsTable, dom: *const Domain, t: u32
     var next = if (base >= 0) traits.slotCount.get(@intCast(base)) else 0;
     var i = traits.first.get(t);
     while (i < traits.end.get(t)) : (i += 1) {
-        const kind = abc.traitTag[i] & 0x0f;
-        if (kind != C.TRAIT_Slot and kind != C.TRAIT_Const and kind != C.TRAIT_Class) {
+        const kind = abc.traitTag[i].kind;
+        if (!kind.bindsSlot()) {
             continue;
         }
 
@@ -159,7 +159,7 @@ pub fn checkInitialValues(traits: *const TraitsTable, dom: *const Domain, t: u32
         }
 
         const ty = traits.slotType.get(slots + slot - 1);
-        const value = if (kind == C.TRAIT_Class) 0 else abc.traitValue[i];
+        const value = if (kind == .class) 0 else abc.traitValue[i];
         const err = dom.checkDefault(index, value, abc.traitValueKind[i], ty);
         if (err != 0) {
             return err;

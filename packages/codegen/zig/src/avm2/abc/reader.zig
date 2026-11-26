@@ -35,6 +35,16 @@ pub const Reader = struct {
         return self.data[p];
     }
 
+    /// A byte as T: a kind, which may be one T does not name (a
+    /// non-exhaustive enum), or flags (a packed struct of a byte).
+    pub inline fn byteAs(self: *Reader, comptime T: type) T {
+        const b: u8 = @truncate(self.u8_());
+        return switch (@typeInfo(T)) {
+            .@"enum" => @fromBackingInt(@intCast(b)),
+            else => @bitCast(b),
+        };
+    }
+
     pub inline fn u16_(self: *Reader) u32 {
         const p = self.pos;
         if (p + 2 > self.end) {

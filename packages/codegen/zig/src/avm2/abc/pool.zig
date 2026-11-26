@@ -85,7 +85,7 @@ pub const ConstantPool = struct {
     /// Each string's bytes in the ABC.
     strings: []Range = &.{},
 
-    nsKind: []u8 = &.{},
+    nsKind: []C.Constant = &.{},
     /// String index of the namespace URI; 0 if it has none.
     nsName: []u32 = &.{},
 
@@ -93,7 +93,7 @@ pub const ConstantPool = struct {
     nsSetStart: []u32 = &.{},
     nsSetMembers: []u32 = &.{},
 
-    mnKind: []u8 = &.{},
+    mnKind: []C.Constant = &.{},
     /// Namespace (QName), namespace set (Multiname) or base type (TypeName).
     mnA: []u32 = &.{},
     /// Name string (QName, RTQName, Multiname) or type parameter (TypeName).
@@ -107,10 +107,10 @@ pub const ConstantPool = struct {
             .doubles = try memory.allocZeroed(gpa, f64, 1),
             .floats = try memory.allocZeroed(gpa, f32, 1),
             .strings = try memory.allocZeroed(gpa, Range, 1),
-            .nsKind = try memory.allocZeroed(gpa, u8, 1),
+            .nsKind = try memory.allocZeroed(gpa, C.Constant, 1),
             .nsName = try memory.allocZeroed(gpa, u32, 1),
             .nsSetStart = try memory.allocZeroed(gpa, u32, 2),
-            .mnKind = try memory.allocZeroed(gpa, u8, 1),
+            .mnKind = try memory.allocZeroed(gpa, C.Constant, 1),
             .mnA = try memory.allocZeroed(gpa, u32, 1),
             .mnB = try memory.allocZeroed(gpa, u32, 1),
         };
@@ -121,12 +121,12 @@ pub const ConstantPool = struct {
         const a = self.mnA[i];
         const b = self.mnB[i];
         return switch (self.mnKind[i]) {
-            C.CONSTANT_Qname, C.CONSTANT_QnameA => .{ .qname = .{ .ns = a, .name = b, .attribute = self.mnKind[i] == C.CONSTANT_QnameA } },
-            C.CONSTANT_RTQname, C.CONSTANT_RTQnameA => .{ .rtqname = .{ .name = b, .attribute = self.mnKind[i] == C.CONSTANT_RTQnameA } },
-            C.CONSTANT_RTQnameL, C.CONSTANT_RTQnameLA => .{ .rtqname_late = .{ .attribute = self.mnKind[i] == C.CONSTANT_RTQnameLA } },
-            C.CONSTANT_Multiname, C.CONSTANT_MultinameA => .{ .multiname = .{ .set = a, .name = b, .attribute = self.mnKind[i] == C.CONSTANT_MultinameA } },
-            C.CONSTANT_MultinameL, C.CONSTANT_MultinameLA => .{ .multiname_late = .{ .set = a, .attribute = self.mnKind[i] == C.CONSTANT_MultinameLA } },
-            C.CONSTANT_TypeName => .{ .type_name = .{ .base = a, .param = b } },
+            .qname, .qname_a => .{ .qname = .{ .ns = a, .name = b, .attribute = self.mnKind[i] == .qname_a } },
+            .rtqname, .rtqname_a => .{ .rtqname = .{ .name = b, .attribute = self.mnKind[i] == .rtqname_a } },
+            .rtqname_l, .rtqname_la => .{ .rtqname_late = .{ .attribute = self.mnKind[i] == .rtqname_la } },
+            .multiname, .multiname_a => .{ .multiname = .{ .set = a, .name = b, .attribute = self.mnKind[i] == .multiname_a } },
+            .multiname_l, .multiname_la => .{ .multiname_late = .{ .set = a, .attribute = self.mnKind[i] == .multiname_la } },
+            .type_name => .{ .type_name = .{ .base = a, .param = b } },
             else => .none,
         };
     }
@@ -144,21 +144,21 @@ pub const ConstantPool = struct {
     /// default value may be of that kind, OutOfRange where `index` is past
     /// its table. True, false and null are their kind alone; their index
     /// is not read.
-    pub fn value(self: *const ConstantPool, kind: u8, index: u32) ValueError!Value {
+    pub fn value(self: *const ConstantPool, kind: C.Constant, index: u32) ValueError!Value {
         const count: usize = switch (kind) {
-            C.CONSTANT_Int => self.ints.len,
-            C.CONSTANT_UInt => self.uints.len,
-            C.CONSTANT_Double => self.doubles.len,
-            C.CONSTANT_Float => self.floats.len,
-            C.CONSTANT_Utf8 => self.strings.len,
-            C.CONSTANT_True, C.CONSTANT_False, C.CONSTANT_Null => std.math.maxInt(usize),
-            C.CONSTANT_Namespace,
-            C.CONSTANT_PackageNamespace,
-            C.CONSTANT_PackageInternalNs,
-            C.CONSTANT_ProtectedNamespace,
-            C.CONSTANT_ExplicitNamespace,
-            C.CONSTANT_StaticProtectedNs,
-            C.CONSTANT_PrivateNs,
+            .int => self.ints.len,
+            .uint => self.uints.len,
+            .double => self.doubles.len,
+            .float => self.floats.len,
+            .utf8 => self.strings.len,
+            .true, .false, .null => std.math.maxInt(usize),
+            .namespace,
+            .package_namespace,
+            .package_internal_ns,
+            .protected_namespace,
+            .explicit_namespace,
+            .static_protected_ns,
+            .private_ns,
             => self.nsKind.len,
             else => return error.IllegalKind,
         };
@@ -167,14 +167,14 @@ pub const ConstantPool = struct {
         }
 
         return switch (kind) {
-            C.CONSTANT_Int => .{ .int = self.ints[index] },
-            C.CONSTANT_UInt => .{ .uint = self.uints[index] },
-            C.CONSTANT_Double => .{ .double = self.doubles[index] },
-            C.CONSTANT_Float => .{ .float = self.floats[index] },
-            C.CONSTANT_Utf8 => .{ .string = index },
-            C.CONSTANT_True => .{ .boolean = true },
-            C.CONSTANT_False => .{ .boolean = false },
-            C.CONSTANT_Null => .null,
+            .int => .{ .int = self.ints[index] },
+            .uint => .{ .uint = self.uints[index] },
+            .double => .{ .double = self.doubles[index] },
+            .float => .{ .float = self.floats[index] },
+            .utf8 => .{ .string = index },
+            .true => .{ .boolean = true },
+            .false => .{ .boolean = false },
+            .null => .null,
             else => .{ .namespace = index },
         };
     }
@@ -269,11 +269,11 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
     }
 
     const nsCount = @max(readCount(r), 1);
-    pool.nsKind = try sized(gpa, u8, pool.nsKind, nsCount);
+    pool.nsKind = try sized(gpa, C.Constant, pool.nsKind, nsCount);
     pool.nsName = try sized(gpa, u32, pool.nsName, nsCount);
     for (1..nsCount) |i| {
-        const kind: u8 = @truncate(r.u8_());
-        if (!isNamespaceKind(kind)) {
+        const kind = r.byteAs(C.Constant);
+        if (!kind.isNamespace()) {
             return diag.fail(if (r.failed) C.kCorruptABCError else C.kCpoolEntryWrongTypeError);
         }
 
@@ -309,30 +309,30 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
     pool.nsSetMembers = try gpa.dupe(u32, members.items);
 
     const mnCount = @max(readCount(r), 1);
-    pool.mnKind = try sized(gpa, u8, pool.mnKind, mnCount);
+    pool.mnKind = try sized(gpa, C.Constant, pool.mnKind, mnCount);
     pool.mnA = try sized(gpa, u32, pool.mnA, mnCount);
     pool.mnB = try sized(gpa, u32, pool.mnB, mnCount);
     for (1..mnCount) |i| {
-        const kind: u8 = @truncate(r.u8_());
+        const kind = r.byteAs(C.Constant);
         var a: u32 = 0;
         var b: u32 = 0;
         switch (kind) {
-            C.CONSTANT_Qname, C.CONSTANT_QnameA => {
+            .qname, .qname_a => {
                 a = r.u30_();
                 b = r.u30_();
                 if (a >= nsCount or b >= stringCount) {
                     return diag.fail(C.kCpoolIndexRangeError);
                 }
             },
-            C.CONSTANT_RTQname, C.CONSTANT_RTQnameA => {
+            .rtqname, .rtqname_a => {
                 b = r.u30_();
                 if (b >= stringCount) {
                     return diag.fail(C.kCpoolIndexRangeError);
                 }
             },
             // No operands: both come from the stack.
-            C.CONSTANT_RTQnameL, C.CONSTANT_RTQnameLA => {},
-            C.CONSTANT_Multiname, C.CONSTANT_MultinameA => {
+            .rtqname_l, .rtqname_la => {},
+            .multiname, .multiname_a => {
                 b = r.u30_();
                 if (b >= stringCount) {
                     return diag.fail(C.kCpoolIndexRangeError);
@@ -343,13 +343,13 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
                     return diag.fail(C.kCpoolIndexRangeError);
                 }
             },
-            C.CONSTANT_MultinameL, C.CONSTANT_MultinameLA => {
+            .multiname_l, .multiname_la => {
                 a = r.u30_();
                 if (a == 0 or a >= nsSetCount) {
                     return diag.fail(C.kCpoolIndexRangeError);
                 }
             },
-            C.CONSTANT_TypeName => {
+            .type_name => {
                 // Forward references are legal; the base kind is checked below.
                 a = r.u30_();
                 if (a == 0 or a >= mnCount) {
@@ -395,20 +395,6 @@ fn readCount(r: *Reader) u32 {
     return count;
 }
 
-fn isNamespaceKind(kind: u8) bool {
-    return switch (kind) {
-        C.CONSTANT_Namespace,
-        C.CONSTANT_PackageNamespace,
-        C.CONSTANT_PackageInternalNs,
-        C.CONSTANT_ProtectedNamespace,
-        C.CONSTANT_ExplicitNamespace,
-        C.CONSTANT_StaticProtectedNs,
-        C.CONSTANT_PrivateNs,
-        => true,
-        else => false,
-    };
-}
-
 /// A TypeName may not parameterize another TypeName, and chains like
 /// Vector.<Vector.<T>> may not loop. Stamping visited entries with the
 /// TypeName being checked avoids clearing a set per TypeName.
@@ -416,18 +402,18 @@ fn typeNamesAreAcyclic(gpa: Allocator, pool: *const ConstantPool) Allocator.Erro
     const count = pool.multinameCount();
     const stamp = try memory.allocZeroed(gpa, u32, count);
     for (1..@max(count, 1)) |i| {
-        if (pool.mnKind[i] != C.CONSTANT_TypeName) {
+        if (pool.mnKind[i] != .type_name) {
             continue;
         }
 
-        if (pool.mnKind[pool.mnA[i]] == C.CONSTANT_TypeName) {
+        if (pool.mnKind[pool.mnA[i]] == .type_name) {
             return false;
         }
 
         var param = pool.mnB[i];
         while (param != 0) {
             stamp[param] = @intCast(i);
-            if (pool.mnKind[param] != C.CONSTANT_TypeName) {
+            if (pool.mnKind[param] != .type_name) {
                 break;
             }
 
