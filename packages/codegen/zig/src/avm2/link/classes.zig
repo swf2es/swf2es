@@ -1,5 +1,5 @@
-// Linking an ABC's classes, as avmplus' AbcParser::parseInstanceInfos
-// (assembly/avm2/link/classes.ts): each to its base class and interfaces,
+// Linking an ABC's classes, as avmplus' AbcParser::parseInstanceInfos:
+// each to its base class and interfaces,
 // and the traits of its instances, class objects, scripts and activations
 // laid out, their methods bound to them; with the first builtin ABC, the
 // classes and types the rules treat specially.
@@ -13,9 +13,15 @@ const Domain = domain_.Domain;
 const traits_ = @import("traits.zig");
 const Scope = traits_.Scope;
 const typenames = @import("typenames.zig");
+const errors = @import("../abc/errors.zig");
+const Diagnostics = errors.Diagnostics;
+/// How linking stops: the ABC rejected with a VerifyError, which the
+/// Diagnostics holds, or memory run out.
+pub const Error = errors.Error;
 
-/// Link ABC `index`'s classes to their bases and interfaces; false after recording the error.
-pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
+/// Link ABC `index`'s classes to their bases and interfaces; Error.Verify
+/// with the first VerifyError, as avmplus stops at its first throw.
+pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
     const gpa = dom.gpa;
     const abc = dom.abcs.get(index);
     const first = dom.classAbc.len;
@@ -39,7 +45,7 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
         if (baseName != 0) {
             const base = typenames.resolveType(dom, index, baseName);
             if (base < 0) {
-                return abc.fail(-base);
+                return diag.fail(-base);
             }
 
             const b: u32 = @intCast(base);
@@ -47,11 +53,11 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
                 base == dom.classClass or
                 (base == dom.functionClass and !abc.builtin))
             {
-                return abc.fail(C.kCannotExtendFinalClass);
+                return diag.fail(C.kCannotExtendFinalClass);
             }
 
             if (dom.classFlags.get(b).interface) {
-                return abc.fail(C.kCannotExtendError);
+                return diag.fail(C.kCannotExtendError);
             }
 
             dom.classBase.set(id, base);
@@ -64,19 +70,19 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
             const t = typenames.resolveType(dom, index, abc.interfaces[j]);
             if (t < 0) {
                 dom.traits.interfaceList.truncate(interfaces);
-                return abc.fail(-t);
+                return diag.fail(-t);
             }
 
             if (!dom.classFlags.get(@intCast(t)).interface) {
                 dom.traits.interfaceList.truncate(interfaces);
-                return abc.fail(C.kCannotImplementError);
+                return diag.fail(C.kCannotImplementError);
             }
 
             try dom.traits.interfaceList.push(gpa, @bitCast(dom.classTraits.get(@intCast(t))));
         }
 
         if (flags.interface and baseName != 0) {
-            return abc.fail(C.kCannotExtendError);
+            return diag.fail(C.kCannotExtendError);
         }
 
         // As avmplus' AvmCore: the first builtin class without a base is Object.
@@ -93,7 +99,7 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
         dom.classTraits.set(id, @intCast(t));
         const err = try layout(&dom.traits, dom, t);
         if (err != 0) {
-            return abc.fail(err);
+            return diag.fail(err);
         }
 
         try bindMethods(dom, t, @bitCast(abc.instanceInit[i]), flags.final);
@@ -131,11 +137,13 @@ pub fn link(dom: *Domain, index: u32) Allocator.Error!bool {
         dom.apiName = try dom.internText("API");
     }
 
-    return try layoutStatics(dom, index) and try layoutScripts(dom, index) and try layoutActivations(dom, index);
+    try layoutStatics(dom, index, diag);
+    try layoutScripts(dom, index, diag);
+    try layoutActivations(dom, index, diag);
 }
 
 /// Lay out each class object's traits, whose base is Class.
-fn layoutStatics(dom: *Domain, index: u32) Allocator.Error!bool {
+fn layoutStatics(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
     const abc = dom.abcs.get(index);
     const first = dom.classStart.get(index);
     const classTraits = if (dom.classClass >= 0) dom.classTraits.get(@intCast(dom.classClass)) else -1;
@@ -145,17 +153,15 @@ fn layoutStatics(dom: *Domain, index: u32) Allocator.Error!bool {
         dom.classStatic.set(first + i, @intCast(t));
         const err = try layout(&dom.traits, dom, t);
         if (err != 0) {
-            return abc.fail(err);
+            return diag.fail(err);
         }
 
         try bindMethods(dom, t, @bitCast(abc.classInit[i]), false);
     }
-
-    return true;
 }
 
 /// Lay out each script's global object traits, whose base is Object.
-fn layoutScripts(dom: *Domain, index: u32) Allocator.Error!bool {
+fn layoutScripts(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
     const gpa = dom.gpa;
     const abc = dom.abcs.get(index);
     const objectTraits = if (dom.objectClass >= 0) dom.classTraits.get(@intCast(dom.objectClass)) else -1;
@@ -170,17 +176,15 @@ fn layoutScripts(dom: *Domain, index: u32) Allocator.Error!bool {
         dom.traits.scope.set(t, scope);
         const err = try layout(&dom.traits, dom, t);
         if (err != 0) {
-            return abc.fail(err);
+            return diag.fail(err);
         }
 
         try bindMethods(dom, t, @bitCast(abc.scriptInit[s]), false);
     }
-
-    return true;
 }
 
 /// Lay out activation traits, for bodies that need an activation or declare traits.
-fn layoutActivations(dom: *Domain, index: u32) Allocator.Error!bool {
+fn layoutActivations(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
     const gpa = dom.gpa;
     const abc = dom.abcs.get(index);
     const bodies = try memory.allocZeroed(gpa, i32, abc.bodyCount());
@@ -195,7 +199,7 @@ fn layoutActivations(dom: *Domain, index: u32) Allocator.Error!bool {
             bodies[b] = @intCast(t);
             const err = try layout(&dom.traits, dom, t);
             if (err != 0) {
-                return abc.fail(err);
+                return diag.fail(err);
             }
 
             try bindMethods(dom, t, -1, false);
@@ -203,7 +207,6 @@ fn layoutActivations(dom: *Domain, index: u32) Allocator.Error!bool {
     }
 
     try dom.bodyTraits.push(gpa, bodies);
-    return true;
 }
 
 /// As MethodInfo::makeMethodOf, after t's members bind: its methods,

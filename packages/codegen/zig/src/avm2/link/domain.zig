@@ -17,6 +17,7 @@ const memory = @import("../../memory.zig");
 const Rows = memory.Rows;
 const output = @import("../../output.zig");
 const Abc = @import("../abc/abc.zig").Abc;
+const Diagnostics = @import("../abc/errors.zig").Diagnostics;
 const C = @import("../abc/constants.zig");
 const ConstantPool = @import("../abc/pool.zig").ConstantPool;
 const BodyDecoder = @import("../abc/code.zig").BodyDecoder;
@@ -633,7 +634,17 @@ pub const Domain = struct {
         const classCount = self.classAbc.len;
         const typeCount = self.typeNs.len;
         const builtins = self.saveBuiltins();
-        if (!try classes.link(self, index)) {
+        var diag: Diagnostics = .{};
+        const linked = if (classes.link(self, index, &diag)) true else |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.Verify => false,
+        };
+        if (!linked) {
+            // Recorded, not unwound: the ABC keeps its error for its readers.
+            if (abc.@"error" == 0) {
+                abc.@"error" = diag.code;
+            }
+
             self.abcs.truncate(index);
             self.abcBase.truncate(index);
             self.abcBuffer.truncate(index);
