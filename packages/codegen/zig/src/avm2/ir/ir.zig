@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ops = @import("../abc/opcodes.zig");
 const TypeId = @import("../link/traits.zig").TypeId;
+const Flags = @import("../abc/code.zig").Flags;
 
 /// The IR's own instructions, beyond the ABC's opcodes: their names in Op
 /// and their numbers, from 0x100. The `.ir_*` tags used across emit/ are
@@ -217,7 +218,7 @@ pub const Ir = struct {
     /// Start a block at ABC offset `pc` with the next instruction, entered with
     /// stack and scope depths `stack` and `scope` and the frame values `types`
     /// and `flags` (1: not null, 2: with scope).
-    pub fn addBlock(self: *Ir, pc: u32, stack: u32, scope: u32, types: []const TypeId, flags: []const u8) Allocator.Error!void {
+    pub fn addBlock(self: *Ir, pc: u32, stack: u32, scope: u32, types: []const TypeId, flags: []const Flags) Allocator.Error!void {
         const gpa = self.gpa;
         const k = self.blockCount;
         if (k == self.blockFirst.len) {
@@ -243,7 +244,8 @@ pub const Ir = struct {
 
         for (0..size) |i| {
             self.entryType[used + i] = typeColumn(types[i]);
-            self.entryFlags[used + i] = flags[i] & 3;
+            // Not null and with, the first two bits.
+            self.entryFlags[used + i] = @as(u8, @bitCast(flags[i])) & 3;
         }
 
         self.blockFirst[k] = self.count;

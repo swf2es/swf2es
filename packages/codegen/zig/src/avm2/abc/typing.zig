@@ -14,15 +14,13 @@ const ir_ = @import("../ir/ir.zig");
 const types = @import("../link/types.zig");
 const code_ = @import("code.zig");
 const BodyDecoder = code_.BodyDecoder;
-const KNOWN = code_.KNOWN;
-const NOT_NULL = code_.NOT_NULL;
-const WITH = code_.WITH;
+const Flags = code_.Flags;
 const C = @import("constants.zig");
 const p = @import("properties.zig");
 const Op = @import("opcodes.zig").Op;
 
-fn notNullIf(bd: *BodyDecoder, ty: TypeId) u8 {
-    return if (bd.domain.typeNotNull(ty)) NOT_NULL else 0;
+fn notNullIf(bd: *BodyDecoder, ty: TypeId) Flags {
+    return .{ .not_null = bd.domain.typeNotNull(ty) };
 }
 
 /// The type effects and type checks of the instruction at `pc`, as in
@@ -35,15 +33,15 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         .lookupswitch => return bd.peekType(1, domain.intType),
         .pushnull => return bd.pushNullish(domain.nullType),
         .pushundefined => return bd.pushNullish(domain.voidType),
-        .pushtrue, .pushfalse => return bd.push(domain.booleanType, NOT_NULL),
-        .pushnan, .pushdouble => return bd.push(domain.numberType, NOT_NULL),
-        .pushfloat => return if (domain.floatType == .any) bd.fail(C.kClassNotFoundError) else bd.push(domain.floatType, NOT_NULL),
-        .pushbyte, .pushshort, .pushint => return bd.push(domain.intType, NOT_NULL),
-        .pushuint => return bd.push(domain.uintType, NOT_NULL),
-        .pushstring => return bd.push(domain.stringType, NOT_NULL),
-        .pushnamespace => return bd.push(domain.namespaceType, NOT_NULL),
+        .pushtrue, .pushfalse => return bd.push(domain.booleanType, .{ .not_null = true }),
+        .pushnan, .pushdouble => return bd.push(domain.numberType, .{ .not_null = true }),
+        .pushfloat => return if (domain.floatType == .any) bd.fail(C.kClassNotFoundError) else bd.push(domain.floatType, .{ .not_null = true }),
+        .pushbyte, .pushshort, .pushint => return bd.push(domain.intType, .{ .not_null = true }),
+        .pushuint => return bd.push(domain.uintType, .{ .not_null = true }),
+        .pushstring => return bd.push(domain.stringType, .{ .not_null = true }),
+        .pushnamespace => return bd.push(domain.namespaceType, .{ .not_null = true }),
         .setlocal => {
-            bd.setValue(a, bd.typeOf(top), bd.valueFlags[top] & KNOWN);
+            bd.setValue(a, bd.typeOf(top), bd.valueFlags[top].known());
             return true;
         },
         .getlocal => return bd.pushLocal(a),
@@ -53,7 +51,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             }
 
             bd.rowC = @bitCast(domain.methodStart.get(bd.index) + a);
-            return bd.push(domain.functionType, NOT_NULL);
+            return bd.push(domain.functionType, .{ .not_null = true });
         },
         .getlex => {
             // The scope object found is the receiver of the get.
@@ -73,7 +71,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             }
 
             try bd.coerce(top, domain.classInstanceType());
-            bd.setValue(top, domain.staticTraitsOf(bd.index, a), NOT_NULL);
+            bd.setValue(top, domain.staticTraitsOf(bd.index, a), .{ .not_null = true });
             bd.rowC = ir_.typeColumn(domain.staticTraitsOf(bd.index, a));
             return true;
         },
@@ -90,7 +88,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             }
 
             try bd.checkNull(bd.peek(n));
-            return bd.popPush(n, .any, 0);
+            return bd.popPush(n, .any, .none);
         },
         .checkfilter, .convert_o => {
             try bd.checkNull(top);
@@ -103,7 +101,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             }
 
             try bd.checkNull(bd.peek(n));
-            return bd.popPush(n, domain.booleanType, NOT_NULL);
+            return bd.popPush(n, domain.booleanType, .{ .not_null = true });
         },
         .astype => {
             const t = try p.typeName(bd, a);
@@ -190,15 +188,15 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
                 return false;
             }
 
-            return bd.popPush(1, domain.booleanType, NOT_NULL);
+            return bd.popPush(1, domain.booleanType, .{ .not_null = true });
         },
-        .istypelate => return bd.popPush(2, domain.booleanType, NOT_NULL),
-        .convert_s, .esc_xelem, .esc_xattr, .typeof => return bd.popPush(1, domain.stringType, NOT_NULL),
+        .istypelate => return bd.popPush(2, domain.booleanType, .{ .not_null = true }),
+        .convert_s, .esc_xelem, .esc_xattr, .typeof => return bd.popPush(1, domain.stringType, .{ .not_null = true }),
         .callstatic => return p.callStatic(bd, a, b),
-        .call => return bd.popPush(a +% 2, .any, 0),
+        .call => return bd.popPush(a +% 2, .any, .none),
         .construct => {
             const t = domain.instanceTraitsOf(bd.typeOf(bd.peek(a +% 1)));
-            return bd.popPush(a +% 1, t, NOT_NULL);
+            return bd.popPush(a +% 1, t, .{ .not_null = true });
         },
         .callmethod => {
             // Always rejected, as avmplus has done since Flash Player 9.
@@ -230,7 +228,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             try bd.checkNull(obj);
             bd.rowC = ir_.typeColumn(ctraits);
             const itraits = domain.instanceTraitsOf(ctraits);
-            const pushed = bd.popPush(n, itraits, if (itraits == .any) 0 else NOT_NULL);
+            const pushed = bd.popPush(n, itraits, .{ .not_null = itraits != .any });
             // A name bound to a slot, as `new` of a script's class names one:
             // what the slot holds, constructed, with no lookup by name.
             const kind = found.kind;
@@ -247,7 +245,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
 
             return pushed;
         },
-        .applytype => return bd.popPush(a +% 1, .any, NOT_NULL),
+        .applytype => return bd.popPush(a +% 1, .any, .{ .not_null = true }),
         .callsuper, .callsupervoid => return p.callSuper(bd, opcode, a, b),
         .getsuper => return p.getSuper(bd, a),
         .setsuper => {
@@ -287,9 +285,9 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
                 }
             }
 
-            return bd.popPush(2 *% a, domain.objectType(), NOT_NULL);
+            return bd.popPush(2 *% a, domain.objectType(), .{ .not_null = true });
         },
-        .newarray => return bd.popPush(a, domain.arrayType, NOT_NULL),
+        .newarray => return bd.popPush(a, domain.arrayType, .{ .not_null = true }),
         .pushscope, .pushwith => {
             const ty = bd.typeOf(top);
             const outer = bd.outer;
@@ -299,7 +297,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
                 }
             }
 
-            bd.setValue(bd.localCount + scope, ty, if (opcode == .pushwith) NOT_NULL | WITH else NOT_NULL);
+            bd.setValue(bd.localCount + scope, ty, .{ .not_null = true, .with = opcode == .pushwith });
             return true;
         },
         .newactivation => {
@@ -311,12 +309,12 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
                 return bd.fail(err);
             }
 
-            return bd.push(t, NOT_NULL);
+            return bd.push(t, .{ .not_null = true });
         },
-        .newcatch => return bd.push(bd.handlerScope[a], NOT_NULL),
+        .newcatch => return bd.push(bd.handlerScope[a], .{ .not_null = true }),
         .getscopeobject => {
             const i = bd.localCount + bd.byteAt(pc + 1);
-            return bd.push(bd.typeOf(i), bd.valueFlags[i] & NOT_NULL);
+            return bd.push(bd.typeOf(i), .{ .not_null = bd.valueFlags[i].not_null });
         },
         .getouterscope => {
             const outer = bd.outer;
@@ -329,7 +327,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
                 return bd.fail(C.kGetScopeObjectBoundsError);
             }
 
-            return bd.push(outer.types[a], NOT_NULL);
+            return bd.push(outer.types[a], .{ .not_null = true });
         },
         .getglobalscope => return p.globalScope(bd) != TypeId.failed,
         .getglobalslot => {
@@ -374,7 +372,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         },
         .dup => {
             const i = bd.stackBase() + bd.stack;
-            _ = bd.push(bd.typeOf(top), bd.valueFlags[top] & KNOWN);
+            _ = bd.push(bd.typeOf(top), bd.valueFlags[top].known());
             bd.origin[i] = bd.origin[top];
             bd.originWrite[i] = bd.originWrite[top];
             return true;
@@ -382,8 +380,8 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         .swap => {
             const below = bd.peek(2);
             const ty = bd.typeOf(top);
-            const flags = bd.valueFlags[top] & KNOWN;
-            bd.setValue(top, bd.typeOf(below), bd.valueFlags[below] & KNOWN);
+            const flags = bd.valueFlags[top].known();
+            bd.setValue(top, bd.typeOf(below), bd.valueFlags[below].known());
             bd.setValue(below, ty, flags);
             return true;
         },
@@ -400,16 +398,16 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
                 }
             }
 
-            return bd.popPush(2, domain.booleanType, NOT_NULL);
+            return bd.popPush(2, domain.booleanType, .{ .not_null = true });
         },
         .in => {
             try bd.checkNull(top);
-            return bd.popPush(2, domain.booleanType, NOT_NULL);
+            return bd.popPush(2, domain.booleanType, .{ .not_null = true });
         },
-        .equals, .strictequals, .instanceof => return bd.popPush(2, domain.booleanType, NOT_NULL),
+        .equals, .strictequals, .instanceof => return bd.popPush(2, domain.booleanType, .{ .not_null = true }),
         .not => {
             try bd.coerce(top, domain.booleanType);
-            return bd.popPush(1, domain.booleanType, NOT_NULL);
+            return bd.popPush(1, domain.booleanType, .{ .not_null = true });
         },
         .add => {
             const lhs = bd.peek(2);
@@ -417,36 +415,36 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
             const rt = bd.typeOf(top);
             const string = domain.stringType;
             if ((lt == string and bd.isNotNull(lhs)) or (rt == string and bd.isNotNull(top))) {
-                return bd.popPush(2, string, NOT_NULL);
+                return bd.popPush(2, string, .{ .not_null = true });
             }
 
             if (lt.isBuiltin(domain.floatType) and rt == domain.floatType) {
-                return bd.popPush(2, domain.floatType, NOT_NULL);
+                return bd.popPush(2, domain.floatType, .{ .not_null = true });
             }
 
             if (types.isNumeric(domain, lt) and types.isNumeric(domain, rt)) {
-                return bd.popPush(2, domain.numberType, NOT_NULL);
+                return bd.popPush(2, domain.numberType, .{ .not_null = true });
             }
 
             // A number or a string, but not null either way.
-            return bd.popPush(2, domain.objectType(), NOT_NULL);
+            return bd.popPush(2, domain.objectType(), .{ .not_null = true });
         },
         .modulo, .subtract, .divide, .multiply => {
             if (bd.abc.hasFloatSupport()) {
                 const lt = numericType(bd, bd.typeOf(bd.peek(2)));
                 const rt = numericType(bd, bd.typeOf(top));
                 if (lt == domain.floatType and rt == domain.floatType) {
-                    return bd.popPush(2, domain.floatType, NOT_NULL);
+                    return bd.popPush(2, domain.floatType, .{ .not_null = true });
                 }
 
                 if (lt == .any or rt == .any) {
-                    return bd.popPush(2, .any, NOT_NULL);
+                    return bd.popPush(2, .any, .{ .not_null = true });
                 }
             }
 
             try bd.coerce(bd.peek(2), domain.numberType);
             try bd.coerce(top, domain.numberType);
-            return bd.popPush(2, domain.numberType, NOT_NULL);
+            return bd.popPush(2, domain.numberType, .{ .not_null = true });
         },
         .negate, .increment, .decrement => {
             if (bd.abc.hasFloatSupport()) {
@@ -467,30 +465,30 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
         .add_i, .subtract_i, .multiply_i, .bitand, .bitor, .bitxor, .lshift, .rshift => {
             try bd.coerce(bd.peek(2), domain.intType);
             try bd.coerce(top, domain.intType);
-            return bd.popPush(2, domain.intType, NOT_NULL);
+            return bd.popPush(2, domain.intType, .{ .not_null = true });
         },
         .urshift => {
             try bd.coerce(bd.peek(2), domain.intType);
             try bd.coerce(top, domain.intType);
-            return bd.popPush(2, domain.uintType, NOT_NULL);
+            return bd.popPush(2, domain.uintType, .{ .not_null = true });
         },
-        .nextvalue, .nextname => return bd.peekType(1, domain.intType) and bd.popPush(2, .any, 0),
-        .hasnext => return bd.peekType(1, domain.intType) and bd.popPush(2, domain.intType, NOT_NULL),
+        .nextvalue, .nextname => return bd.peekType(1, domain.intType) and bd.popPush(2, .any, .none),
+        .hasnext => return bd.peekType(1, domain.intType) and bd.popPush(2, domain.intType, .{ .not_null = true }),
         .hasnext2 => {
             if (bd.typeOf(b) != domain.intType) {
                 return bd.fail(C.kIllegalOperandTypeError);
             }
 
-            bd.setValue(a, .any, 0);
-            return bd.push(domain.booleanType, NOT_NULL);
+            bd.setValue(a, .any, .none);
+            return bd.push(domain.booleanType, .{ .not_null = true });
         },
         .sxi1, .sxi8, .sxi16, .li8, .li16, .li32 => {
             try bd.coerce(top, domain.intType);
-            return bd.popPush(1, domain.intType, NOT_NULL);
+            return bd.popPush(1, domain.intType, .{ .not_null = true });
         },
         .lf32, .lf64 => {
             try bd.coerce(top, domain.intType);
-            return bd.popPush(1, domain.numberType, NOT_NULL);
+            return bd.popPush(1, domain.numberType, .{ .not_null = true });
         },
         .si8, .si16, .si32 => {
             try bd.coerce(bd.peek(2), domain.intType);
@@ -506,7 +504,7 @@ pub fn typeAt(bd: *BodyDecoder, pc: u32, opcode: Op, a: u32, b: u32, scope: u32)
     }
 
     if (opcode.setLocalN()) |local| {
-        bd.setValue(local, bd.typeOf(top), bd.valueFlags[top] & KNOWN);
+        bd.setValue(local, bd.typeOf(top), bd.valueFlags[top].known());
     } else if (opcode.getLocalN()) |local| {
         return bd.pushLocal(local);
     }
@@ -550,7 +548,7 @@ fn scopeHere(bd: *BodyDecoder, last: ?TypeId, extra: TypeId) Error!*Scope {
     for (0..bd.scope) |i| {
         const v = bd.localCount + @as(u32, @intCast(i));
         scope.types[outer.size + i] = bd.typeOf(v);
-        scope.withs[outer.size + i] = if (bd.valueFlags[v] & WITH != 0) 1 else 0;
+        scope.withs[outer.size + i] = @intFromBool(bd.valueFlags[v].with);
     }
 
     if (last) |t| {

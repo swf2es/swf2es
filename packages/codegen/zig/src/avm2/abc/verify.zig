@@ -137,7 +137,7 @@ pub fn verifyAt(bd: *BodyDecoder, pc: u32, opcode: Op) Error!bool {
             }
 
             if (bd.typed) {
-                bd.setValue(a, .any, 0);
+                bd.setValue(a, .any, .none);
             }
 
             if (bd.emitPass) {
