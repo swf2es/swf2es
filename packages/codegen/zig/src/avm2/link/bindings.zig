@@ -11,10 +11,13 @@ const traits_ = @import("traits.zig");
 const Binding = traits_.Binding;
 const BindingKind = traits_.BindingKind;
 const TraitsTable = traits_.TraitsTable;
+const errors = @import("../abc/errors.zig");
+const Diagnostics = errors.Diagnostics;
+const Error = errors.Error;
 
 /// As Traits::verifyBindings: bind t's members, whose base traits are
-/// already laid out; 0, or the VerifyError.
-pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
+/// already laid out.
+pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32, diag: *Diagnostics) Error!void {
     const gpa = dom.gpa;
     const index = traits.abc.get(t);
     const abc = dom.abcs.get(index);
@@ -69,41 +72,41 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
                 }
 
                 if (id > nameCount and early) {
-                    return C.kCorruptABCError;
+                    return diag.fail(C.kCorruptABCError);
                 }
 
                 // Slots are final, and cannot override anything else.
                 if (slot -% 1 < baseSlots) {
-                    return C.kIllegalOverrideError;
+                    return diag.fail(C.kIllegalOverrideError);
                 }
 
                 if (traits.own(t, nsId, name, version) != Binding.none) {
-                    return C.kCorruptABCError;
+                    return diag.fail(C.kCorruptABCError);
                 }
 
                 if (traits.isInterface.get(t) != 0) {
-                    return C.kIllegalSlotError;
+                    return diag.fail(C.kIllegalSlotError);
                 }
 
                 const bkind: BindingKind = if (kind == .slot) .variable else .constant;
                 try traits.add(gpa, t, nsId, name, version, .of(slot -% 1, bkind));
             },
             .method => {
-                const baseBinding = overridden(traits, t, nsId, nsVersion, name, tag) orelse return C.kIllegalOverrideError;
+                const baseBinding = overridden(traits, t, nsId, nsVersion, name, tag) orelse return diag.fail(C.kIllegalOverrideError);
                 if (baseBinding == Binding.none) {
                     try traits.add(gpa, t, nsId, name, version, .of(methodCount, .method));
                     methodCount +%= 1;
                 } else if (baseBinding.kind == .method) {
                     try traits.add(gpa, t, nsId, name, version, baseBinding);
                 } else {
-                    return C.kCorruptABCError;
+                    return diag.fail(C.kCorruptABCError);
                 }
             },
             .getter, .setter => {
                 // The other accessor of the pair may be defined here already.
                 var baseBinding = traits.own(t, nsId, name, version);
                 if (baseBinding == Binding.none) {
-                    baseBinding = overridden(traits, t, nsId, nsVersion, name, tag) orelse return C.kIllegalOverrideError;
+                    baseBinding = overridden(traits, t, nsId, nsVersion, name, tag) orelse return diag.fail(C.kIllegalOverrideError);
                 }
 
                 const us: BindingKind = if (kind == .getter) .get else .set;
@@ -114,7 +117,7 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
                 } else if (baseBinding.kind.isAccessor()) {
                     try traits.add(gpa, t, nsId, name, version, if (baseBinding.kind == them) .{ .kind = .get_set, .id = baseBinding.id } else baseBinding);
                 } else {
-                    return C.kCorruptABCError;
+                    return diag.fail(C.kCorruptABCError);
                 }
             },
             else => {},
@@ -126,8 +129,6 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
     if (traits.kind.get(t) == .instance and traits.isInterface.get(t) == 0) {
         try bindInterfaces(traits, dom, t);
     }
-
-    return 0;
 }
 
 /// As TraitsBindings::fixOneInterfaceBindings: for each interface t

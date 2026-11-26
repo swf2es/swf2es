@@ -13,6 +13,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Error = Allocator.Error;
+const errors = @import("errors.zig");
+const Diagnostics = errors.Diagnostics;
 const memory = @import("../../memory.zig");
 const ir_ = @import("../ir/ir.zig");
 const Ir = ir_.Ir;
@@ -654,10 +656,8 @@ pub const BodyDecoder = struct {
         const traits = &domain.traits;
         self.global = domain.methodStart.get(self.index) + self.method;
         self.declarer = traits.methodTraits.get(self.global);
-        const err = try traits.sign(domain, self.global);
-        if (err != 0) {
-            return self.fail(err);
-        }
+        var diag: Diagnostics = .{};
+        traits.sign(domain, self.global, &diag) catch |err| return self.linkFailed(err, &diag);
 
         if (self.valueType.len < self.frameSize) {
             const gpa = self.gpa;
@@ -1126,6 +1126,15 @@ pub const BodyDecoder = struct {
     pub fn fail(self: *BodyDecoder, err: i32) bool {
         self.code.fail(err);
         return false;
+    }
+
+    /// fail with the VerifyError linking rejected with, `err` from a call
+    /// given `diag`; running out of memory goes on up.
+    pub fn linkFailed(self: *BodyDecoder, err: errors.Error, diag: *const Diagnostics) Error!bool {
+        return switch (err) {
+            error.Verify => self.fail(diag.code),
+            error.OutOfMemory => error.OutOfMemory,
+        };
     }
 
     /// fail, with the number its message names.

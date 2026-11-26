@@ -13,6 +13,9 @@ const Binding = traits_.Binding;
 const TraitsTable = traits_.TraitsTable;
 const TypeId = traits_.TypeId;
 const resolveTypeId = @import("typenames.zig").resolveTypeId;
+const errors = @import("../abc/errors.zig");
+const Diagnostics = errors.Diagnostics;
+const Error = errors.Error;
 
 fn hasGetter(binding: Binding) bool {
     const kind = binding.kind;
@@ -26,7 +29,7 @@ fn hasSetter(binding: Binding) bool {
 
 /// As Traits::finishSlotsAndMethods: each slot's type, and each method's
 /// dispatch id; an overridden method must not be final.
-pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!i32 {
+pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32, diag: *Diagnostics) Error!void {
     const gpa = dom.gpa;
     const index = traits.abc.get(t);
     const abc = dom.abcs.get(index);
@@ -88,19 +91,14 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
             // A slot defined twice would give one memory location two types.
             slot -%= 1;
             if (slot >= slotCount or traits.slotSet.get(slots + slot) != 0) {
-                return C.kCorruptABCError;
+                return diag.fail(C.kCorruptABCError);
             }
 
-            var ty: TypeId = undefined;
-            if (kind == .class) {
-                // A class not linked yet reads as *.
-                ty = dom.classStatic.get(dom.classStart.get(index) + abc.traitIndex[i]).orAny();
-            } else {
-                ty = try resolveTypeId(dom, index, abc.traitIndex[i], false);
-                if (ty == TypeId.failed) {
-                    return dom.typeError;
-                }
-            }
+            // A class not linked yet reads as *.
+            const ty: TypeId = if (kind == .class)
+                dom.classStatic.get(dom.classStart.get(index) + abc.traitIndex[i]).orAny()
+            else
+                try resolveTypeId(dom, index, abc.traitIndex[i], false, diag);
 
             traits.slotType.set(slots + slot, ty);
             traits.slotSet.set(slots + slot, 1);
@@ -121,7 +119,7 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
                 {
                     const virt = traits.dispatch.get(traits.dispatchStart.get(base.index()) + d);
                     if (virt >= 0 and traits.methodFinal.get(@intCast(virt)) != 0) {
-                        return C.kIllegalOverrideError;
+                        return diag.fail(C.kIllegalOverrideError);
                     }
                 }
             }
@@ -129,12 +127,10 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
             traits.dispatch.set(dispatch + d, @intCast(methods + abc.traitIndex[i]));
         }
     }
-
-    return 0;
 }
 
 /// As Traits::genInitBody: every slot's initial value must suit its type.
-pub fn checkInitialValues(traits: *const TraitsTable, dom: *const Domain, t: u32) i32 {
+pub fn checkInitialValues(traits: *const TraitsTable, dom: *const Domain, t: u32, diag: *Diagnostics) errors.Rejected!void {
     const index = traits.abc.get(t);
     const abc = dom.abcs.get(index);
     const early = traits.allowEarlyBinding(t);
@@ -162,13 +158,8 @@ pub fn checkInitialValues(traits: *const TraitsTable, dom: *const Domain, t: u32
 
         const ty = traits.slotType.get(slots + slot - 1);
         const value = if (kind == .class) 0 else abc.traitValue[i];
-        const err = dom.checkDefault(index, value, abc.traitValueKind[i], ty);
-        if (err != 0) {
-            return err;
-        }
+        try dom.checkDefault(index, value, abc.traitValueKind[i], ty, diag);
     }
-
-    return 0;
 }
 
 /// As TraitsBindings::checkOverride: `over`, t's method at a dispatch id,

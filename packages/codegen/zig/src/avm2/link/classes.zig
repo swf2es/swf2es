@@ -44,12 +44,8 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
         const flags = abc.instanceFlags[i];
         const baseName = abc.instanceSuper[i];
         if (baseName != 0) {
-            const base = typenames.resolveType(dom, index, baseName);
-            if (base < 0) {
-                return diag.fail(-base);
-            }
-
-            const b: u32 = @intCast(base);
+            const b = try resolveClass(dom, index, baseName, diag);
+            const base: i32 = @intCast(b);
             if (dom.classFlags.get(b).final or
                 base == dom.classClass or
                 (base == dom.functionClass and !abc.builtin))
@@ -68,19 +64,17 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
         const last = abc.instanceInterfaceStart[i + 1];
         var j = abc.instanceInterfaceStart[i];
         while (j < last) : (j += 1) {
-            const t = typenames.resolveType(dom, index, abc.interfaces[j]);
-            if (t < 0) {
+            const t = resolveClass(dom, index, abc.interfaces[j], diag) catch |err| {
                 dom.traits.interfaceList.truncate(interfaces);
-                return diag.fail(-t);
-            }
-
-            if (!dom.classFlags.get(@intCast(t)).interface) {
+                return err;
+            };
+            if (!dom.classFlags.get(t).interface) {
                 dom.traits.interfaceList.truncate(interfaces);
                 return diag.fail(C.kCannotImplementError);
             }
 
             // As the word it is: an interface not linked yet goes in as none's.
-            try dom.traits.interfaceList.push(gpa, @bitCast(@backingInt(dom.classTraits.get(@intCast(t)))));
+            try dom.traits.interfaceList.push(gpa, @bitCast(@backingInt(dom.classTraits.get(t))));
         }
 
         if (flags.interface and baseName != 0) {
@@ -99,10 +93,7 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
         dom.traits.interfaceStart.set(t, interfaces);
         dom.traits.interfaceEnd.set(t, dom.traits.interfaceList.len);
         dom.classTraits.set(id, .of(t));
-        const err = try layout(&dom.traits, dom, t);
-        if (err != 0) {
-            return diag.fail(err);
-        }
+        try layout(&dom.traits, dom, t, diag);
 
         try bindMethods(dom, t, @bitCast(abc.instanceInit[i]), flags.final);
 
@@ -154,10 +145,7 @@ fn layoutStatics(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
         const i: u32 = @intCast(i_);
         const t = try dom.traits.create(dom.gpa, .class, index, i, classTraits, dom.traits.protectedNs.get(dom.classTraits.get(first + i).index()), abc.classTraitStart[i], abc.classTraitStart[i + 1]);
         dom.classStatic.set(first + i, .of(t));
-        const err = try layout(&dom.traits, dom, t);
-        if (err != 0) {
-            return diag.fail(err);
-        }
+        try layout(&dom.traits, dom, t, diag);
 
         try bindMethods(dom, t, @bitCast(abc.classInit[i]), false);
     }
@@ -177,13 +165,18 @@ fn layoutScripts(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
         const scope = try gpa.create(Scope);
         scope.* = .{};
         dom.traits.scope.set(t, scope);
-        const err = try layout(&dom.traits, dom, t);
-        if (err != 0) {
-            return diag.fail(err);
-        }
+        try layout(&dom.traits, dom, t, diag);
 
         try bindMethods(dom, t, @bitCast(abc.scriptInit[s]), false);
     }
+}
+
+/// A base class's or an interface's class: resolveType, void rejected.
+fn resolveClass(dom: *const Domain, index: u32, multiname: u32, diag: *Diagnostics) errors.Rejected!u32 {
+    return typenames.resolveType(dom, index, multiname, diag) catch |err| switch (err) {
+        error.Void => diag.fail(C.kIllegalVoidError),
+        error.Verify => error.Verify,
+    };
 }
 
 /// Lay out activation traits, for bodies that need an activation or declare traits.
@@ -200,10 +193,7 @@ fn layoutActivations(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
         if (flags.need_activation or end > first) {
             const t = try dom.traits.create(gpa, .activation, index, b, .none, -1, first, end);
             bodies[b] = .of(t);
-            const err = try layout(&dom.traits, dom, t);
-            if (err != 0) {
-                return diag.fail(err);
-            }
+            try layout(&dom.traits, dom, t, diag);
 
             try bindMethods(dom, t, -1, false);
         }

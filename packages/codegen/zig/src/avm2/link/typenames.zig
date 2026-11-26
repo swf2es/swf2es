@@ -11,15 +11,25 @@ const Domain = domain_.Domain;
 const hashPair = @import("table.zig").hashPair;
 const traits_ = @import("traits.zig");
 const TypeId = traits_.TypeId;
+const TypeRef = traits_.TypeRef;
+const errors = @import("../abc/errors.zig");
+const Diagnostics = errors.Diagnostics;
+const Error = errors.Error;
+
+/// How a base class's or an interface's name fails to resolve: rejected,
+/// with the VerifyError in Diagnostics, or the void class, which only some
+/// names may be.
+pub const NameError = error{Void} || errors.Rejected;
 
 /// As PoolObject::resolveTypeName for a slot or parameter type: * for
-/// index 0, or the type; TypeId.failed on failure, with typeError set.
-/// AssemblyScript recurses into a TypeName's parameter; a chain of them
-/// (Vector.<Vector.<...>>) is as deep as the input makes it, so this walks
-/// down it keeping each level's base, then makes the types back up, in
-/// AssemblyScript's order.
-pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) Allocator.Error!TypeId {
+/// index 0, or the type. AssemblyScript recurses into a TypeName's
+/// parameter; a chain of them (Vector.<Vector.<...>>) is as deep as the
+/// input makes it, so this walks down it keeping each level's base, then
+/// makes the types back up, in AssemblyScript's order.
+pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool, diag: *Diagnostics) Error!TypeId {
     const pool = &dom.abcs.get(index).pool;
+    // Each level's base class, or -1 where it did not resolve (an i32
+    // list, as a list of ?u32 would be another copy of append).
     var bases: std.ArrayList(i32) = .empty;
     var mn = multiname;
     var void_ok = allowVoid;
@@ -29,36 +39,31 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) 
         }
 
         if (mn >= pool.multinameCount()) {
-            dom.typeError = C.kCpoolIndexRangeError;
-            return TypeId.failed;
+            return diag.fail(C.kCpoolIndexRangeError);
         }
 
         if (pool.mnKind[mn] != .type_name) {
-            const c = resolveType(dom, index, mn);
-            if (c == -C.kIllegalVoidError) {
-                if (void_ok) {
-                    break dom.voidType;
-                }
+            const c = resolveType(dom, index, mn, diag) catch |err| switch (err) {
+                error.Void => {
+                    if (void_ok) {
+                        break dom.voidType;
+                    }
 
-                dom.typeError = C.kIllegalVoidError;
-                return TypeId.failed;
-            }
-
-            if (c < 0) {
-                dom.typeError = -c;
-                return TypeId.failed;
-            }
-
+                    return diag.fail(C.kIllegalVoidError);
+                },
+                error.Verify => return error.Verify,
+            };
             // A class not linked yet reads as *.
-            break dom.classTraits.get(@intCast(c)).orAny();
+            break dom.classTraits.get(c).orAny();
         }
 
-        const base = resolveType(dom, index, pool.mnA[mn]);
-        if (base == -C.kAmbiguousBindingError) {
-            dom.typeError = C.kAmbiguousBindingError;
-            return TypeId.failed;
-        }
-
+        // A base that does not resolve fails as no Vector below, unless it
+        // is ambiguous; its own error is not the one avmplus reports.
+        var baseDiag: Diagnostics = .{};
+        const base: i32 = if (resolveType(dom, index, pool.mnA[mn], &baseDiag)) |c| @intCast(c) else |err| switch (err) {
+            error.Verify => if (baseDiag.code == C.kAmbiguousBindingError) return diag.fail(C.kAmbiguousBindingError) else -1,
+            error.Void => -1,
+        };
         try bases.append(dom.scratch, base);
         mn = pool.mnB[mn];
         void_ok = false;
@@ -69,14 +74,12 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) 
     while (level > 0) {
         level -= 1;
         const base = bases.items[level];
-        const t = if (base >= 0) try parameterized(dom, base, param) else TypeId.failed;
-        // Not a Vector, or Vector.<*> absent.
-        if (!t.isTraits()) {
-            dom.typeError = C.kClassNotFoundError;
-            return TypeId.failed;
+        const t: TypeRef = if (base >= 0) try parameterized(dom, @intCast(base), param) else .none;
+        if (t == .none) {
+            return diag.fail(C.kClassNotFoundError);
         }
 
-        param = t;
+        param = t.toType();
     }
 
     return param;
@@ -84,30 +87,30 @@ pub fn resolveTypeId(dom: *Domain, index: u32, multiname: u32, allowVoid: bool) 
 
 /// As PoolObject::resolveParameterizedType: Vector.<T>, which avmplus has
 /// as its own classes for int, uint, Number and *, and otherwise makes as
-/// a subclass of Vector.<*>; TypeId.failed if `base` is not Vector, and *
-/// for a builtin Vector absent, or one that needs Vector.<*> without it.
-pub fn parameterized(dom: *Domain, base: i32, param: TypeId) Allocator.Error!TypeId {
-    if (base != dom.vectorClass or base < 0) {
-        return TypeId.failed;
+/// a subclass of Vector.<*>; none if class `base` is not Vector, or the
+/// builtin Vector it needs is absent.
+pub fn parameterized(dom: *Domain, base: u32, param: TypeId) Allocator.Error!TypeRef {
+    if (dom.vectorClass < 0 or base != @as(u32, @intCast(dom.vectorClass))) {
+        return .none;
     }
 
     switch (dom.builtin(param)) {
-        .any => return dom.vectorObjectType,
-        .int => return dom.vectorIntType,
-        .uint => return dom.vectorUintType,
-        .number => return dom.vectorDoubleType,
+        .any => return .ofType(dom.vectorObjectType),
+        .int => return .ofType(dom.vectorIntType),
+        .uint => return .ofType(dom.vectorUintType),
+        .number => return .ofType(dom.vectorDoubleType),
         else => {},
     }
 
     const made = dom.vectorFor(param);
     if (made != .none) {
-        return made.toType();
+        return made;
     }
 
     // A builtin ABC with Vector but not Vector.<*>: nothing to subclass, as
     // for Vector.<*> above, rather than a panic.
     if (dom.vectorObjectType == .any) {
-        return .any;
+        return .none;
     }
 
     // As Traits::newParameterizedITraits: a subclass of Vector.<*> with no members of its own.
@@ -124,40 +127,36 @@ pub fn parameterized(dom: *Domain, base: i32, param: TypeId) Allocator.Error!Typ
 }
 
 /// As PoolObject::resolveTypeName for a base class or interface: the class
-/// id, or minus the error: 1014 if nothing matches, 1008 if two classes do,
-/// 1022 for void.
+/// id; rejected with 1014 if nothing matches, 1008 if two classes do, and
+/// error.Void for void.
 ///
 /// A TypeName's base is never a TypeName (the parser's typeNamesAreAcyclic),
 /// but its parameter may be, as deep as the input makes it: AssemblyScript
 /// recurses down the parameters, each level giving its base unless a
 /// deeper one fails, which this walks in a loop.
-pub fn resolveType(dom: *const Domain, index: u32, multiname: u32) i32 {
+pub fn resolveType(dom: *const Domain, index: u32, multiname: u32, diag: *Diagnostics) NameError!u32 {
     const pool = &dom.abcs.get(index).pool;
     if (pool.mnKind[multiname] != .type_name) {
-        return resolvePlain(dom, index, multiname);
+        return resolvePlain(dom, index, multiname, diag);
     }
 
-    const outer = resolvePlain(dom, index, pool.mnA[multiname]);
-    var base = outer;
+    const outer = try resolvePlain(dom, index, pool.mnA[multiname], diag);
     var mn = multiname;
-    while (base >= 0 and pool.mnB[mn] != 0) {
+    while (pool.mnB[mn] != 0) {
         mn = pool.mnB[mn];
         if (pool.mnKind[mn] != .type_name) {
-            const t = resolvePlain(dom, index, mn);
-            return if (t < 0) t else outer;
+            _ = try resolvePlain(dom, index, mn, diag);
+            return outer;
         }
 
-        base = resolvePlain(dom, index, pool.mnA[mn]);
-        if (base < 0) {
-            return base;
-        }
+        _ = try resolvePlain(dom, index, pool.mnA[mn], diag);
     }
 
     return outer;
 }
 
 /// resolveType of a multiname that is not a TypeName.
-fn resolvePlain(dom: *const Domain, index: u32, mn: u32) i32 {
+fn resolvePlain(dom: *const Domain, index: u32, mn: u32, diag: *Diagnostics) NameError!u32 {
     const abc = dom.abcs.get(index);
     const pool = &abc.pool;
     const kind = pool.mnKind[mn];
@@ -178,7 +177,7 @@ fn resolvePlain(dom: *const Domain, index: u32, mn: u32) i32 {
             const ns = pool.nsSetMembers[m];
             const t = findType(dom, index, ids[ns], strings[nameIndex], versions[ns]);
             if (t >= 0 and found >= 0 and t != found) {
-                return -C.kAmbiguousBindingError;
+                return diag.fail(C.kAmbiguousBindingError);
             }
 
             if (t >= 0) {
@@ -188,10 +187,10 @@ fn resolvePlain(dom: *const Domain, index: u32, mn: u32) i32 {
     }
 
     if (found < 0) {
-        return -C.kClassNotFoundError;
+        return diag.fail(C.kClassNotFoundError);
     }
 
-    return if (found == dom.voidClass) -C.kIllegalVoidError else found;
+    return if (found == dom.voidClass) error.Void else @intCast(found);
 }
 
 /// As DomainMgr::findTraitsInPoolByNameAndNS for ABC `index`: a class a

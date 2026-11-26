@@ -17,7 +17,9 @@ const memory = @import("../../memory.zig");
 const Rows = memory.Rows;
 const output = @import("../../output.zig");
 const Abc = @import("../abc/abc.zig").Abc;
-const Diagnostics = @import("../abc/errors.zig").Diagnostics;
+const errors = @import("../abc/errors.zig");
+const Diagnostics = errors.Diagnostics;
+const Error = errors.Error;
 const C = @import("../abc/constants.zig");
 const ConstantPool = @import("../abc/pool.zig").ConstantPool;
 const BodyDecoder = @import("../abc/code.zig").BodyDecoder;
@@ -414,8 +416,6 @@ pub const Domain = struct {
     /// Each ABC's first method id; the ABC of each method id.
     methodStart: Rows(u32) = .{},
     methodAbcIndex: Rows(u32) = .{},
-    /// The error of the last resolveTypeId that failed.
-    typeError: i32 = 0,
     /// Per ABC, each script's traits, and each body's activation traits, if any.
     scriptTraits: Rows([]u32) = .{},
     bodyTraits: Rows([]TypeRef) = .{},
@@ -792,25 +792,24 @@ pub const Domain = struct {
     }
 
     /// As Verifier::checkTypeName: the type multiname `mn` of ABC `index` names,
-    /// void included, and Vector.<T>, or * for another parameterized type;
-    /// TypeId.failed on failure, with typeError set. AssemblyScript
-    /// recurses into a TypeName's parameter; this walks the chain down,
-    /// keeping each level's class, and makes the types back up.
-    pub fn checkTypeName(self: *Domain, index: u32, multiname: u32) Allocator.Error!TypeId {
+    /// void included, and Vector.<T>, or * for another parameterized type.
+    /// AssemblyScript recurses into a TypeName's parameter; this walks the
+    /// chain down, keeping each level's class, and makes the types back up.
+    pub fn checkTypeName(self: *Domain, index: u32, multiname: u32, diag: *Diagnostics) Error!TypeId {
         const pool = &self.abcs.get(index).pool;
+        // Each level's class, or -1 for void (an i32 list, as a list of
+        // ?u32 would be another copy of append).
         var classes_: std.ArrayList(i32) = .empty;
         var mn = multiname;
         const innermost: TypeId = while (true) {
             const isTypeName = pool.mnKind[mn] == .type_name;
-            const c = typenames.resolveType(self, index, if (isTypeName) pool.mnA[mn] else mn);
-            if (c < 0 and c != -C.kIllegalVoidError) {
-                self.typeError = -c;
-                return TypeId.failed;
-            }
-
+            const c: i32 = if (typenames.resolveType(self, index, if (isTypeName) pool.mnA[mn] else mn, diag)) |id| @intCast(id) else |err| switch (err) {
+                error.Void => -1,
+                error.Verify => return error.Verify,
+            };
             if (!isTypeName) {
                 // A class not linked yet reads as *.
-                break if (c < 0) self.voidType else self.classTraits.get(@intCast(c)).orAny();
+                break if (c >= 0) self.classTraits.get(@intCast(c)).orAny() else self.voidType;
             }
 
             try classes_.append(self.scratch, c);
@@ -825,9 +824,9 @@ pub const Domain = struct {
         while (level > 0) {
             level -= 1;
             const c = classes_.items[level];
-            const t = if (c >= 0) try typenames.parameterized(self, c, param) else TypeId.failed;
-            // Not a Vector, or Vector.<*> absent: *.
-            param = if (t.isTraits()) t else .any;
+            const t: TypeRef = if (c >= 0) try typenames.parameterized(self, @intCast(c), param) else .none;
+            // Not a Vector, or a builtin Vector absent: *.
+            param = t.orAny();
         }
 
         return param;
@@ -1028,10 +1027,10 @@ pub const Domain = struct {
     /// As Verifier::emitCallpropertySlot: what calling a class slot of type
     /// `slotType` with one argument does to it: the builtin conversions give
     /// int, uint, Number, Boolean or String, a user class coerces to it, and
-    /// anything else is a call (TypeId.failed).
-    pub fn conversionOf(self: *const Domain, slotType: TypeId) TypeId {
+    /// anything else is a call (null).
+    pub fn conversionOf(self: *const Domain, slotType: TypeId) ?TypeId {
         if (!slotType.isTraits()) {
-            return TypeId.failed;
+            return null;
         }
 
         if (self.floatType != .any and slotType == self.staticOf(self.floatType)) {
@@ -1054,12 +1053,12 @@ pub const Domain = struct {
             return self.instanceTraitsOf(slotType);
         }
 
-        return TypeId.failed;
+        return null;
     }
 
     /// Whether calling class slot `slotType` converts to a builtin primitive, never null.
     pub fn isConversion(self: *const Domain, slotType: TypeId) bool {
-        const converted = self.conversionOf(slotType);
+        const converted = self.conversionOf(slotType) orelse return false;
         return converted.isBuiltin(self.intType) or
             converted.isBuiltin(self.uintType) or
             converted.isBuiltin(self.numberType) or
@@ -1227,25 +1226,26 @@ pub const Domain = struct {
     }
 
     /// As PoolObject::getLegalDefaultValue: whether constant `value` of `kind`
-    /// of ABC `index` may be the default of a slot or parameter of `type`; 0,
-    /// or the VerifyError.
-    pub fn checkDefault(self: *const Domain, index: u32, value: u32, kind: C.Constant, type_: TypeId) i32 {
+    /// of ABC `index` may be the default of a slot or parameter of `type`.
+    pub fn checkDefault(self: *const Domain, index: u32, value: u32, kind: C.Constant, type_: TypeId, diag: *Diagnostics) errors.Rejected!void {
         // Legacy ABCs ignore the kind at index zero; AIR's float entry zero is NaN.
         const hasFloats = self.abcs.get(index).hasFloatSupport();
         if (value == 0 and (kind != .float or !hasFloats)) {
-            return 0;
+            return;
         }
 
         const illegal = if (type_ == .any) C.kCorruptABCError else C.kIllegalDefaultValue;
         if (kind == .float and !hasFloats) {
-            return illegal;
+            return diag.fail(illegal);
         }
 
-        const constant = self.abcs.get(index).pool.value(kind, value) catch |err| return switch (err) {
+        const constant = self.abcs.get(index).pool.value(kind, value) catch |err| return diag.fail(switch (err) {
             error.IllegalKind => illegal,
             error.OutOfRange => C.kCpoolIndexRangeError,
-        };
-        return if (traits_.legalDefault(self.builtin(type_), constant)) 0 else C.kIllegalDefaultValue;
+        });
+        if (!traits_.legalDefault(self.builtin(type_), constant)) {
+            return diag.fail(C.kIllegalDefaultValue);
+        }
     }
 
     pub fn findText(self: *const Domain, bytes: []const u8) i32 {
