@@ -6,6 +6,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const options = @import("options");
 const memory = @import("memory.zig");
+const output = @import("output.zig");
 const root = @import("root.zig");
 const avm1 = @import("testing/avm1.zig");
 const avm1_compile = @import("avm1/compile.zig");
@@ -94,22 +95,22 @@ export fn stackDeepest() u32 {
 
 /// The AVM1 actions Flash knows, one a line (assembly/testing/avm1.ts).
 export fn avm1Opcodes() usize {
-    return root.handOut(avm1.opcodes(root.gpa()) catch |err| return root.failWriting(err));
+    return root.handOut(avm1.opcodes(root.gpa()) catch |err| return failWriting(err));
 }
 
 /// An AVM1 block's regions as the flow finds them.
 export fn avm1Dump(bytes: [*]const u8, len: u32) usize {
-    return root.handOut(avm1.dump(root.gpa(), bytes[0..len]) catch |err| return root.failWriting(err));
+    return root.handOut(avm1.dump(root.gpa(), bytes[0..len]) catch |err| return failWriting(err));
 }
 
 /// avm1Dump briefly, for the fuzzer.
 export fn avm1Check(bytes: [*]const u8, len: u32) usize {
-    return root.handOut(avm1.check(root.gpa(), bytes[0..len]) catch |err| return root.failWriting(err));
+    return root.handOut(avm1.check(root.gpa(), bytes[0..len]) catch |err| return failWriting(err));
 }
 
 /// The action at `offset` of an AVM1 block alone.
 export fn avm1Action(bytes: [*]const u8, len: u32, offset: i32) usize {
-    return root.handOut(avm1.action(root.gpa(), bytes[0..len], offset) catch |err| return root.failWriting(err));
+    return root.handOut(avm1.action(root.gpa(), bytes[0..len], offset) catch |err| return failWriting(err));
 }
 
 // The ABC reader's and parser's dumps (assembly/testing/abc.ts).
@@ -122,17 +123,17 @@ export fn readAll(bytes: [*]const u8, len: u32, kinds: [*]const u8, kinds_len: u
 
 /// The constant pool of an ABC block, one entry a line.
 export fn poolDump(bytes: [*]const u8, len: u32) usize {
-    return root.handOut(abc.poolDump(root.gpa(), bytes[0..len]) catch |err| return root.failWriting(err));
+    return root.handOut(abc.poolDump(root.gpa(), bytes[0..len]) catch |err| return failWriting(err));
 }
 
 /// An ABC block's tables after the constant pool, one entry a line.
 export fn abcDump(bytes: [*]const u8, len: u32, is_builtin: bool) usize {
-    return root.handOut(abc.abcDump(root.gpa(), bytes[0..len], is_builtin) catch |err| return root.failWriting(err));
+    return root.handOut(abc.abcDump(root.gpa(), bytes[0..len], is_builtin) catch |err| return failWriting(err));
 }
 
 /// AVM2's opcode table.
 export fn opcodeTable() usize {
-    return root.handOut(abc.opcodeTable(root.gpa()) catch |err| return root.failWriting(err));
+    return root.handOut(abc.opcodeTable(root.gpa()) catch |err| return failWriting(err));
 }
 
 // The domain's dumps (assembly/testing/domain.ts).
@@ -186,7 +187,7 @@ export fn benchDecode(bytes: [*]const u8, len: u32, rounds: i32) i32 {
 }
 
 export fn codeDump(bytes: [*]const u8, len: u32, is_builtin: bool) usize {
-    return root.handOut(abc.codeDump(root.gpa(), bytes[0..len], is_builtin) catch |err| return root.failWriting(err));
+    return root.handOut(abc.codeDump(root.gpa(), bytes[0..len], is_builtin) catch |err| return failWriting(err));
 }
 
 export fn domainVerifyAll() usize {
@@ -227,6 +228,14 @@ export fn domainCheckIr() usize {
 export fn unspecifiedReads() u32 {
     defer link.unspecified = 0;
     return link.unspecified;
+}
+
+/// What a dump fails with, as codegenError() reports it: its writer fails
+/// only as its buffer cannot grow.
+fn failWriting(err: output.Error) usize {
+    return root.fail(switch (err) {
+        error.OutOfMemory, error.WriteFailed => error.OutOfMemory,
+    });
 }
 
 /// What the exports keep and hold let go, and the call's and the global

@@ -100,6 +100,17 @@ fn handOutNone() usize {
     return 0;
 }
 
+/// What a call made, handed out, or nothing if it failed.
+fn handed(result: Allocator.Error![]const u8) usize {
+    return handOut(result catch |err| return fail(err));
+}
+
+/// What a call made, handed out; nothing if there was none, or it failed.
+fn handedOrNone(result: Allocator.Error!?[]const u8) usize {
+    const bytes = result catch |err| return fail(err);
+    return if (bytes) |b| handOut(b) else handOutNone();
+}
+
 /// A staged array: its address and length, as the wrapper passes it.
 fn staged(comptime T: type, at: [*]const T, len: u32) []const T {
     return at[0..len];
@@ -116,27 +127,19 @@ fn swfOf(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32
     return .{ .bytes = staged(u8, swf, swf_len), .blocks = blocks };
 }
 
-/// What the test build's dumps fail with, as codegenError() reports it:
-/// their writer fails only as its buffer cannot grow.
-pub fn failWriting(err: output.Error) usize {
-    return fail(switch (err) {
-        error.OutOfMemory, error.WriteFailed => error.OutOfMemory,
-    });
-}
-
 // The AVM1 compiler (avm1/compile.zig), as assembly/avm1/compile.ts exports it.
 
 pub export fn actionsModuleBytes(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, keep: bool) usize {
     const s = swfOf(swf, swf_len, offsets, offsets_len, lengths, lengths_len) catch |err| return fail(err);
-    return handOut(avm1.moduleBytes(gpa(), memory.pages().allocator(), s, version, keep) catch |err| return fail(err));
+    return handed(avm1.moduleBytes(gpa(), memory.pages().allocator(), s, version, keep));
 }
 
 pub export fn actionsModuleEntries() usize {
-    return handOut(avm1.moduleEntries(gpa()) catch |err| return fail(err));
+    return handed(avm1.moduleEntries(gpa()));
 }
 
 pub export fn actionsModuleUnits() usize {
-    return handOut(avm1.moduleUnits(gpa()) catch |err| return fail(err));
+    return handed(avm1.moduleUnits(gpa()));
 }
 
 pub export fn actionsEmitEach(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, blocks: [*]const u8, blocks_len: u32, reuse: bool) usize {
@@ -145,17 +148,15 @@ pub export fn actionsEmitEach(swf: [*]const u8, swf_len: u32, offsets: [*]const 
 
 pub export fn actionsEmitEachBytes(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, blocks: [*]const u8, blocks_len: u32, reuse: bool) usize {
     const s = swfOf(swf, swf_len, offsets, offsets_len, lengths, lengths_len) catch |err| return fail(err);
-    return handOut(avm1.emitEach(gpa(), s, version, staged(u8, blocks, blocks_len), reuse) catch |err| return fail(err));
+    return handed(avm1.emitEach(gpa(), s, version, staged(u8, blocks, blocks_len), reuse));
 }
 
 pub export fn actionsHold(handle: i32, swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32) void {
-    const s = swfOf(swf, swf_len, offsets, offsets_len, lengths, lengths_len) catch |err| {
-        _ = fail(err);
-        return;
-    };
-    avm1.hold(memory.pages().allocator(), handle, s) catch |err| {
-        _ = fail(err);
-    };
+    orFailed(void, hold(handle, swf, swf_len, offsets, offsets_len, lengths, lengths_len));
+}
+
+fn hold(handle: i32, swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32) Allocator.Error!void {
+    try avm1.hold(memory.pages().allocator(), handle, try swfOf(swf, swf_len, offsets, offsets_len, lengths, lengths_len));
 }
 
 pub export fn actionsRelease(handle: i32) void {
@@ -173,14 +174,13 @@ pub export fn actionsHeldEmitEachBytes(handle: i32, version: i32, blocks: [*]con
 
 pub export fn actionsHeldUnitBytes(handle: i32, version: i32, at: i32, end: i32, bound: i32, five: bool) usize {
     const key: units.UnitKey = .{ .at = at, .end = end, .bound = bound, .five = five };
-    const code = avm1.heldUnitBytes(gpa(), handle, version, key) catch |err| return fail(err);
-    return if (code) |text| handOut(text) else handOutNone();
+    return handedOrNone(avm1.heldUnitBytes(gpa(), handle, version, key));
 }
 
 pub export fn actionsUnitBytes(swf: [*]const u8, swf_len: u32, offsets: [*]const i32, offsets_len: u32, lengths: [*]const i32, lengths_len: u32, version: i32, at: i32, end: i32, bound: i32, five: bool) usize {
     const s = swfOf(swf, swf_len, offsets, offsets_len, lengths, lengths_len) catch |err| return fail(err);
     const key: units.UnitKey = .{ .at = at, .end = end, .bound = bound, .five = five };
-    return handOut(avm1.unitBytes(gpa(), s, version, key) catch |err| return fail(err));
+    return handed(avm1.unitBytes(gpa(), s, version, key));
 }
 
 /// Where the high and reach of the unit compiled last are, two f64s.
@@ -248,7 +248,7 @@ pub export fn domainFound(appDomain: i32, nsKind: i32, uri: [*]const u8, uri_len
 }
 
 pub export fn domainLinked(index: i32) usize {
-    return handOut(avm2.domainLinked(gpa(), index) catch |err| return fail(err));
+    return handed(avm2.domainLinked(gpa(), index));
 }
 
 pub export fn domainWantsCompact(want: i32) bool {
@@ -256,17 +256,15 @@ pub export fn domainWantsCompact(want: i32) bool {
 }
 
 pub export fn domainModule(hashes: [*]const u8, hashes_len: u32, index: i32, keep: bool, linkedOnly: bool) usize {
-    return handOut(avm2.domainModule(gpa(), staged(u8, hashes, hashes_len), index, keep, linkedOnly) catch |err| return fail(err));
+    return handed(avm2.domainModule(gpa(), staged(u8, hashes, hashes_len), index, keep, linkedOnly));
 }
 
 pub export fn domainModuleBytes(hashes: [*]const u8, hashes_len: u32, index: i32, keep: bool, linkedOnly: bool) usize {
-    const bytes = avm2.domainModuleBytes(gpa(), staged(u8, hashes, hashes_len), index, keep, linkedOnly) catch |err| return fail(err);
-    return if (bytes) |b| handOut(b) else handOutNone();
+    return handedOrNone(avm2.domainModuleBytes(gpa(), staged(u8, hashes, hashes_len), index, keep, linkedOnly));
 }
 
 pub export fn domainModuleMoreBytes() usize {
-    const bytes = avm2.domainModuleMoreBytes(gpa()) catch |err| return fail(err);
-    return if (bytes) |b| handOut(b) else handOutNone();
+    return handedOrNone(avm2.domainModuleMoreBytes(gpa()));
 }
 
 pub export fn domainModuleDone() bool {
@@ -274,20 +272,19 @@ pub export fn domainModuleDone() bool {
 }
 
 pub export fn domainModuleEntries() usize {
-    return handOut(avm2.domainModuleEntries(gpa()) catch |err| return fail(err));
+    return handed(avm2.domainModuleEntries(gpa()));
 }
 
 pub export fn domainSourceMap() usize {
-    return handOut(avm2.domainSourceMap(gpa()) catch |err| return fail(err));
+    return handed(avm2.domainSourceMap(gpa()));
 }
 
 pub export fn domainContext(index: i32, after: i32, upTo: i32) usize {
-    return handOut(avm2.domainContext(gpa(), index, after, upTo) catch |err| return fail(err));
+    return handed(avm2.domainContext(gpa(), index, after, upTo));
 }
 
 pub export fn domainKeyHeaderBytes(index: i32) usize {
-    const bytes = avm2.domainKeyHeaderBytes(gpa(), index) catch |err| return fail(err);
-    return if (bytes) |b| handOut(b) else handOutNone();
+    return handedOrNone(avm2.domainKeyHeaderBytes(gpa(), index));
 }
 
 pub export fn domainKeyFork(appDomain: i32) i32 {
@@ -295,12 +292,11 @@ pub export fn domainKeyFork(appDomain: i32) i32 {
 }
 
 pub export fn domainKeyLogBytes(appDomain: i32, after: i32, from: i32, to: i32, block: i32, filled: i32) usize {
-    const bytes = avm2.domainKeyLogBytes(gpa(), appDomain, after, from, to, block, filled) catch |err| return fail(err);
-    return if (bytes) |b| handOut(b) else handOutNone();
+    return handedOrNone(avm2.domainKeyLogBytes(gpa(), appDomain, after, from, to, block, filled));
 }
 
 pub export fn domainRevision() usize {
-    return handOut(avm2.domainRevision(gpa()) catch |err| return fail(err));
+    return handed(avm2.domainRevision(gpa()));
 }
 
 pub export fn domainLogMark() i32 {
@@ -308,7 +304,7 @@ pub export fn domainLogMark() i32 {
 }
 
 pub export fn domainLogSince(mark: i32, index: i32) usize {
-    return handOut(avm2.domainLogSince(gpa(), mark, index) catch |err| return fail(err));
+    return handed(avm2.domainLogSince(gpa(), mark, index));
 }
 
 pub export fn lastAddLinked() bool {
@@ -316,8 +312,7 @@ pub export fn lastAddLinked() bool {
 }
 
 pub export fn journalBytes(mark: u32) usize {
-    const bytes = avm2.journalBytes(gpa(), mark) catch |err| return fail(err);
-    return if (bytes) |b| handOut(b) else handOutNone();
+    return handedOrNone(avm2.journalBytes(gpa(), mark));
 }
 
 pub export fn replayEntry(kind: u32, index: u32, a: u32, b: u32) bool {
@@ -348,12 +343,11 @@ pub export fn domainRebuildStep() i32 {
 }
 
 pub export fn domainSaveBytes() usize {
-    return handOut(avm2.domainSaveBytes(gpa()) catch |err| return fail(err));
+    return handed(avm2.domainSaveBytes(gpa()));
 }
 
 pub export fn domainSavedAbcBytes(index: i32) usize {
-    const bytes = avm2.domainSavedAbcBytes(index) catch |err| return fail(err);
-    return if (bytes) |b| handOut(b) else handOutNone();
+    return handedOrNone(avm2.domainSavedAbcBytes(index));
 }
 
 pub export fn domainLoad(words: [*]const u8, len: u32) bool {
@@ -373,7 +367,7 @@ pub export fn domainLoadRebuild() bool {
 }
 
 pub export fn domainUsage() usize {
-    return handOut(avm2.domainUsage(gpa()) catch |err| return fail(err));
+    return handed(avm2.domainUsage(gpa()));
 }
 
 pub export fn domainParent(appDomain: i32) i32 {
