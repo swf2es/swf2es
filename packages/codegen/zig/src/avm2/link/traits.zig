@@ -532,9 +532,10 @@ pub const TraitsTable = struct {
 
     /// find from traits `ref`, none finding nothing.
     pub fn findFrom(self: *const TraitsTable, ref: TypeRef, ns: u32, name: u32, version: u8) Binding {
-        var it = self.bases(ref);
-        while (it.next()) |t| {
-            const b = self.own(t, ns, name, version);
+        // By hand, not bases(): every early-bound name the verifier looks up comes here.
+        var t = ref;
+        while (t != .none) : (t = self.base.get(t.index())) {
+            const b = self.own(t.index(), ns, name, version);
             if (b != Binding.none) {
                 return b;
             }
