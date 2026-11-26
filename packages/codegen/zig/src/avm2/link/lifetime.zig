@@ -196,20 +196,27 @@ pub fn memorySize() u64 {
     return memory.pages().reached();
 }
 
-/// What wantsRebuild is asked: a rebuild in place with no spare instance, or beside one made or being made.
-pub const WANT_InPlace: u8 = 0;
-pub const WANT_InPlaceBesideSpare: u8 = 1;
-/// A synchronous caller without a spare can pay for the first rebuild to reach a reusable high-water mark.
-pub const WANT_Synchronous: u8 = 4;
-/// A move to a spare instance (see saveDomain), or whether one will be due before long, for a host to make it ahead.
-pub const WANT_Move: u8 = 2;
-pub const WANT_Spare: u8 = 3;
+/// What wantsRebuild is asked. The host asks the first four by number
+/// (index.ts's WANT_* constants, which a unit test holds to these).
+pub const Want = enum(u8) {
+    /// A rebuild in place, with no spare instance.
+    in_place = 0,
+    /// A rebuild in place, beside a spare made or being made.
+    in_place_beside_spare = 1,
+    /// A move to a spare instance (see saveDomain).
+    move = 2,
+    /// Whether a move will be due before long, for a host to make the spare ahead.
+    spare = 3,
+    /// A synchronous caller without a spare, which can pay for the first
+    /// rebuild to reach a reusable high-water mark; never the host's.
+    synchronous = 4,
+};
 
 /// Whether a rebuild is worth it now, as `want` asks (lifetime.ts tells
 /// the policy): in this instance's memory, a part of `part` bytes of
 /// garbage at a time, or in another's, parts of `movedPart` there. Zig's
 /// memory is not AssemblyScript's, so the answers are its own.
-pub fn wantsRebuild(dom: *Domain, part: u64, movedPart: u64, want: u8) bool {
+pub fn wantsRebuild(dom: *Domain, part: u64, movedPart: u64, want: Want) bool {
     addWeights(dom);
     const size = memorySize();
     var largest: u64 = 0;
@@ -251,9 +258,9 @@ pub fn wantsRebuild(dom: *Domain, part: u64, movedPart: u64, want: u8) bool {
     // The live tables are allocated in runs. Leave headroom for fragmented free
     // chunks, the verifier, and a scratch part alongside the rebuilt domain.
     const fits = liveTables + (liveTables >> 1) + part < available;
-    if (want == WANT_Move or want == WANT_Spare) {
+    if (want == .move or want == .spare) {
         // A spare is made once a move is half way due, to be there when it is.
-        const half: u6 = if (want == WANT_Spare) 1 else 0;
+        const half: u6 = if (want == .spare) 1 else 0;
         const worth = dead >= @max(@max(DEAD_Floor, size >> 4), live >> 2) >> half;
         return ((worth and full(live + dead, reserve << half, size)) or
             size >= @max(SHRINK_Floor, rebuilt << (2 - half))) and
@@ -261,9 +268,9 @@ pub fn wantsRebuild(dom: *Domain, part: u64, movedPart: u64, want: u8) bool {
             rebuilt < MOVE_Limit;
     }
 
-    return !(want == WANT_InPlaceBesideSpare and smaller) and
+    return !(want == .in_place_beside_spare and smaller) and
         deadTables >= @max(@max(@min(DEAD_Floor >> 1, liveTables), size >> 3), liveTables >> 1) and
-        (fits or want == WANT_Synchronous) and
+        (fits or want == .synchronous) and
         !full(live, reserve, size);
 }
 
@@ -575,64 +582,79 @@ const SAVED_Builtin: u32 = 2;
 /// units, as AssemblyScript's strings of them.
 pub fn saveDomain(dom: *const Domain, gpa: Allocator, out: *std.ArrayList(u8)) Allocator.Error!void {
     out.clearRetainingCapacity();
-    const w = struct {
-        fn word(list: *std.ArrayList(u8), a: Allocator, value: u32) Allocator.Error!void {
-            try list.appendSlice(a, std.mem.asBytes(&std.mem.nativeToLittle(u32, value)));
-        }
-    };
-    try w.word(out, gpa, SAVED_Version);
-    try w.word(out, gpa, dom.apiVersion);
-    try w.word(out, gpa, dom.generation);
+    var w: SaveWriter = .{ .out = out, .gpa = gpa };
+    try w.word(SAVED_Version);
+    try w.word(dom.apiVersion);
+    try w.word(dom.generation);
     const domains = dom.domainParent.len;
-    try w.word(out, gpa, domains);
+    try w.word(domains);
     for (0..domains) |d_| {
         const d: u32 = @intCast(d_);
-        try w.word(out, gpa, @bitCast(dom.domainParent.get(d)));
-        try w.word(out, gpa, dom.domainDepth.get(d));
-        try w.word(out, gpa, @backingInt(dom.domainState.get(d)));
-        try w.word(out, gpa, dom.domainEvicted.get(d));
+        try w.word(@bitCast(dom.domainParent.get(d)));
+        try w.word(dom.domainDepth.get(d));
+        try w.kind(dom.domainState.get(d));
+        try w.word(dom.domainEvicted.get(d));
     }
 
     const abcs = dom.abcs.len;
-    try w.word(out, gpa, abcs);
+    try w.word(abcs);
     for (0..abcs) |i_| {
         const i: u32 = @intCast(i_);
         const abc = dom.abcs.get(i);
         const kept = abc != &no_abc and dom.isLive(i);
-        try w.word(out, gpa, dom.abcDomain.get(i));
-        try w.word(out, gpa, dom.abcWeight.get(i));
-        try w.word(out, gpa, (if (kept) SAVED_Live else 0) | (if (abc.builtin) SAVED_Builtin else 0));
-        try w.word(out, gpa, if (kept) abc.length else 0);
+        try w.word(dom.abcDomain.get(i));
+        try w.word(dom.abcWeight.get(i));
+        try w.word((if (kept) SAVED_Live else 0) | (if (abc.builtin) SAVED_Builtin else 0));
+        try w.word(if (kept) abc.length else 0);
     }
 
     const entries = dom.logKind.len;
-    try w.word(out, gpa, entries);
+    try w.word(entries);
     for (0..entries) |e_| {
         const e: u32 = @intCast(e_);
-        try w.word(out, gpa, @backingInt(dom.logKind.get(e)));
-        try w.word(out, gpa, dom.logAt.get(e));
-        try w.word(out, gpa, dom.logAbc.get(e));
-        try w.word(out, gpa, dom.logA.get(e));
-        try w.word(out, gpa, dom.logB.get(e));
+        try w.kind(dom.logKind.get(e));
+        try w.word(dom.logAt.get(e));
+        try w.word(dom.logAbc.get(e));
+        try w.word(dom.logA.get(e));
+        try w.word(dom.logB.get(e));
     }
 
     const found = dom.foundDomain.len;
-    try w.word(out, gpa, found);
+    try w.word(found);
     for (0..found) |f_| {
         const f: u32 = @intCast(f_);
-        try w.word(out, gpa, dom.foundDomain.get(f));
-        try w.word(out, gpa, @backingInt(dom.foundKind.get(f)));
-        try w.word(out, gpa, dom.foundAbc.get(f));
-        try w.word(out, gpa, dom.foundAsType.get(f));
-        for ([_][]const u8{ dom.foundUri.get(f), dom.foundName.get(f) }) |text| {
-            const units = try output.decodeUnits(gpa, text);
-            try w.word(out, gpa, @intCast(units.len));
-            for (units) |u| {
-                try w.word(out, gpa, u);
-            }
-        }
+        try w.word(dom.foundDomain.get(f));
+        try w.kind(dom.foundKind.get(f));
+        try w.word(dom.foundAbc.get(f));
+        try w.word(dom.foundAsType.get(f));
+        try w.text(dom.foundUri.get(f));
+        try w.text(dom.foundName.get(f));
     }
 }
+
+/// saveDomain's words, little-endian, appended to `out`.
+const SaveWriter = struct {
+    out: *std.ArrayList(u8),
+    gpa: Allocator,
+
+    fn word(self: *SaveWriter, value: u32) Allocator.Error!void {
+        try self.out.appendSlice(self.gpa, std.mem.asBytes(&std.mem.nativeToLittle(u32, value)));
+    }
+
+    /// A kind or a state, a byte, as a word.
+    fn kind(self: *SaveWriter, value: anytype) Allocator.Error!void {
+        try self.word(@backingInt(value));
+    }
+
+    /// A string as its UTF-16 units, a word each after their count, as AssemblyScript's strings of them.
+    fn text(self: *SaveWriter, wtf8: []const u8) Allocator.Error!void {
+        const units = try output.decodeUnits(self.gpa, wtf8);
+        try self.word(@intCast(units.len));
+        for (units) |u| {
+            try self.word(u);
+        }
+    }
+};
 
 /// Whether ABC `index` of `dom` is one saveDomain names live, whose bytes the other instance is given.
 pub fn savedLive(dom: *const Domain, index: u32) bool {
@@ -653,52 +675,52 @@ pub const Loaded = struct {
     lengths: std.ArrayList(u32) = .empty,
 };
 
-/// saveDomain's words, read in turn, failing rather than reading past them.
-const Words = struct {
-    words: []const u8,
-    at: usize = 0,
-    failed: bool = false,
+/// Words that are not saveDomain's: too few, or a kind no save writes.
+const Malformed = error{Malformed};
+const LoadError = Malformed || Allocator.Error;
 
-    fn next(self: *Words) u32 {
-        if (self.at + 4 > self.words.len) {
-            self.failed = true;
-            return 0;
+/// saveDomain's words, read in turn, refused rather than read past.
+const SaveReader = struct {
+    bytes: []const u8,
+    at: usize = 0,
+
+    fn word(self: *SaveReader) Malformed!u32 {
+        if (self.bytes.len - self.at < 4) {
+            return error.Malformed;
         }
 
-        const value = std.mem.readInt(u32, self.words[self.at..][0..4], .little);
+        const value = std.mem.readInt(u32, self.bytes[self.at..][0..4], .little);
         self.at += 4;
         return value;
     }
 
     /// A kind or a state, a byte saved as a word: one above 0xff, which a
     /// save never writes, is refused, not read as its low byte.
-    fn kind(self: *Words, comptime T: type) T {
-        const word = self.next();
-        if (word > 0xff) {
-            self.failed = true;
+    fn kind(self: *SaveReader, comptime T: type) Malformed!T {
+        const value = try self.word();
+        if (value > 0xff) {
+            return error.Malformed;
         }
 
-        return T.fromWord(word);
+        return T.fromWord(value);
     }
 
     /// A count of things of `size` words each, refused if more than the words left could hold.
-    fn count(self: *Words, size: u64) u32 {
-        const n = self.next();
-        if (@as(u64, n) * size * 4 > self.words.len - @min(self.at, self.words.len)) {
-            self.failed = true;
-            return 0;
+    fn count(self: *SaveReader, size: u64) Malformed!u32 {
+        const n = try self.word();
+        if (@as(u64, n) * size * 4 > self.bytes.len - self.at) {
+            return error.Malformed;
         }
 
         return n;
     }
 
     /// A string of UTF-16 units, as the domain keeps a finding's: WTF-8.
-    fn text(self: *Words, gpa: Allocator) Allocator.Error![]const u8 {
-        const length = self.count(1);
-        const units = try gpa.alloc(u16, length);
+    fn text(self: *SaveReader, gpa: Allocator) LoadError![]const u8 {
+        const units = try gpa.alloc(u16, try self.count(1));
         for (units) |*u| {
             // AssemblyScript's String.fromCharCodes keeps the low 16 bits.
-            u.* = @truncate(self.next());
+            u.* = @truncate(try self.word());
         }
 
         return std.unicode.wtf16LeToWtf8Alloc(gpa, units);
@@ -708,56 +730,65 @@ const Words = struct {
 /// Load into `loaded.dom`, a new Domain, a domain as saveDomain saved it:
 /// false if the words are not saveDomain's.
 pub fn loadDomain(loaded: *Loaded, words: []const u8) Allocator.Error!bool {
+    var reader: SaveReader = .{ .bytes = words };
+    read(loaded, &reader) catch |err| switch (err) {
+        // The first word that is not a save's ends the load, whatever follows.
+        error.Malformed => return false,
+        error.OutOfMemory => |e| return e,
+    };
+
+    return consistent(loaded.dom) and livesGiven(loaded);
+}
+
+/// loadDomain's reading of the words, before what they say is checked.
+fn read(loaded: *Loaded, reader: *SaveReader) LoadError!void {
     const dom = loaded.dom;
     const gpa = dom.gpa;
-    var reader: Words = .{ .words = words };
-    if (reader.next() != SAVED_Version) {
-        return false;
+    if (try reader.word() != SAVED_Version) {
+        return error.Malformed;
     }
 
-    dom.apiVersion = @truncate(reader.next());
-    dom.generation = reader.next();
+    dom.apiVersion = @truncate(try reader.word());
+    dom.generation = try reader.word();
     // The saved domains, the root among them, in place of the new domain's.
     truncateDomains(dom);
-    const domains = reader.count(4);
+    const domains = try reader.count(4);
     for (0..domains) |_| {
-        try dom.domainParent.push(gpa, @bitCast(reader.next()));
-        try dom.domainDepth.push(gpa, reader.next());
-        try dom.domainState.push(gpa, reader.kind(DomainState));
-        try dom.domainEvicted.push(gpa, reader.next());
+        try dom.domainParent.push(gpa, @bitCast(try reader.word()));
+        try dom.domainDepth.push(gpa, try reader.word());
+        try dom.domainState.push(gpa, try reader.kind(DomainState));
+        try dom.domainEvicted.push(gpa, try reader.word());
     }
 
-    const abcs = reader.count(4);
+    const abcs = try reader.count(4);
     for (0..abcs) |_| {
         try dom.abcs.push(gpa, &no_abc);
-        try dom.abcDomain.push(gpa, reader.next());
-        try dom.abcWeight.push(gpa, reader.next());
-        try loaded.flags.append(gpa, @truncate(reader.next()));
-        try loaded.lengths.append(gpa, reader.next());
+        try dom.abcDomain.push(gpa, try reader.word());
+        try dom.abcWeight.push(gpa, try reader.word());
+        try loaded.flags.append(gpa, @truncate(try reader.word()));
+        try loaded.lengths.append(gpa, try reader.word());
         try dom.abcBuffer.push(gpa, &no_bytes);
         try dom.abcBase.push(gpa, &no_bytes);
     }
 
-    const entries = reader.count(5);
+    const entries = try reader.count(5);
     for (0..entries) |_| {
-        try dom.logKind.push(gpa, reader.kind(domain_.LogKind));
-        try dom.logAt.push(gpa, reader.next());
-        try dom.logAbc.push(gpa, reader.next());
-        try dom.logA.push(gpa, reader.next());
-        try dom.logB.push(gpa, reader.next());
+        try dom.logKind.push(gpa, try reader.kind(domain_.LogKind));
+        try dom.logAt.push(gpa, try reader.word());
+        try dom.logAbc.push(gpa, try reader.word());
+        try dom.logA.push(gpa, try reader.word());
+        try dom.logB.push(gpa, try reader.word());
     }
 
-    const found = reader.count(6);
+    const found = try reader.count(6);
     for (0..found) |_| {
-        try dom.foundDomain.push(gpa, reader.next());
-        try dom.foundKind.push(gpa, reader.kind(domain_.NsType));
-        try dom.foundAbc.push(gpa, reader.next());
-        try dom.foundAsType.push(gpa, @truncate(reader.next()));
+        try dom.foundDomain.push(gpa, try reader.word());
+        try dom.foundKind.push(gpa, try reader.kind(domain_.NsType));
+        try dom.foundAbc.push(gpa, try reader.word());
+        try dom.foundAsType.push(gpa, @truncate(try reader.word()));
         try dom.foundUri.push(gpa, try reader.text(gpa));
         try dom.foundName.push(gpa, try reader.text(gpa));
     }
-
-    return !reader.failed and consistent(dom) and livesGiven(loaded);
 }
 
 /// Whether every ABC of a live application domain is one saveDomain named

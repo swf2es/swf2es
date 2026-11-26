@@ -514,7 +514,8 @@ comptime {
 
 /// A frame of em.saved: each register's type, checked and promoted, each
 /// scope's with, each scope and stack register's copy, a word each, and
-/// the scalars.
+/// the scalars. One slice a table, on purpose: the frame used to pair each
+/// register's checked and promoted, which no slice could name.
 const SavedFrame = struct {
     types: []i32,
     checked: []i32,

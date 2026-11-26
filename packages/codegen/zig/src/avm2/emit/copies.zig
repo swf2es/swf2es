@@ -28,16 +28,16 @@ pub const Fact = enum(i32) {
             std.debug.assert(r >= 0);
         }
 
-        return @enumFromInt(r);
+        return @fromBackingInt(r);
     }
 
     /// A copy of the constant instruction i pushed.
     pub inline fn constant(i: u32) Fact {
-        return @enumFromInt(-2 - @as(i32, @intCast(i)));
+        return @fromBackingInt(-2 - @as(i32, @intCast(i)));
     }
 
     pub inline fn isRegister(f: Fact) bool {
-        return @intFromEnum(f) >= 0;
+        return @backingInt(f) >= 0;
     }
 
     /// Whether f copies a constant; never asked of unseen, which only flowCopies' rows hold.
@@ -46,7 +46,7 @@ pub const Fact = enum(i32) {
             std.debug.assert(f != .unseen);
         }
 
-        return @intFromEnum(f) <= -2;
+        return @backingInt(f) <= -2;
     }
 
     /// The register f copies.
@@ -55,7 +55,7 @@ pub const Fact = enum(i32) {
             std.debug.assert(f.isRegister());
         }
 
-        return @intFromEnum(f);
+        return @backingInt(f);
     }
 
     /// The instruction that pushed the constant f copies.
@@ -64,7 +64,7 @@ pub const Fact = enum(i32) {
             std.debug.assert(f.isConstant());
         }
 
-        return @intCast(-2 - @intFromEnum(f));
+        return @intCast(-2 - @backingInt(f));
     }
 
     /// What register r reads, whose fact f is: what it copies, or r itself.

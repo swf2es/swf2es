@@ -289,7 +289,12 @@ pub fn domainLinked(gpa: Allocator, index: i32) Allocator.Error![]const u8 {
 /// its answers are too.
 pub fn domainWantsCompact(want: i32) Allocator.Error!bool {
     const dom = try domain();
-    return want >= 0 and want <= 3 and lifetime.wantsRebuild(dom, partBudget(), part_budget, @intCast(want));
+    // Of the host's four only.
+    if (want < 0 or want > @backingInt(lifetime.Want.spare)) {
+        return false;
+    }
+
+    return lifetime.wantsRebuild(dom, partBudget(), part_budget, @fromBackingInt(@as(u8, @intCast(want))));
 }
 
 /// The garbage a part of a rebuild makes, which stage 6's rebuild takes;
@@ -1291,7 +1296,7 @@ fn rebuilt(r: *Rebuilding) bool {
 /// whether it was (or, `stepped`, started).
 pub fn domainCompact(stepped: bool) Allocator.Error!bool {
     const dom = try domain();
-    const want = if (stepped) lifetime.WANT_InPlace else lifetime.WANT_Synchronous;
+    const want: lifetime.Want = if (stepped) .in_place else .synchronous;
     if (!lifetime.wantsRebuild(dom, partBudget(), part_budget, want)) {
         return false;
     }

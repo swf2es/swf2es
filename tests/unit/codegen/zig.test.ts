@@ -180,6 +180,24 @@ test("the Zig tests' ABCs are the ones the node tests build", async () => {
   assert.deepEqual(await zigBytes("domain.zig", "link_contested"), [...verifyErrorAbcs()[2][1]]);
 });
 
+test("index.ts asks wantsRebuild by the numbers lifetime.zig's Want gives them", async () => {
+  const read = (path: string) =>
+    readFile(new URL(`../../../packages/codegen/${path}`, import.meta.url), "utf8");
+  const zig = (await read("zig/src/avm2/link/lifetime.zig")).match(
+    /pub const Want = enum\(u8\) \{([^}]*)\};/,
+  )?.[1];
+  assert.ok(zig, "Want in lifetime.zig");
+  const want = new Map(
+    [...zig.matchAll(/^\s*([a-z_]+) = (\d+),/gm)].map(([, name, value]) => [name, Number(value)]),
+  );
+  const host = [...(await read("src/index.ts")).matchAll(/^const WANT_(\w+) = (\d+);/gm)];
+  assert.ok(host.length >= 4, "index.ts's WANT_ constants");
+  for (const [, name, value] of host) {
+    const snake = name.replace(/(?<!^)[A-Z]/g, (c) => `_${c}`).toLowerCase();
+    assert.equal(want.get(snake), Number(value), `WANT_${name} is Want.${snake}`);
+  }
+});
+
 test("a load that panics the compiler is rejected, and the domain goes on in a new instance", async () => {
   // The test build panics on these two ABCs (root.zig's domainAdd): a
   // safety check, and the stack overflowing.
