@@ -1,28 +1,53 @@
-// A reference build of the compiler from a git ref, for the parity harness
-// (run.ts) and the compile-time benchmark (tests/bench/codegen-compile.ts):
-// its release and test builds, built once by the pinned Zig from the ref's
-// packages/codegen/zig and kept in ~/.cache/swf2es/parity/<commit>/.
+// The builds the parity harness (run.ts) and the compile-time benchmark
+// (tests/bench/codegen-compile.ts) compare: a reference, from a git ref,
+// and the candidate, this tree's.
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runZig, swf2esCache } from "../../tools/zig.ts";
+import { built, inputs, recorded } from "../../packages/codegen/zig/inputs.ts";
+import { runZig, swf2esCache, ZIG_VERSION } from "../../tools/zig.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
+const sha256 = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
+
+/** The reference's modules, the names its build.zig gave them (as at zig-last-parity, or as since), and its digests.json's. */
+const REFERENCE_MODULES = [
+  {
+    name: "codegen",
+    built: ["codegen", "codegen-zig"],
+    digested: ["dist/codegen.wasm", "dist/codegen-zig.wasm"],
+  },
+  {
+    name: "testing",
+    built: ["testing", "testing-zig"],
+    digested: ["dist-test/testing.wasm", "dist-test/testing-zig.wasm"],
+  },
+];
 
 /**
- * The reference's release and test builds, built once by the pinned Zig
- * from `ref`'s packages/codegen/zig and kept by its commit. Its artifacts
- * are named as at zig-last-parity (codegen-zig, testing-zig, ...) or as
- * since (codegen, testing, ...).
+ * The reference's release and test builds, built once from `ref`'s
+ * packages/codegen/zig by this tree's pinned Zig (its version is in the
+ * cache's key, beside the commit), the release build stamped as pnpm build
+ * stamps it, each checked against the ref's own digests.json where it has
+ * one, and kept in ~/.cache/swf2es/parity/<zig>-<commit>/, written whole
+ * or not at all.
  */
 export function referenceBuild(ref: string): { dir: string; commit: string } {
   const commit = execFileSync("git", ["rev-parse", `${ref}^{commit}`], { cwd: root })
     .toString()
     .trim();
-  const dir = join(swf2esCache(), "parity", commit);
-  const files = ["codegen.wasm", "testing.wasm", "testing-poison.wasm"];
-  if (files.every((f) => existsSync(join(dir, f)))) {
+  const dir = join(swf2esCache(), "parity", `${ZIG_VERSION}-${commit}`);
+  if (REFERENCE_MODULES.every((m) => existsSync(join(dir, `${m.name}.wasm`)))) {
     return { dir, commit };
   }
 
@@ -40,27 +65,67 @@ export function referenceBuild(ref: string): { dir: string; commit: string } {
       ["build", "--prefix", prefix],
       join(swf2esCache(), "zig-codegen-cache"),
     );
-    mkdirSync(dir, { recursive: true });
-    for (const name of ["codegen", "testing", "testing-poison"]) {
-      const zig = name.replace(/^(codegen|testing)/, "$1-zig");
-      const from = [join(prefix, "bin", `${name}.wasm`), join(prefix, "bin", `${zig}.wasm`)].find(
-        (path) => existsSync(path),
+    let digests: { modules?: Record<string, string> } = {};
+    try {
+      digests = JSON.parse(
+        execFileSync("git", ["show", `${commit}:packages/codegen/zig/digests.json`], {
+          cwd: root,
+          stdio: ["ignore", "pipe", "ignore"],
+        }).toString(),
       );
-      if (!from) {
-        throw new Error(`the reference's build has no ${name}.wasm`);
-      }
-
-      copyFileSync(from, join(dir, `${name}.wasm`));
+    } catch {
+      // A ref from before the digests.
     }
 
-    // Stamped as pnpm build stamps the release build, so that sizes compare.
-    execFileSync(process.execPath, [
-      join(root, "packages/codegen/stamp.ts"),
-      join(dir, "codegen.wasm"),
-    ]);
+    const staged = join(work, "staged");
+    mkdirSync(staged);
+    for (const module of REFERENCE_MODULES) {
+      const from = module.built
+        .map((name) => join(prefix, "bin", `${name}.wasm`))
+        .find((path) => existsSync(path));
+      if (!from) {
+        throw new Error(`the reference's build has no ${module.name}.wasm`);
+      }
+
+      const to = join(staged, `${module.name}.wasm`);
+      copyFileSync(from, to);
+      if (module.name === "codegen") {
+        execFileSync(process.execPath, [join(root, "packages/codegen/stamp.ts"), to]);
+      }
+
+      const want = module.digested.map((path) => digests.modules?.[path]).find(Boolean);
+      if (want && want !== sha256(to)) {
+        throw new Error(
+          `the reference's ${module.name}.wasm, ${sha256(to)}, is not its digests.json's, ${want}`,
+        );
+      }
+    }
+
+    mkdirSync(join(swf2esCache(), "parity"), { recursive: true });
+    rmSync(dir, { recursive: true, force: true });
+    renameSync(staged, dir);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
 
   return { dir, commit };
+}
+
+/**
+ * This tree's builds, made from its sources: build.ts runs first, which
+ * builds them again where they are not digests.json's or the sources moved
+ * since. The release build's path.
+ */
+export function candidateBuild(): { release: string } {
+  execFileSync(process.execPath, [join(root, "packages/codegen/zig/build.ts")], {
+    stdio: "inherit",
+  });
+  const digests = recorded();
+  if (digests?.inputs !== inputs()) {
+    console.log("parity: the candidate is built from sources digests.json does not record yet");
+  } else if (JSON.stringify(built()) !== JSON.stringify(digests.modules)) {
+    console.log("parity: the candidate's modules are not digests.json's for these sources");
+  }
+
+  return { release: join(root, "packages/codegen/dist/codegen.wasm") };
 }

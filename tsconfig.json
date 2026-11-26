@@ -26,6 +26,7 @@
     "packages/codegen/src/webassembly.d.ts",
     "packages/codegen/stamp.ts",
     "packages/codegen/zig/build.ts",
+    "packages/codegen/zig/inputs.ts",
     "packages/native/build.ts",
     "packages/player-hosts/build-thread.ts",
     "packages/swf2es/build.ts"

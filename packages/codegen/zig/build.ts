@@ -20,31 +20,14 @@
 //                               with the name section, so that a trap's
 //                               stack names its functions (zig build names)
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { inputDigest, runZig, swf2esCache, ZIG_VERSION } from "../../../tools/zig.ts";
+import { runZig, swf2esCache, ZIG_VERSION } from "../../../tools/zig.ts";
+import { built, type Digests, digestsFile, inputs, MODULES, pkg, recorded } from "./inputs.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-const pkg = join(here, "..");
-const digestsFile = join(here, "digests.json");
 
-/** Each module build.zig installs, and where in the package it goes. */
-const MODULES: Record<string, string> = {
-  codegen: "dist/codegen.wasm",
-  testing: "dist-test/testing.wasm",
-  "testing-poison": "dist-test/testing-poison.wasm",
-};
 const STAMPED = new Set(["codegen"]);
 /**
  * What the AssemblyScript compiler's build left in the package, which a
@@ -62,43 +45,6 @@ const LEFTOVERS = [
   "dist-test/testing-zig-poison.wasm",
   "dist-test-checked",
 ];
-
-interface Digests {
-  zig: string;
-  inputs: string;
-  modules: Record<string, string>;
-}
-
-const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-
-function zigFiles(dir: string): string[] {
-  return readdirSync(dir, { recursive: true, encoding: "utf8" })
-    .filter((file) => file.endsWith(".zig"))
-    .map((file) => join(dir, file));
-}
-
-function inputs(): string {
-  return inputDigest(pkg, [
-    ...zigFiles(join(here, "src")),
-    join(here, "build.zig"),
-    fileURLToPath(import.meta.url),
-    join(pkg, "stamp.ts"),
-  ]);
-}
-
-function recorded(): Digests | null {
-  return existsSync(digestsFile) ? JSON.parse(readFileSync(digestsFile, "utf8")) : null;
-}
-
-function built(): Record<string, string> {
-  const modules: Record<string, string> = {};
-  for (const path of Object.values(MODULES)) {
-    const file = join(pkg, path);
-    modules[path] = existsSync(file) ? sha256(readFileSync(file)) : "";
-  }
-
-  return modules;
-}
 
 /** The modules built into the package, with Zig's caches in `cache`, else fresh ones. */
 async function build(cache?: string): Promise<void> {

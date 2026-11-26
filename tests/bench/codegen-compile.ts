@@ -7,31 +7,36 @@
 //   - conformance: each case's ABC (tests/golden/abcs/) in a child domain of
 //     avmshell's libraries, dropped after;
 //   - avm1: the determinism checks' AVM1 blocks, each SWF's module;
-//   - local: SWF2ES_LOCAL_SWFS's SWFs, space-separated paths, reported by
+//   - local: SWF2ES_LOCAL_SWFS's SWFs (tests/parity/local.ts), reported by
 //     number only: an AS3 SWF's ABCs in a child domain of the player's
 //     libraries, dropped after, or an AVM1 SWF's module;
 //   - rebuild: the libraries and every conformance case live and compiled,
 //     saved, then loaded and rebuilt (each verified again) in a fresh
 //     instance, as a compaction moves it.
 //
-// Prints each group's median and quartiles for both, and the candidate's
-// ratio to the reference; a group whose output differs in size says so.
-// Run under the machine lock, the machine otherwise idle.
+// The candidate is this tree's, built first where its sources moved. Each
+// build has one pass first that is not counted, and the runs alternate
+// which build goes first, an even number of them. Prints each group's
+// median and quartiles for both, and candidate/reference; a group whose
+// output differs in size says so. Run under the machine lock, the machine
+// otherwise idle.
 //
 //   node tests/bench/codegen-compile.ts [--reference <ref>] [--runs N]
+import "../parity/guard.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shellToplevelLibrary } from "../../packages/cli/dist/shell-toplevel-library.js";
 import { API_VERSION } from "../../packages/codegen/dist/index.js";
 import { type CodegenExports, instantiate } from "../../packages/codegen/dist/zig.js";
-import { isAs3, readActions, readDoAbc, readSwf } from "../../packages/format/dist/index.js";
+import { isAs3, readActions, readDoAbc } from "../../packages/format/dist/index.js";
 import {
   builtinLibrary,
   playerglobalLibrary,
 } from "../../packages/player/dist/playerglobal/libraries.js";
 import { type Avm1Swf, avm1Swfs } from "../conformance/determinism-avm1.ts";
-import { referenceBuild } from "../parity/reference.ts";
+import { localSwfs } from "../parity/local.ts";
+import { candidateBuild, referenceBuild } from "../parity/reference.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const args = process.argv.slice(2);
@@ -40,24 +45,21 @@ const option = (name: string, fallback: string) => {
   return at >= 0 ? args[at + 1] : fallback;
 };
 const ref = option("--reference", "zig-last-parity");
-const runs = Number(option("--runs", "7"));
+const runs = Number(option("--runs", "8"));
+if (!Number.isInteger(runs) || runs < 2 || runs % 2 !== 0) {
+  console.log("--runs takes an even number, 2 or more, so that each build goes first as often");
+  process.exit(1);
+}
 
 const reference = referenceBuild(ref);
+const candidate = candidateBuild();
 const builds: Record<string, WebAssembly.Module> = {
   reference: await WebAssembly.compile(readFileSync(join(reference.dir, "codegen.wasm"))),
-  candidate: await WebAssembly.compile(
-    readFileSync(join(root, "packages/codegen/dist/codegen.wasm")),
-  ),
+  candidate: await WebAssembly.compile(readFileSync(candidate.release)),
 };
 
 type Compiler = CodegenExports & { panicked(): string | null };
 
-const abcsOf = (file: string): Uint8Array[] => {
-  const swf = readSwf(new Uint8Array(readFileSync(file)));
-  return swf.tags
-    .filter((t) => t.code === 72 || t.code === 82)
-    .map((t) => readDoAbc(swf.bytes, t).abc);
-};
 const conformanceDir = join(root, "tests/golden/abcs/conformance");
 const conformance = readdirSync(conformanceDir)
   .filter((f) => f.endsWith(".abc"))
@@ -65,24 +67,22 @@ const conformance = readdirSync(conformanceDir)
   .map((f) => [new Uint8Array(readFileSync(join(conformanceDir, f)))]);
 const avm1 = avm1Swfs(false);
 /** A local SWF: its ABCs, or its AVM1 action blocks. */
-const local = (process.env.SWF2ES_LOCAL_SWFS ?? "")
-  .split(" ")
-  .filter(Boolean)
-  .map((file, i): Uint8Array[] | Avm1Swf => {
-    const swf = readSwf(new Uint8Array(readFileSync(file)));
-    if (isAs3(swf)) {
-      return abcsOf(file);
-    }
+const local = localSwfs().map((swf, i): Uint8Array[] | Avm1Swf => {
+  if (isAs3(swf)) {
+    return swf.tags
+      .filter((t) => t.code === 72 || t.code === 82)
+      .map((t) => readDoAbc(swf.bytes, t).abc);
+  }
 
-    const { version, blocks } = readActions(swf);
-    return {
-      name: `local ${i}`,
-      bytes: swf.bytes,
-      version,
-      offsets: Int32Array.from(blocks, (b) => b.offset),
-      lengths: Int32Array.from(blocks, (b) => b.length),
-    };
-  });
+  const { version, blocks } = readActions(swf);
+  return {
+    name: `local ${i}`,
+    bytes: swf.bytes,
+    version,
+    offsets: Int32Array.from(blocks, (b) => b.offset),
+    lengths: Int32Array.from(blocks, (b) => b.length),
+  };
+});
 
 /** AVM1 SWFs' modules, each kept: ms and bytes. */
 async function actions(build: string, swfs: Avm1Swf[]) {
@@ -222,11 +222,16 @@ const GROUPS: [string, (build: string) => Promise<{ ms: number; bytes: number }>
 const times = new Map<string, number[]>();
 const sizes = new Map<string, number>();
 const order = Object.keys(builds);
-for (let run = 0; run < runs; run++) {
+// One pass each first, not counted: the engine's tiers warmed alike for both.
+for (let run = -1; run < runs; run++) {
   for (const [name, measure] of GROUPS) {
     // Interleaved, each run starting with the other build.
     for (const build of run % 2 ? [...order].reverse() : order) {
       const { ms, bytes } = await measure(build);
+      if (run < 0) {
+        continue;
+      }
+
       const key = `${build} ${name}`;
       times.set(key, [...(times.get(key) ?? []), ms]);
       sizes.set(key, bytes);
@@ -248,12 +253,12 @@ for (const [name] of GROUPS) {
   console.log(
     `${name.padEnd(12)} reference ${a.median.toFixed(1)} ms (${a.q1.toFixed(1)}-${a.q3.toFixed(1)}), ` +
       `candidate ${b.median.toFixed(1)} ms (${b.q1.toFixed(1)}-${b.q3.toFixed(1)}), ` +
-      `${(b.median / a.median).toFixed(3)}${same ? "" : ", OUTPUT DIFFERS IN SIZE"}`,
+      `candidate/reference ${(b.median / a.median).toFixed(3)}${same ? "" : ", OUTPUT DIFFERS IN SIZE"}`,
   );
 }
 
 const size = (file: string) => readFileSync(file).length;
 console.log(
   `codegen.wasm: reference ${size(join(reference.dir, "codegen.wasm"))} bytes, ` +
-    `candidate ${size(join(root, "packages/codegen/dist/codegen.wasm"))} bytes`,
+    `candidate ${size(candidate.release)} bytes`,
 );

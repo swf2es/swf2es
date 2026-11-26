@@ -1,3 +1,27 @@
+// The old-against-new parity harness: a reference build of the compiler,
+// made from a git ref (the tag zig-last-parity by default, the last commit
+// that held the Zig compiler to AssemblyScript's byte for byte; reference.ts),
+// and the candidate, this tree's build, fed the same calls, their results
+// compared byte for byte; and the candidate's poison build, which fills
+// freed memory with 0xAA, against the candidate, which differ only where
+// output reads memory nothing wrote. A suite runs on the release builds, or
+// on the test builds for the dumps. A case that throws is recorded as its
+// result, so one failure stops nothing. Not a CI job: the golden digests
+// (tests/golden) are CI's; this is the tool for a refactor of the compiler,
+// which must leave every suite the same.
+//
+// The candidate is built first where this tree's sources moved since its
+// modules were built (build.ts). Any suite that differs fails the run; one
+// with nothing to run (no corpus fetched, no ABCs in the oracle's cache, no
+// cases) is reported as skipped, so "all 45 suites the same" means all 45
+// ran. Each build's results go to out/, and where a case's large result (a
+// module) differs, both, with the first line they differ at. Ruffle's corpus
+// is used where it was fetched (tests/player/corpus/fetch-ruffle.ts), the
+// oracle's ABCs where its cache holds them, and SWF2ES_LOCAL_SWFS adds
+// local SWFs (local.ts), reported by number only.
+//
+//   node tests/parity/run.ts [--reference <ref>] [suite...]
+import "./guard.ts";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -5,8 +29,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shellToplevelLibrary } from "../../packages/cli/dist/shell-toplevel-library.js";
 import { AIR_API_VERSION, API_VERSION } from "../../packages/codegen/dist/index.js";
-import { type CodegenExports, instantiate, SIGNATURES } from "../../packages/codegen/dist/zig.js";
-import { isAs3, readActions, readDoAbc, readSwf } from "../../packages/format/dist/index.js";
+import { type CodegenExports, instantiate } from "../../packages/codegen/dist/zig.js";
+import {
+  isAs3,
+  readActions,
+  readDoAbc,
+  readSwf,
+  type Swf,
+} from "../../packages/format/dist/index.js";
 import {
   airLibrary,
   builtinLibrary,
@@ -20,13 +50,11 @@ import { linkCases, resolveCases } from "../unit/codegen/link-cases.ts";
 import { richAbc } from "../unit/codegen/rich-abc.ts";
 import { bindTesting, testingModule } from "../unit/codegen/testing-module.ts";
 import { verifyErrorAbcs } from "../unit/codegen/verify-errors.ts";
-import { referenceBuild } from "./reference.ts";
+import { localSwfs } from "./local.ts";
+import { candidateBuild, referenceBuild } from "./reference.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const out = fileURLToPath(new URL("out/", import.meta.url));
-const expected: string[] = JSON.parse(
-  readFileSync(fileURLToPath(new URL("expected.json", import.meta.url)), "utf8"),
-);
 
 /**
  * A suite's results: a line a case, large results by their digests. The
@@ -231,10 +259,7 @@ function avm1(c: Compiler, r: Results, swf: Avm1Swf): void {
     .map((item) => item.split("\u0001"))
     .filter((parts) => parts.length === 4)
     .map(([key, numbers]) => [key, numbers.split(",").map(Number)] as const);
-  for (const [i, [key, [at, end, bound, five]]] of keys.entries()) {
-    if (i % 64 === 63) {
-    }
-
+  for (const [key, [at, end, bound, five]] of keys) {
     r.case(`${name}: unit ${key}`, () => {
       const code = r.blob(
         `${name}: unit ${key}`,
@@ -252,10 +277,7 @@ function avm1(c: Compiler, r: Results, swf: Avm1Swf): void {
   r.case(`${name}: held blocks`, () =>
     r.blob(`${name}: held blocks`, handed(c, c.actionsHeldEmitEachBytes(7, version, all))),
   );
-  for (const [i, [key, [at, end, bound, five]]] of keys.entries()) {
-    if (i % 64 === 63) {
-    }
-
+  for (const [key, [at, end, bound, five]] of keys) {
     r.case(`${name}: held unit ${key}`, () => {
       const code = r.blob(
         `${name}: held unit ${key}`,
@@ -271,13 +293,12 @@ function avm1(c: Compiler, r: Results, swf: Avm1Swf): void {
   });
 }
 
-/** Local SWFs, SWF2ES_LOCAL_SWFS's paths, space-separated: reported by number, never by name. */
-const localFiles = () => (process.env.SWF2ES_LOCAL_SWFS ?? "").split(" ").filter(Boolean);
+/** The local SWFs (local.ts), read once, up front. */
+const locals = localSwfs();
 
 /** The local SWFs' AVM1 action blocks. */
-function localSwfs(): Avm1Swf[] {
-  return localFiles().flatMap((file, i) => {
-    const swf = readSwf(new Uint8Array(readFileSync(file)));
+function localAvm1(): Avm1Swf[] {
+  return locals.flatMap((swf, i) => {
     const { version, blocks } = readActions(swf);
     return isAs3(swf) || blocks.length === 0
       ? []
@@ -698,33 +719,35 @@ let corpusCounted = false;
 /** DoABC and DoABC2 tags' codes. */
 const DO_ABC = [72, 82];
 
+const corpus = new URL("../player/corpus/ruffle/tests/tests/swfs/", import.meta.url);
+
+/** Why the SWF suites have nothing to run, if they have not: neither the corpus nor a local SWF. */
+const noSwfs = () =>
+  existsSync(corpus) || locals.length > 0
+    ? null
+    : "no corpus fetched (tests/player/corpus/fetch-ruffle.ts) and no SWF2ES_LOCAL_SWFS";
+
 /** The ABCs of the corpus's AS3 SWFs (where it was fetched) and of the local SWFs. */
 function swfAbcs(): [string, Uint8Array][] {
-  const corpus = new URL("../player/corpus/ruffle/tests/tests/swfs/", import.meta.url);
-  const files: [string, string][] = [];
-  try {
+  const swfs: [string, Swf][] = [];
+  if (existsSync(corpus)) {
     for (const name of readdirSync(corpus, { recursive: true, encoding: "utf8" }).sort()) {
       if (name.endsWith(".swf")) {
-        files.push([name, fileURLToPath(new URL(name, corpus))]);
+        try {
+          swfs.push([name, readSwf(new Uint8Array(readFileSync(new URL(name, corpus))))]);
+        } catch {
+          // Not a SWF this reader takes.
+        }
       }
     }
-  } catch {
-    // Not fetched.
   }
 
-  for (const [i, file] of localFiles().entries()) {
-    files.push([`local ${i}`, file]);
+  for (const [i, swf] of locals.entries()) {
+    swfs.push([`local ${i}`, swf]);
   }
 
   const found: [string, Uint8Array][] = [];
-  for (const [name, file] of files) {
-    let swf: ReturnType<typeof readSwf>;
-    try {
-      swf = readSwf(new Uint8Array(readFileSync(file)));
-    } catch {
-      continue;
-    }
-
+  for (const [name, swf] of swfs) {
     for (const [k, tag] of swf.tags.filter((t) => DO_ABC.includes(t.code)).entries()) {
       found.push([`${name} abc ${k}`, readDoAbc(swf.bytes, tag).abc]);
     }
@@ -787,16 +810,6 @@ function abcDumps(c: Compiler, r: Results, name: string, bytes: Uint8Array): voi
   r.case(`${name}: reads`, () => Array.from(c.readAll(bytes.subarray(0, 96), KINDS)).join(","));
 }
 
-/** A link case. */
-function linked(
-  _c: Compiler,
-  r: Results,
-  name: string,
-  run: () => string | number | boolean,
-): void {
-  r.case(name, run);
-}
-
 /** Libraries to link against: the player's, or avmshell's builtin and shell_toplevel. */
 type Base = { version: number; libraries: Uint8Array[] };
 const PLAYER: Base = { version: API_VERSION, libraries: [builtinLibrary, playerglobalLibrary] };
@@ -843,7 +856,7 @@ class Linking {
     const { c, r } = this;
     let first = 0;
     let error = -2;
-    linked(c, r, `${name}: add`, () => {
+    r.case(`${name}: add`, () => {
       first = c.domainTraitsCount();
       error = this.add(bytes, builtin, domain);
       return error;
@@ -853,11 +866,9 @@ class Linking {
     }
 
     const index = this.count - 1;
-    linked(c, r, `${name}: traits`, () =>
-      r.blob(`${name}: traits`, Buffer.from(c.domainTraits(first))),
-    );
-    linked(c, r, `${name}: linked`, () => c.domainLinked(index));
-    linked(c, r, `${name}: slot types`, () => {
+    r.case(`${name}: traits`, () => r.blob(`${name}: traits`, Buffer.from(c.domainTraits(first))));
+    r.case(`${name}: linked`, () => c.domainLinked(index));
+    r.case(`${name}: slot types`, () => {
       const all: string[] = [];
       for (let cls = 0; cls < 4096; cls++) {
         const types = c.domainSlotTypes(index, cls);
@@ -870,22 +881,18 @@ class Linking {
 
       return r.blob(`${name}: slot types`, Buffer.from(all.join("\n")));
     });
-    linked(c, r, `${name}: resolve`, () => c.domainResolve(first));
-    linked(c, r, `${name}: after`, () =>
-      r.blob(`${name}: after`, Buffer.from(c.domainTraits(first))),
-    );
+    r.case(`${name}: resolve`, () => c.domainResolve(first));
+    r.case(`${name}: after`, () => r.blob(`${name}: after`, Buffer.from(c.domainTraits(first))));
     return true;
   }
 
   /** The domain's counts and versioned URIs, its builtins, and what its ABCs weigh. */
   summary(name: string): void {
     const { c, r } = this;
-    linked(c, r, `${name}: summary`, () =>
-      r.blob(`${name}: summary`, Buffer.from(c.domainSummary())),
-    );
-    linked(c, r, `${name}: builtins`, () => c.domainBuiltins());
+    r.case(`${name}: summary`, () => r.blob(`${name}: summary`, Buffer.from(c.domainSummary())));
+    r.case(`${name}: builtins`, () => c.domainBuiltins());
     // Live and dead weights count rows alike; the memory after them is each compiler's own.
-    linked(c, r, `${name}: usage`, () => c.domainUsage().split(" ").slice(0, 2).join(" "));
+    r.case(`${name}: usage`, () => c.domainUsage().split(" ").slice(0, 2).join(" "));
   }
 
   /** Lookups of names the libraries define, from `domain`. */
@@ -893,7 +900,7 @@ class Linking {
     const { c, r } = this;
     for (const [type, uri, local] of FINDS) {
       for (const version of [0, 50, 52]) {
-        linked(c, r, `${name}: find ${type} ${uri}::${local} at ${version}`, () =>
+        r.case(`${name}: find ${type} ${uri}::${local} at ${version}`, () =>
           c.domainFind(type, uri, local, version, domain),
         );
       }
@@ -1003,6 +1010,23 @@ function oracleDir(): string {
   const cache = process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache");
   return process.env.SWF2ES_ORACLE_CACHE ?? join(cache, "swf2es", "oracle");
 }
+
+/** Why the oracle suites have nothing to run, if they have not. */
+const noOracle = () => {
+  const dir = oracleDir();
+  const any =
+    existsSync(dir) &&
+    readdirSync(dir).some((sub) => {
+      try {
+        return readdirSync(join(dir, sub)).some((f) => f.endsWith(".abc"));
+      } catch {
+        return false;
+      }
+    });
+  return any
+    ? null
+    : `no ABCs in the oracle's cache (${dir === oracleDir() ? "~/.cache/swf2es/oracle or SWF2ES_ORACLE_CACHE" : ""})`;
+};
 
 function oracleAbcs(): [string, [string, Uint8Array][]][] {
   const found: [string, [string, Uint8Array][]][] = [];
@@ -1698,7 +1722,7 @@ const verifyErrors = new Map<string, number>();
 /** What verifying the last ABC added gives: each body's error, the IR checked, and some bodies' IR. */
 function verifyLast(c: Compiler, r: Results, name: string, irs: number): void {
   let bodies = 0;
-  linked(c, r, `${name}: verify`, () => {
+  r.case(`${name}: verify`, () => {
     const text: string = c.domainVerifyAll();
     bodies = Number(/of (\d+) bodies$/.exec(text)?.[1] ?? 0);
     if (r.compiler === "reference") {
@@ -1709,13 +1733,13 @@ function verifyLast(c: Compiler, r: Results, name: string, irs: number): void {
 
     return r.blob(`${name}: verify`, Buffer.from(text));
   });
-  linked(c, r, `${name}: check IR`, () => c.domainCheckIr());
+  r.case(`${name}: check IR`, () => c.domainCheckIr());
   // Every verified body's whole IR, entry frames and flags included.
-  linked(c, r, `${name}: full IR`, () => r.blob(`${name}: full IR`, Buffer.from(c.domainIrAll())));
+  r.case(`${name}: full IR`, () => r.blob(`${name}: full IR`, Buffer.from(c.domainIrAll())));
   // Every body's for a small ABC; for a large one, spread over it.
   const step = Math.max(1, Math.ceil(bodies / irs));
   for (let b = 0; b < bodies; b += step) {
-    linked(c, r, `${name}: IR ${b}`, () => r.blob(`${name}: IR ${b}`, Buffer.from(c.domainIr(b))));
+    r.case(`${name}: IR ${b}`, () => r.blob(`${name}: IR ${b}`, Buffer.from(c.domainIr(b))));
   }
 }
 
@@ -1726,16 +1750,14 @@ function verifyLast(c: Compiler, r: Results, name: string, irs: number): void {
  */
 function emitLast(c: Compiler, r: Results, name: string, count: number): void {
   let bodies = 0;
-  linked(c, r, `${name}: verify`, () => {
+  r.case(`${name}: verify`, () => {
     const text: string = c.domainVerifyAll();
     bodies = Number(/of (\d+) bodies$/.exec(text)?.[1] ?? 0);
     return r.blob(`${name}: verify`, Buffer.from(text));
   });
   const step = Math.max(1, Math.ceil(bodies / count));
   for (let b = 0; b < bodies; b += step) {
-    linked(c, r, `${name}: emit ${b}`, () =>
-      r.blob(`${name}: emit ${b}`, Buffer.from(c.domainEmit(b))),
-    );
+    r.case(`${name}: emit ${b}`, () => r.blob(`${name}: emit ${b}`, Buffer.from(c.domainEmit(b))));
   }
 }
 
@@ -1745,7 +1767,7 @@ function emitLast(c: Compiler, r: Results, name: string, count: number): void {
  * the module whole with hashes, linked only; parts of `budget` bytes.
  */
 function moduleLast(c: Compiler, r: Results, name: string, budget: number): void {
-  linked(c, r, `${name}: module`, () => {
+  r.case(`${name}: module`, () => {
     c.domainPartBudget(budget);
     // Each part copied as it is handed out: any call may grow memory.
     const parts = [handed(c, c.domainModuleBytes("", -1, true, false)).slice()];
@@ -1756,11 +1778,11 @@ function moduleLast(c: Compiler, r: Results, name: string, budget: number): void
     c.domainPartBudget(0);
     return r.blob(`${name}: module`, Buffer.concat(parts));
   });
-  linked(c, r, `${name}: source map`, () =>
+  r.case(`${name}: source map`, () =>
     r.blob(`${name}: source map`, Buffer.from(c.domainSourceMap())),
   );
   let bodies = "";
-  linked(c, r, `${name}: entries`, () => {
+  r.case(`${name}: entries`, () => {
     const entries: string = c.domainModuleEntries();
     // Each entry is its body's index, U+0001, its code, U+0002.
     bodies = entries
@@ -1770,10 +1792,10 @@ function moduleLast(c: Compiler, r: Results, name: string, budget: number): void
       .join(",");
     return r.blob(`${name}: entries`, Buffer.from(entries));
   });
-  linked(c, r, `${name}: each`, () =>
+  r.case(`${name}: each`, () =>
     r.blob(`${name}: each`, Buffer.from(c.domainEmitEach(bodies, budget % 2 === 0))),
   );
-  linked(c, r, `${name}: linked only`, () =>
+  r.case(`${name}: linked only`, () =>
     r.blob(
       `${name}: linked only`,
       Buffer.from(c.domainModule("own\nfirst\nsecond", -1, false, true)),
@@ -1789,9 +1811,9 @@ function moduleLast(c: Compiler, r: Results, name: string, budget: number): void
  * and the root in blocks; how far the child's log is its parent's; and
  * the revision. Every `count`-th ABC's module only is compiled.
  */
-function keysLast(c: Compiler, r: Results, name: string, _count: number, child: number): void {
+function keysLast(c: Compiler, r: Results, name: string, child: number): void {
   const address = (a: number) => (a === 0 ? "none" : Buffer.from(handed(c, a)).toString("latin1"));
-  linked(c, r, `${name}: compile`, () => {
+  r.case(`${name}: compile`, () => {
     const mark: number = c.domainLogMark();
     const module = createHash("sha1")
       .update(c.domainModule("", -1, false, false))
@@ -1799,7 +1821,7 @@ function keysLast(c: Compiler, r: Results, name: string, _count: number, child: 
     const since: string = c.domainLogSince(mark, -1);
     return `${module} mark ${mark} since [${since}] replay ${c.domainReplay(since, -1)} again [${c.domainLogSince(mark, -1)}]`;
   });
-  linked(c, r, `${name}: context`, () =>
+  r.case(`${name}: context`, () =>
     r.blob(
       `${name}: context`,
       Buffer.from(
@@ -1807,7 +1829,7 @@ function keysLast(c: Compiler, r: Results, name: string, _count: number, child: 
       ),
     ),
   );
-  linked(c, r, `${name}: keys`, () =>
+  r.case(`${name}: keys`, () =>
     r.blob(
       `${name}: keys`,
       Buffer.from(
@@ -1823,6 +1845,10 @@ function keysLast(c: Compiler, r: Results, name: string, _count: number, child: 
     ),
   );
 }
+
+/** keysLast as verifySwfs calls each ABC's, which takes no count. */
+const keysEach = (c: Compiler, r: Results, name: string, _: number, child: number) =>
+  keysLast(c, r, name, child);
 
 /**
  * Each SWF's ABCs added into a child of the root, as linkSwfs adds them,
@@ -1956,7 +1982,7 @@ const SUITES: Suite[] = [
 
         return corpus;
       });
-      for (const swf of [...swfs, ...localSwfs()]) {
+      for (const swf of [...swfs, ...localAvm1()]) {
         avm1(c, r, swf);
       }
     },
@@ -2112,13 +2138,14 @@ const SUITES: Suite[] = [
     name: "link-swfs",
     build: "testing",
     needs: LINK_EXPORTS,
+    unavailable: noSwfs,
     run: (c, r) => linkSwfs(c, r, PLAYER, bySwf(swfAbcs())),
   },
   {
     name: "link-oracle",
     build: "testing",
     needs: LINK_EXPORTS,
-    unavailable: () => (existsSync(oracleDir()) ? null : "no oracle cache"),
+    unavailable: noOracle,
     run: (c, r) => linkSwfs(c, r, SHELL, oracleAbcs()),
   },
   {
@@ -2289,13 +2316,14 @@ const SUITES: Suite[] = [
     name: "verify-swfs",
     build: "testing",
     needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr", "domainIrAll"],
+    unavailable: noSwfs,
     run: (c, r) => verifySwfs(c, r, PLAYER, bySwf(swfAbcs()), 24),
   },
   {
     name: "verify-oracle",
     build: "testing",
     needs: [...LINK_EXPORTS, "domainVerifyAll", "domainCheckIr", "domainIr", "domainIrAll"],
-    unavailable: () => (existsSync(oracleDir()) ? null : "no oracle cache"),
+    unavailable: noOracle,
     run: (c, r) => verifySwfs(c, r, SHELL, oracleAbcs(), 8),
   },
   {
@@ -2365,13 +2393,14 @@ const SUITES: Suite[] = [
     name: "emit-swfs",
     build: "testing",
     needs: [...LINK_EXPORTS, "domainVerifyAll", "domainEmit"],
+    unavailable: noSwfs,
     run: (c, r) => verifySwfs(c, r, PLAYER, bySwf(swfAbcs()), 48, emitLast),
   },
   {
     name: "emit-oracle",
     build: "testing",
     needs: [...LINK_EXPORTS, "domainVerifyAll", "domainEmit"],
-    unavailable: () => (existsSync(oracleDir()) ? null : "no oracle cache"),
+    unavailable: noOracle,
     run: (c, r) => verifySwfs(c, r, SHELL, oracleAbcs(), 32, emitLast),
   },
   {
@@ -2419,13 +2448,14 @@ const SUITES: Suite[] = [
     name: "modules-swfs",
     build: "testing",
     needs: [...LINK_EXPORTS, ...MODULE_EXPORTS],
+    unavailable: noSwfs,
     run: (c, r) => verifySwfs(c, r, PLAYER, bySwf(swfAbcs()), 65536, moduleLast),
   },
   {
     name: "modules-oracle",
     build: "testing",
     needs: [...LINK_EXPORTS, ...MODULE_EXPORTS],
-    unavailable: () => (existsSync(oracleDir()) ? null : "no oracle cache"),
+    unavailable: noOracle,
     run: (c, r) => verifySwfs(c, r, SHELL, oracleAbcs(), 1 << 20, moduleLast),
   },
   {
@@ -2453,14 +2483,15 @@ const SUITES: Suite[] = [
         PLAYER,
         linkSeeds().map(([name, bytes]) => [name, [[name, bytes]]]),
         1,
-        keysLast,
+        keysEach,
       ),
   },
   {
     name: "keys-swfs",
     build: "testing",
     needs: [...LINK_EXPORTS, ...KEY_EXPORTS],
-    run: (c, r) => verifySwfs(c, r, PLAYER, bySwf(swfAbcs()), 1, keysLast),
+    unavailable: noSwfs,
+    run: (c, r) => verifySwfs(c, r, PLAYER, bySwf(swfAbcs()), 1, keysEach),
   },
   {
     name: "keys-mutated",
@@ -2473,7 +2504,7 @@ const SUITES: Suite[] = [
         PLAYER,
         mutatedCode(2000).map(([name, bytes]) => [name, [[name, bytes]]]),
         1,
-        keysLast,
+        keysEach,
       ),
   },
   {
@@ -2563,12 +2594,23 @@ if (!ref) {
   throw new Error("--reference needs a git ref");
 }
 
+const wanted = args.filter((arg, i) => arg !== "--reference" && args[i - 1] !== "--reference");
+const unknown = wanted.filter((name) => !SUITES.some((suite) => suite.name === name));
+if (unknown.length > 0) {
+  console.log(
+    `parity: no suite ${unknown.join(", ")}; the suites: ${SUITES.map((s) => s.name).join(" ")}`,
+  );
+  process.exit(1);
+}
+
 const reference = referenceBuild(ref);
+// The candidate's builds made from this tree's sources, as pnpm build makes them.
+const candidate = candidateBuild();
 const compile = (path: string) => WebAssembly.compile(readFileSync(path));
 const modules = {
   reference: await compile(join(reference.dir, "codegen.wasm")),
   referenceTesting: await compile(join(reference.dir, "testing.wasm")),
-  candidate: await compile(join(root, "packages/codegen/dist/codegen.wasm")),
+  candidate: await compile(candidate.release),
   candidateTesting: await testingModule("testing"),
   poison: await testingModule("testing-poison"),
 };
@@ -2613,20 +2655,29 @@ for (const [name, module] of Object.entries(modules)) {
   }
 }
 
-// The reference must have what the candidate's bindings call.
-for (const [build, mine, theirs] of [
-  ["release", modules.candidate, modules.reference],
-  ["testing", modules.candidateTesting, modules.referenceTesting],
-] as const) {
-  const missing = [...exported(mine)].filter((name) => !exported(theirs).has(name));
+// The reference must have what the suites call.
+for (const build of ["release", "testing"] as const) {
+  const theirs = exported(build === "release" ? modules.reference : modules.referenceTesting);
+  const needed = new Set(SUITES.filter((s) => s.build === build).flatMap((s) => s.needs));
+  const missing = [...needed].filter((name) => !theirs.has(name));
   if (missing.length > 0) {
     console.log(`parity: the reference's ${build} build lacks ${missing.join(", ")}`);
+    failed++;
   }
 }
 
+const sha = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
+const shas = {
+  reference: sha(join(reference.dir, "codegen.wasm")),
+  candidate: sha(candidate.release),
+};
 console.log(
-  `parity: ${ref} (${reference.commit.slice(0, 9)}) against this tree, ${Object.keys(SIGNATURES).length} exports`,
+  `parity: reference ${ref} (${reference.commit.slice(0, 9)}), codegen.wasm ${shas.reference}`,
 );
+console.log(`parity: candidate this tree, codegen.wasm ${shas.candidate}`);
+if (shas.reference === shas.candidate) {
+  console.log("parity: the candidate's release build is the reference's, byte for byte");
+}
 
 /** The first line two lists differ at, or -1. */
 function differs(a: string[], b: string[]): number {
@@ -2659,27 +2710,27 @@ async function showBlobs(suite: Suite, key: string, aName: string, bName: string
   return `\n    ${key}, line ${at + 1} (out/${suite.name}/${file}.*):\n      ${aName}: ${aLines[at]?.slice(0, 200)}\n      ${bName}: ${bLines[at]?.slice(0, 200)}`;
 }
 
-const wanted = args.filter((arg, i) => arg !== "--reference" && args[i - 1] !== "--reference");
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 const report: Record<string, string> = {};
-for (const suite of SUITES.filter((s) => wanted.length === 0 || wanted.includes(s.name))) {
+const selected = SUITES.filter((s) => wanted.length === 0 || wanted.includes(s.name));
+const skipped: string[] = [];
+let ran = 0;
+let cases = 0;
+for (const suite of selected) {
   const unavailable = suite.unavailable?.();
   if (unavailable) {
     report[suite.name] = `skipped: ${unavailable}`;
-    console.log(`  ${suite.name}: skipped (${unavailable})`);
+    console.log(`  ${suite.name}: SKIPPED (${unavailable})`);
+    skipped.push(suite.name);
     continue;
   }
 
   const missing = suite.needs.filter((name) => !has[suite.build].has(name));
   if (missing.length > 0) {
-    report[suite.name] = `not ported: ${missing.join(", ")}`;
-    console.log(`  ${suite.name}: not ported (${missing.join(", ")})`);
-    if (expected.includes(suite.name)) {
-      console.log(`  ${suite.name} is in expected.json, but not ported`);
-      failed++;
-    }
-
+    report[suite.name] = `the candidate lacks ${missing.join(", ")}`;
+    console.log(`  ${suite.name}: the candidate lacks ${missing.join(", ")}`);
+    failed++;
     continue;
   }
 
@@ -2712,22 +2763,30 @@ for (const suite of SUITES.filter((s) => wanted.length === 0 || wanted.includes(
     }
   }
 
-  report[suite.name] = mismatches.length
-    ? "differs"
-    : `same, ${results.reference.lines.length} cases`;
-  console.log(
-    `  ${suite.name}: ${mismatches.length ? mismatches.join("\n  ") : report[suite.name]}`,
-  );
-  if (mismatches.length && expected.includes(suite.name)) {
+  const count = results.reference.lines.length;
+  if (mismatches.length > 0) {
+    report[suite.name] = "differs";
+    console.log(`  ${suite.name}: ${mismatches.join("\n  ")}`);
     failed++;
-  } else if (!mismatches.length && !expected.includes(suite.name) && !suite.unavailable) {
-    // A ratchet: what is the same is held so.
-    console.log(`  ${suite.name} is the same now: add it to tests/parity/expected.json`);
-    failed++;
+  } else if (count === 0) {
+    report[suite.name] = "skipped: no cases";
+    console.log(`  ${suite.name}: SKIPPED (no cases)`);
+    skipped.push(suite.name);
+  } else {
+    report[suite.name] = `same, ${count} cases`;
+    console.log(`  ${suite.name}: ${report[suite.name]}`);
+    ran++;
+    cases += count;
   }
 }
 
 writeFileSync(join(out, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
+const all = ran === SUITES.length ? `all ${ran} suites` : `${ran} of ${SUITES.length} suites`;
+console.log(
+  failed > 0
+    ? `parity: ${failed} failed; ${ran} the same, ${skipped.length} skipped`
+    : `parity: ${all} the same, ${cases} cases${skipped.length ? `; skipped: ${skipped.join(", ")}` : ""}`,
+);
 if (failed > 0) {
   process.exitCode = 1;
 }
