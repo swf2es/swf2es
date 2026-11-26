@@ -29,8 +29,8 @@ pub fn stackName(dom: *Domain, gpa: Allocator, index: u32, m: u32) Allocator.Err
     const local = m - dom.methodStart.get(index);
     const t = traits.methodTraits.get(m);
     var out: Units = .empty;
-    if (t >= 0) {
-        const tu: u32 = @intCast(t);
+    if (t != .none) {
+        const tu = t.index();
         const kind = traits.kind.get(tu);
         const owner = traits.owner.get(tu);
         var declaring = false;

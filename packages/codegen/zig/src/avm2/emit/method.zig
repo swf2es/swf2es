@@ -57,7 +57,7 @@ pub fn hasBoundEntry(em: *MethodEmitter, m: u32) bool {
 pub fn isConstructor(em: *MethodEmitter, m: u32) bool {
     const traits = &em.domain.traits;
     const t = traits.methodTraits.get(m);
-    return t >= 0 and traits.kind.get(@intCast(t)) == .instance and traits.init.get(@intCast(t)) == @as(i32, @bitCast(m));
+    return t != .none and traits.kind.get(t.index()) == .instance and traits.init.get(t.index()) == @as(i32, @bitCast(m));
 }
 
 /// The deepest structured code a method is given; one deeper keeps the dispatcher.
