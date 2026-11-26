@@ -83,6 +83,7 @@ pub const TypeRef = enum(i32) {
 
     /// Its traits id; a ref that is not none.
     pub fn index(ref: TypeRef) u32 {
+        std.debug.assert(ref != .none);
         return @intCast(@backingInt(ref));
     }
 

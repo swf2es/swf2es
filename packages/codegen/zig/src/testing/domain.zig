@@ -110,7 +110,7 @@ pub fn domainTraits(gpa: Allocator, first: i32) Allocator.Error![]const u8 {
                 w.writeByte('\n') catch break :write;
             }
 
-            w.print("traits {d} kind {d} base {d} slots {d} methods {d}", .{ t, traits.kind.get(u), traits.base.get(u), traits.slotCount.get(u), traits.methodCount.get(u) }) catch break :write;
+            w.print("traits {d} kind {d} base {d} slots {d} methods {d}", .{ t, traits.kind.get(u), @backingInt(traits.base.get(u)), traits.slotCount.get(u), traits.methodCount.get(u) }) catch break :write;
             var m = traits.memberStart.get(u);
             while (m < traits.memberEnd.get(u)) : (m += 1) {
                 const binding = traits.memberBinding.get(m);
