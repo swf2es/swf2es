@@ -14,6 +14,8 @@ const parseI32 = @import("parse.zig").parseI32;
 const domain_ = @import("avm2/link/domain.zig");
 const Domain = domain_.Domain;
 const lifetime = @import("avm2/link/lifetime.zig");
+const rebuild_ = @import("avm2/link/rebuild.zig");
+const saved = @import("avm2/link/saved.zig");
 const C = @import("avm2/abc/constants.zig");
 const code = @import("avm2/abc/code.zig");
 const output = @import("output.zig");
@@ -1077,7 +1079,7 @@ const Rebuilding = struct {
     previous_limit: ?u32 = null,
     box: *Box,
     source: ?*Box,
-    rebuild: lifetime.Rebuild,
+    rebuild: rebuild_.Rebuild,
 };
 
 /// The rebuild a part at a time and the garbage each part may make, and the
@@ -1091,7 +1093,7 @@ var revived_top: u32 = 0;
 /// The domain domainLoad started, until domainLoadRebuild, and the garbage its parts may make.
 const Loading = struct {
     box: *Box,
-    loaded: lifetime.Loaded,
+    loaded: saved.Loaded,
     target: *Box,
 };
 var loading: ?*Loading = null;
@@ -1177,7 +1179,7 @@ fn stepRebuild(r: *Rebuilding, budget: u64) Allocator.Error!bool {
     return domain_.changed(&r.box.dom, &r.box.arena, stepFresh, .{ &r.rebuild, budget });
 }
 
-fn stepFresh(_: *Domain, rebuild: *lifetime.Rebuild, budget: u64) Allocator.Error!bool {
+fn stepFresh(_: *Domain, rebuild: *rebuild_.Rebuild, budget: u64) Allocator.Error!bool {
     return rebuild.step(budget);
 }
 
@@ -1290,7 +1292,7 @@ pub fn domainRebuildStep() Allocator.Error!i32 {
 pub fn domainSaveBytes(gpa: Allocator) Allocator.Error![]const u8 {
     const dom = try domain();
     var out: std.ArrayList(u8) = .empty;
-    try lifetime.saveDomain(dom, gpa, &out);
+    try saved.saveDomain(dom, gpa, &out);
     return out.items;
 }
 
@@ -1299,7 +1301,7 @@ pub fn domainSavedAbcBytes(index: i32) Allocator.Error!?[]const u8 {
     const dom = try domain();
     // The bound only makes the cast sound: savedLive checks the ABC's own.
     const i = indexIn(index, dom.abcs.len) orelse return null;
-    return if (lifetime.savedLive(dom, i)) lifetime.savedBytes(dom, i) else null;
+    return if (saved.savedLive(dom, i)) saved.savedBytes(dom, i) else null;
 }
 
 /// In a new instance, start a domain as another's domainSaveBytes saved
@@ -1314,8 +1316,8 @@ pub fn domainLoad(words: []const u8, recovery: bool) Allocator.Error!bool {
     errdefer pages.destroy(l);
     const box = try make(dom.apiVersion);
     errdefer unmake(box);
-    var loaded: lifetime.Loaded = .{ .dom = &box.dom };
-    if (!try lifetime.loadDomain(&loaded, words)) {
+    var loaded: saved.Loaded = .{ .dom = &box.dom };
+    if (!try saved.loadDomain(&loaded, words)) {
         unmake(box);
         pages.destroy(l);
         return false;
@@ -1325,7 +1327,7 @@ pub fn domainLoad(words: []const u8, recovery: bool) Allocator.Error!bool {
     // can make a move exceed the memory of the domain it is supposed to shrink.
     loading_budget = part_budget;
     if (!recovery) {
-        const size = lifetime.loadedSize(&loaded, loading_budget);
+        const size = saved.loadedSize(&loaded, loading_budget);
         if (size >= lifetime.MOVE_Limit) {
             unmake(box);
             pages.destroy(l);
@@ -1344,7 +1346,7 @@ pub fn domainLoadAbc(index: i32, bytes: []const u8) Allocator.Error!i32 {
         return -1;
     }
 
-    return lifetime.loadAbc(&l.loaded, &l.target.arena, @intCast(index), bytes);
+    return saved.loadAbc(&l.loaded, &l.target.arena, @intCast(index), bytes);
 }
 
 /// Start rebuilding the domain domainLoad started, given all its live ABCs,
@@ -1352,7 +1354,7 @@ pub fn domainLoadAbc(index: i32, bytes: []const u8) Allocator.Error!i32 {
 /// whether it was started.
 pub fn domainLoadRebuild() Allocator.Error!bool {
     const l = loading orelse return false;
-    if (!lifetime.loadedAll(&l.loaded)) {
+    if (!saved.loadedAll(&l.loaded)) {
         return false;
     }
 
