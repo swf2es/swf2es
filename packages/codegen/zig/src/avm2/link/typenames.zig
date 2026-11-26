@@ -170,11 +170,7 @@ fn resolvePlain(dom: *const Domain, index: u32, mn: u32, diag: *Diagnostics) Nam
         const ns = pool.mnA[mn];
         found = findType(dom, index, ids[ns], strings[nameIndex], versions[ns]);
     } else if (kind == .multiname and nameIndex != 0) {
-        const set = pool.mnA[mn];
-        const last = pool.nsSetStart[set + 1];
-        var m = pool.nsSetStart[set];
-        while (m < last) : (m += 1) {
-            const ns = pool.nsSetMembers[m];
+        for (pool.nsSet(pool.mnA[mn])) |ns| {
             const t = findType(dom, index, ids[ns], strings[nameIndex], versions[ns]);
             if (t >= 0 and found >= 0 and t != found) {
                 return diag.fail(.kAmbiguousBindingError);
@@ -289,12 +285,10 @@ pub fn addClassNames(dom: *Domain, index: u32) Allocator.Error!void {
         var version = versions[ns];
         if (pool.mnKind[mn] == .multiname) {
             const set = ns;
-            const last = pool.nsSetStart[set + 1];
             ns = domain_.firstMember(pool, set);
             version = domain_.API_Internal;
-            var m = pool.nsSetStart[set];
-            while (m < last) : (m += 1) {
-                const v = versions[pool.nsSetMembers[m]];
+            for (pool.nsSet(set)) |member| {
+                const v = versions[member];
                 if (v < version) {
                     version = v;
                 }

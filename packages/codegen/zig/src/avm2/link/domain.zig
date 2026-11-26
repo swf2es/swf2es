@@ -904,11 +904,8 @@ pub const Domain = struct {
             return self.scriptOf(self.find(ids[ns], name, versions[ns], self.abcDomain.get(index)));
         }
 
-        const set = pool.mnA[mn];
         var found: TypeRef = .none;
-        var m = pool.nsSetStart[set];
-        while (m < pool.nsSetStart[set + 1]) : (m += 1) {
-            const ns = pool.nsSetMembers[m];
+        for (pool.nsSet(pool.mnA[mn])) |ns| {
             const script = self.scriptOf(self.find(ids[ns], name, versions[ns], self.abcDomain.get(index)));
             if (script != .none) {
                 if (found != .none and found != script) {
@@ -963,11 +960,9 @@ pub const Domain = struct {
             return false;
         }
 
-        const set = pool.mnA[mn];
-        var m = pool.nsSetStart[set];
-        while (m < pool.nsSetStart[set + 1]) : (m += 1) {
+        for (pool.nsSet(pool.mnA[mn])) |member| {
             // As Namespace::isPublic: of the public kind, and with an empty URI.
-            const ns = self.abcNs.get(index)[pool.nsSetMembers[m]];
+            const ns = self.abcNs.get(index)[member];
             const uri = self.nsUri.get(ns);
             if (self.nsType.get(ns) == .public and (uri == URI_None or self.stringLength.get(uri) == 0)) {
                 return true;
@@ -982,14 +977,14 @@ pub const Domain = struct {
     /// protected member belonging to the first base that has it; -1 if none.
     pub fn initOfDeclarer(self: *Domain, type_: TypeId, index: u32, mn: u32) i32 {
         const traits = &self.traits;
-        var t = TypeRef.ofType(type_);
-        while (t != .none) : (t = traits.base.get(t.index())) {
-            const b = types.getOwnBinding(self, index, t.index(), mn);
+        var it = traits.bases(.ofType(type_));
+        while (it.next()) |t| {
+            const b = types.getOwnBinding(self, index, t, mn);
             if (b == Binding.none) {
                 continue;
             }
 
-            var declarer = t;
+            var declarer = TypeRef.of(t);
             var ns = self.foundNs;
             while (ns == traits.protectedNs.get(declarer.index())) {
                 const parent = traits.base.get(declarer.index());
@@ -1386,12 +1381,10 @@ pub const Domain = struct {
                 var version = versions[first];
                 if (pool.mnKind[mn] == .multiname) {
                     const set = pool.mnA[mn];
-                    const last = pool.nsSetStart[set + 1];
                     first = firstMember(pool, set);
                     version = API_Internal;
-                    var m = pool.nsSetStart[set];
-                    while (m < last) : (m += 1) {
-                        const v = versions[pool.nsSetMembers[m]];
+                    for (pool.nsSet(set)) |member| {
+                        const v = versions[member];
                         if (v < version) {
                             version = v;
                         }
@@ -1413,19 +1406,38 @@ pub const Domain = struct {
         return id;
     }
 
+    /// `domain`, then its parent, and so on up to the root.
+    pub fn ancestors(self: *const Domain, domain: u32) Ancestors {
+        return .{ .dom = self, .at = @intCast(domain) };
+    }
+
+    pub const Ancestors = struct {
+        dom: *const Domain,
+        /// The next domain, or -1 past the root.
+        at: i32,
+
+        pub fn next(it: *Ancestors) ?u32 {
+            if (it.at < 0) {
+                return null;
+            }
+
+            const d: u32 = @intCast(it.at);
+            it.at = it.dom.domainParent.get(d);
+            return d;
+        }
+    };
+
     /// Whether `domain` sees what `other` defines: `other` is it or an ancestor, and live.
     pub fn sees(self: *const Domain, domain: u32, other: u32) bool {
         if (self.domainState.get(other) != .live) {
             return false;
         }
 
-        var d: i32 = @intCast(domain);
-        while (d >= 0) {
-            if (@as(u32, @intCast(d)) == other) {
+        var it = self.ancestors(domain);
+        while (it.next()) |d| {
+            if (d == other) {
                 return true;
             }
-
-            d = self.domainParent.get(@intCast(d));
         }
 
         return false;

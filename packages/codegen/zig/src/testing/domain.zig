@@ -360,7 +360,7 @@ pub fn domainCheckIr(dom: *Domain, gpa: Allocator) Allocator.Error![]const u8 {
             while (i < last) : (i += 1) {
                 const op = ir.op[i];
                 const where = .{ body, k, i, irName(op) };
-                if (ir.dst[i] >= size or ir.dst[i] < -1) {
+                if (ir.dst[i] >= size or ir.dst[i] < ir_.no_register) {
                     return std.fmt.allocPrint(gpa, "body {d} B{d} row {d} ({s}): dst {d} outside the frame of {d}", where ++ .{ ir.dst[i], size });
                 }
 

@@ -23,7 +23,6 @@ const SlotIds = @import("../link/bindings.zig").SlotIds;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
-const TypeRef = traits_.TypeRef;
 const method_ = @import("method.zig");
 const MethodEmitter = method_.MethodEmitter;
 const METHOD_SLOT = method_.METHOD_SLOT;
@@ -286,13 +285,12 @@ pub const ModuleEmitter = struct {
         i = 1;
         while (i < pool.nsSetCount()) : (i += 1) {
             try o.text(", [");
-            var j = pool.nsSetStart[i];
-            while (j < pool.nsSetStart[i + 1]) : (j += 1) {
-                if (j > pool.nsSetStart[i]) {
+            for (pool.nsSet(i), 0..) |ns, k| {
+                if (k > 0) {
                     try o.text(", ");
                 }
 
-                try o.uint(pool.nsSetMembers[j]);
+                try o.uint(ns);
             }
 
             try o.text("]");
@@ -741,9 +739,9 @@ pub const ModuleEmitter = struct {
         // slot named twice has the value the runtime sets last.
         const chain = &self.fillChain;
         chain.clearRetainingCapacity();
-        var u = TypeRef.of(t);
-        while (u != .none) : (u = table.base.get(u.index())) {
-            try chain.append(gpa, u.index());
+        var it = table.bases(.of(t));
+        while (it.next()) |u| {
+            try chain.append(gpa, u);
         }
 
         var c = chain.items.len;

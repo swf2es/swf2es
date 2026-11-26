@@ -9,7 +9,6 @@ const hashPair = @import("table.zig").hashPair;
 const traits_ = @import("traits.zig");
 const Binding = traits_.Binding;
 const TypeId = traits_.TypeId;
-const TypeRef = traits_.TypeRef;
 
 /// As Multiname::isBinding: whether multiname `mn` of ABC `index` names
 /// something that can be bound early, a name in known namespaces.
@@ -96,16 +95,12 @@ fn lookupBinding(dom: *const Domain, index: u32, type_: TypeId, multiname: u32) 
         return traits.find(type_, ids[ns], name, versions[ns]);
     }
 
-    const set = pool.mnA[mn];
-    const first = pool.nsSetStart[set];
-    const last = pool.nsSetStart[set + 1];
-    var t = TypeRef.ofType(type_);
-    while (t != .none) : (t = traits.base.get(t.index())) {
+    const set = pool.nsSet(pool.mnA[mn]);
+    var it = traits.bases(.ofType(type_));
+    while (it.next()) |t| {
         var found = Binding.none;
-        var m = first;
-        while (m < last) : (m += 1) {
-            const ns = pool.nsSetMembers[m];
-            const b = traits.own(t.index(), ids[ns], name, versions[ns]);
+        for (set) |ns| {
+            const b = traits.own(t, ids[ns], name, versions[ns]);
             if (b == Binding.none) {
                 continue;
             }
@@ -144,10 +139,7 @@ pub fn getOwnBinding(dom: *Domain, index: u32, t: u32, multiname: u32) Binding {
         return traits.own(t, ids[ns], name, versions[ns]);
     }
 
-    const set = pool.mnA[mn];
-    var m = pool.nsSetStart[set];
-    while (m < pool.nsSetStart[set + 1]) : (m += 1) {
-        const ns = pool.nsSetMembers[m];
+    for (pool.nsSet(pool.mnA[mn])) |ns| {
         const b = traits.own(t, ids[ns], name, versions[ns]);
         if (b != Binding.none) {
             dom.foundNs = @intCast(ids[ns]);
@@ -195,12 +187,12 @@ pub fn commonBase(dom: *const Domain, a: TypeId, b: TypeId) TypeId {
         return a;
     }
 
-    var t = TypeRef.ofType(b);
-    while (t != .none) : (t = traits.base.get(t.index())) {
-        var s = TypeRef.ofType(a);
-        while (s != .none) : (s = traits.base.get(s.index())) {
+    var it = traits.bases(.ofType(b));
+    while (it.next()) |t| {
+        var inner = traits.bases(.ofType(a));
+        while (inner.next()) |s| {
             if (s == t) {
-                return t.toType();
+                return .of(t);
             }
         }
     }
@@ -218,9 +210,9 @@ pub fn canAssign(dom: *const Domain, lhs: TypeId, rhs: TypeId) bool {
         return true;
     }
 
-    var t = TypeRef.ofType(rhs);
-    while (t != .none) : (t = dom.traits.base.get(t.index())) {
-        if (t.toType() == lhs) {
+    var it = dom.traits.bases(.ofType(rhs));
+    while (it.next()) |t| {
+        if (TypeId.of(t) == lhs) {
             return true;
         }
     }
