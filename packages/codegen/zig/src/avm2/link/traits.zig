@@ -25,15 +25,41 @@ const IdTable = table.IdTable;
 const hashPair = table.hashPair;
 const typenames = @import("typenames.zig");
 
-pub const TRAITS_Instance: u8 = 1;
-pub const TRAITS_Class: u8 = 2;
-pub const TRAITS_Script: u8 = 3;
-pub const TRAITS_Activation: u8 = 4;
-/// The types of void and null, which avmplus also represents as traits.
-pub const TRAITS_Void: u8 = 5;
-pub const TRAITS_Null: u8 = 6;
-/// A catch block's scope, with the exception in its one slot.
-pub const TRAITS_Catch: u8 = 7;
+/// What a traits describes. The log's resolve entries carry it, so its
+/// values are fixed, and an entry's is checked against the owned kinds
+/// before it is read (`owned`); non-exhaustive for the same reason.
+pub const TraitsKind = enum(u8) {
+    instance = 1,
+    class = 2,
+    script = 3,
+    activation = 4,
+    /// The types of void and null, which avmplus also represents as traits.
+    void = 5,
+    null = 6,
+    /// A catch block's scope, with the exception in its one slot.
+    catch_scope = 7,
+    _,
+
+    /// Whether an ABC's entries own it: instance, class, script or
+    /// activation, the kinds a resolve entry names.
+    pub fn isOwned(kind: TraitsKind) bool {
+        return switch (kind) {
+            .instance, .class, .script, .activation => true,
+            else => false,
+        };
+    }
+
+    /// The owned kind a resolve entry's number names, else null: a
+    /// journal's or a save's, read back.
+    pub fn owned(n: u32) ?TraitsKind {
+        if (n > 0xff) {
+            return null;
+        }
+
+        const kind: TraitsKind = @fromBackingInt(@intCast(n));
+        return if (kind.isOwned()) kind else null;
+    }
+};
 
 pub const TYPE_Any: i32 = -1;
 
@@ -45,18 +71,21 @@ pub const BKIND_Const: u32 = 3;
 pub const BKIND_Get: u32 = 5;
 pub const BKIND_Set: u32 = 6;
 pub const BKIND_GetSet: u32 = 7;
-// Types the rules below treat specially, as avmplus' BuiltinType.
-pub const BUILTIN_Any: u8 = 0;
-pub const BUILTIN_Object: u8 = 1;
-pub const BUILTIN_Void: u8 = 2;
-pub const BUILTIN_Boolean: u8 = 3;
-pub const BUILTIN_Int: u8 = 4;
-pub const BUILTIN_Uint: u8 = 5;
-pub const BUILTIN_Number: u8 = 6;
-pub const BUILTIN_String: u8 = 7;
-pub const BUILTIN_Namespace: u8 = 8;
-pub const BUILTIN_Other: u8 = 9;
-pub const BUILTIN_Float: u8 = 10;
+/// Types the rules below treat specially, as avmplus' BuiltinType.
+/// Computed from a type id (Domain.builtin), never stored.
+pub const Builtin = enum(u8) {
+    any,
+    object,
+    void,
+    boolean,
+    int,
+    uint,
+    number,
+    string,
+    namespace,
+    other,
+    float,
+};
 
 /// As isCompatibleOverrideKind: whether `over` may implement a binding of kind `base`.
 pub fn compatibleKind(base: u32, over: u32) bool {
@@ -153,7 +182,7 @@ pub const Scope = struct {
 pub const Scopes = std.ArrayList(*Scope);
 
 pub const TraitsTable = struct {
-    kind: Rows(u8) = .{},
+    kind: Rows(TraitsKind) = .{},
     abc: Rows(u32) = .{},
     /// The class, script or body index in its ABC.
     owner: Rows(u32) = .{},
@@ -237,7 +266,7 @@ pub const TraitsTable = struct {
     }
 
     /// New traits over traits_info entries [first, end) of ABC `abc`.
-    pub fn create(self: *TraitsTable, gpa: Allocator, kind: u8, abc: u32, owner: u32, base: i32, protectedNs: i32, first: u32, end: u32) Allocator.Error!u32 {
+    pub fn create(self: *TraitsTable, gpa: Allocator, kind: TraitsKind, abc: u32, owner: u32, base: i32, protectedNs: i32, first: u32, end: u32) Allocator.Error!u32 {
         const t = self.kind.len;
         try self.kind.push(gpa, kind);
         try self.abc.push(gpa, abc);
@@ -717,7 +746,7 @@ pub const TraitsTable = struct {
         try dom.put(self.paramCount.at(m), count);
         try dom.put(self.optionalCount.at(m), optionalCount);
         try dom.put(self.signed.at(m), 1);
-        try dom.logged(domain_.LOG_Sign, index, 0, local);
+        try dom.logged(.sign, index, 0, local);
         return 0;
     }
 };
@@ -742,8 +771,8 @@ fn toU32(x: f64) f64 {
 /// As PoolObject::isLegalDefaultValue and getLegalDefaultValue: whether
 /// default value `value` suits a slot or parameter of builtin type `bt`;
 /// a number's value matters only for int and uint.
-pub fn legalDefault(bt: u8, value: Value) bool {
-    if (bt == BUILTIN_Any) {
+pub fn legalDefault(bt: Builtin, value: Value) bool {
+    if (bt == .any) {
         return true;
     }
 
@@ -755,13 +784,13 @@ pub fn legalDefault(bt: u8, value: Value) bool {
         .string, .boolean, .null, .namespace => null,
     };
     return switch (bt) {
-        BUILTIN_Object => true,
-        BUILTIN_Float, BUILTIN_Number => number != null,
-        BUILTIN_Boolean => value == .boolean,
-        BUILTIN_Int => if (number) |n| n == toI32(n) and n >= -2147483648 and n <= 2147483647 else false,
-        BUILTIN_Uint => if (number) |n| n == toU32(n) and n >= 0 and n <= 4294967295 else false,
-        BUILTIN_String => value == .null or value == .string,
-        BUILTIN_Namespace => value == .null or value == .namespace,
+        .object => true,
+        .float, .number => number != null,
+        .boolean => value == .boolean,
+        .int => if (number) |n| n == toI32(n) and n >= -2147483648 and n <= 2147483647 else false,
+        .uint => if (number) |n| n == toU32(n) and n >= 0 and n <= 4294967295 else false,
+        .string => value == .null or value == .string,
+        .namespace => value == .null or value == .namespace,
         else => value == .null,
     };
 }
@@ -769,14 +798,14 @@ pub fn legalDefault(bt: u8, value: Value) bool {
 const testing = std.testing;
 
 test "int and uint defaults are numbers they hold exactly" {
-    try testing.expect(legalDefault(BUILTIN_Int, .{ .double = -2147483648 }));
-    try testing.expect(!legalDefault(BUILTIN_Int, .{ .double = 2147483648 }));
-    try testing.expect(!legalDefault(BUILTIN_Int, .{ .double = 1.5 }));
-    try testing.expect(!legalDefault(BUILTIN_Int, .{ .double = std.math.nan(f64) }));
-    try testing.expect(legalDefault(BUILTIN_Uint, .{ .double = 4294967295 }));
-    try testing.expect(!legalDefault(BUILTIN_Uint, .{ .double = -1 }));
-    try testing.expect(legalDefault(BUILTIN_String, .null));
-    try testing.expect(!legalDefault(BUILTIN_Boolean, .null));
+    try testing.expect(legalDefault(.int, .{ .double = -2147483648 }));
+    try testing.expect(!legalDefault(.int, .{ .double = 2147483648 }));
+    try testing.expect(!legalDefault(.int, .{ .double = 1.5 }));
+    try testing.expect(!legalDefault(.int, .{ .double = std.math.nan(f64) }));
+    try testing.expect(legalDefault(.uint, .{ .double = 4294967295 }));
+    try testing.expect(!legalDefault(.uint, .{ .double = -1 }));
+    try testing.expect(legalDefault(.string, .null));
+    try testing.expect(!legalDefault(.boolean, .null));
 }
 
 test "an override meets accessors with accessors and methods with methods" {

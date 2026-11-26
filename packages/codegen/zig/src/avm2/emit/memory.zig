@@ -10,7 +10,7 @@ const IrOp = @import("../ir/ir.zig").Op;
 /// Whether register r is a domain memory address the emitter can use as it is: an int or uint.
 pub fn isAddress(em: *const MethodEmitter, r: i32) bool {
     const bt = em.builtinOf(r);
-    return bt == traits_.BUILTIN_Int or bt == traits_.BUILTIN_Uint;
+    return bt == .int or bt == .uint;
 }
 
 /// The DataView method that loads or stores as op does, little-endian.

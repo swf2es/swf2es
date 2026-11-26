@@ -9,11 +9,10 @@ const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
 const Abc = @import("../abc/abc.zig").Abc;
 const domain_ = @import("domain.zig");
+const DomainState = domain_.DomainState;
 const Domain = domain_.Domain;
-const DOMAIN_Dropped = domain_.DOMAIN_Dropped;
-const DOMAIN_Evicted = domain_.DOMAIN_Evicted;
-const DOMAIN_Live = domain_.DOMAIN_Live;
 const traits_ = @import("traits.zig");
+const TraitsKind = traits_.TraitsKind;
 const code = @import("../abc/code.zig");
 const output = @import("../../output.zig");
 
@@ -47,21 +46,21 @@ pub fn weigh(dom: *Domain, index: u32, rows: u64) void {
 /// lets go of them: what their ABCs define is seen by no domain from now
 /// on, and they take no more ABCs. The root is never dropped.
 pub fn drop(dom: *Domain, domain: u32) void {
-    leave(dom, domain, DOMAIN_Dropped);
+    leave(dom, domain, .dropped);
 }
 
 /// Evict application domain `domain` and its live descendants: as
 /// dropped, until revive, given their ABCs again, links them back.
 pub fn evict(dom: *Domain, domain: u32) void {
-    if (domain < dom.domainState.len and dom.domainState.get(domain) == DOMAIN_Live) {
-        leave(dom, domain, DOMAIN_Evicted);
+    if (domain < dom.domainState.len and dom.domainState.get(domain) == .live) {
+        leave(dom, domain, .evicted);
     }
 }
 
 /// Put `domain` and its descendants in `state`, unless dropped already; never the root.
-fn leave(dom: *Domain, domain: u32, state: u8) void {
+fn leave(dom: *Domain, domain: u32, state: DomainState) void {
     const count = dom.domainParent.len;
-    if (domain == 0 or domain >= count or dom.domainState.get(domain) == DOMAIN_Dropped) {
+    if (domain == 0 or domain >= count or dom.domainState.get(domain) == .dropped) {
         return;
     }
 
@@ -71,8 +70,8 @@ fn leave(dom: *Domain, domain: u32, state: u8) void {
     var d = domain + 1;
     while (d < count) : (d += 1) {
         const parent = dom.domainState.get(@intCast(dom.domainParent.get(d)));
-        if (parent != DOMAIN_Live and dom.domainState.get(d) < parent) {
-            if (dom.domainState.get(d) == DOMAIN_Live) {
+        if (parent != .live and @backingInt(dom.domainState.get(d)) < @backingInt(parent)) {
+            if (dom.domainState.get(d) == .live) {
                 dom.domainEvicted.set(d, dom.generation);
             }
 
@@ -87,7 +86,7 @@ fn leave(dom: *Domain, domain: u32, state: u8) void {
 /// Only bytes it adopts stay in `arena`, the domain's: a host gives an
 /// evicted domain's ABCs back at each revival, held ones included.
 pub fn restore(dom: *Domain, arena: *memory.Arena, index: u32, bytes: []const u8) Allocator.Error!i32 {
-    if (index >= dom.abcs.len or dom.domainState.get(dom.abcDomain.get(index)) != DOMAIN_Evicted) {
+    if (index >= dom.abcs.len or dom.domainState.get(dom.abcDomain.get(index)) != .evicted) {
         return -1;
     }
 
@@ -121,16 +120,16 @@ pub fn restore(dom: *Domain, arena: *memory.Arena, index: u32, bytes: []const u8
 /// evicted ancestor's parent is not live, or an ABC of theirs that a
 /// rebuild let go of was not restored.
 pub fn revive(dom: *Domain, domain: u32) i32 {
-    if (domain == 0 or domain >= dom.domainState.len or dom.domainState.get(domain) != DOMAIN_Evicted) {
+    if (domain == 0 or domain >= dom.domainState.len or dom.domainState.get(domain) != .evicted) {
         return -1;
     }
 
     var top = domain;
-    while (dom.domainState.get(@intCast(dom.domainParent.get(top))) == DOMAIN_Evicted) {
+    while (dom.domainState.get(@intCast(dom.domainParent.get(top))) == .evicted) {
         top = @intCast(dom.domainParent.get(top));
     }
 
-    if (dom.domainState.get(@intCast(dom.domainParent.get(top))) != DOMAIN_Live) {
+    if (dom.domainState.get(@intCast(dom.domainParent.get(top))) != .live) {
         return -1;
     }
 
@@ -144,7 +143,7 @@ pub fn revive(dom: *Domain, domain: u32) i32 {
     var d = domain;
     while (true) : (d = @intCast(dom.domainParent.get(d))) {
         stale = stale or dom.domainEvicted.get(d) != dom.generation;
-        dom.domainState.set(d, DOMAIN_Live);
+        dom.domainState.set(d, .live);
         if (d == top) {
             break;
         }
@@ -157,7 +156,7 @@ pub fn revive(dom: *Domain, domain: u32) i32 {
 pub fn unrevive(dom: *Domain, domain: u32, top: u32) void {
     var d = domain;
     while (true) : (d = @intCast(dom.domainParent.get(d))) {
-        dom.domainState.set(d, DOMAIN_Evicted);
+        dom.domainState.set(d, .evicted);
         if (d == top) {
             break;
         }
@@ -167,7 +166,7 @@ pub fn unrevive(dom: *Domain, domain: u32, top: u32) void {
 /// The first evicted ancestor of `domain` from the root down, or `domain` itself.
 pub fn evictedTop(dom: *const Domain, domain: u32) u32 {
     var top = domain;
-    while (dom.domainState.get(@intCast(dom.domainParent.get(top))) == DOMAIN_Evicted) {
+    while (dom.domainState.get(@intCast(dom.domainParent.get(top))) == .evicted) {
         top = @intCast(dom.domainParent.get(top));
     }
 
@@ -295,16 +294,16 @@ pub fn addWeights(dom: *Domain) void {
 }
 
 /// The traits of ABC `abc` of `kind` and `owner`, as loggedResolve logged them, or -1.
-pub fn traitsOf(dom: *const Domain, abc: u32, kind: u32, owner: u32) i32 {
-    if (kind == traits_.TRAITS_Instance) {
+pub fn traitsOf(dom: *const Domain, abc: u32, kind: TraitsKind, owner: u32) i32 {
+    if (kind == .instance) {
         return dom.classTraits.get(dom.classStart.get(abc) + owner);
     }
 
-    if (kind == traits_.TRAITS_Class) {
+    if (kind == .class) {
         return dom.classStatic.get(dom.classStart.get(abc) + owner);
     }
 
-    if (kind == traits_.TRAITS_Script) {
+    if (kind == .script) {
         return @intCast(dom.scriptTraits.get(abc)[owner]);
     }
 
@@ -434,20 +433,20 @@ pub const Rebuild = struct {
 
             const kind = dom.logKind.get(e);
             const abc = dom.logAbc.get(e);
-            const state = if (kind == domain_.LOG_Found)
-                @max(dom.domainState.get(dom.foundDomain.get(dom.logA.get(e))), dom.domainState.get(dom.abcDomain.get(abc)))
+            const state = if (kind == .found)
+                DomainState.furthest(dom.domainState.get(dom.foundDomain.get(dom.logA.get(e))), dom.domainState.get(dom.abcDomain.get(abc)))
             else
                 dom.domainState.get(dom.abcDomain.get(abc));
-            if (kind == domain_.LOG_None or state == DOMAIN_Dropped) {
+            if (kind == .none or state == .dropped) {
                 continue;
             }
 
-            if (state == DOMAIN_Evicted or dom.abcs.get(abc) == &no_abc) {
+            if (state == .evicted or dom.abcs.get(abc) == &no_abc) {
                 try keepEntry(fresh, dom, e);
                 continue;
             }
 
-            if (kind == domain_.LOG_Verify) {
+            if (kind == .verify) {
                 self.verifier = try code.Verifier.init(fresh, self.verifier_arena.allocator(), abc);
                 if (!try self.verifier.?.run(@max((budget - spent) / code.VERIFY_COST, 1))) {
                     return false;
@@ -508,7 +507,7 @@ fn reattach(r: *Rebuild, index: u32) Allocator.Error!bool {
 fn replay(dom: *Domain, from: *const Domain, e: u32) Allocator.Error!bool {
     const kind = from.logKind.get(e);
     const abc = from.logAbc.get(e);
-    if (kind == domain_.LOG_Found) {
+    if (kind == .found) {
         const f = from.logA.get(e);
         try dom.addFound(from.foundDomain.get(f), from.foundKind.get(f), from.foundUri.get(f), from.foundName.get(f), from.foundAbc.get(f), from.foundAsType.get(f) != 0);
         return true;
@@ -524,28 +523,25 @@ fn replay(dom: *Domain, from: *const Domain, e: u32) Allocator.Error!bool {
         return false;
     }
 
-    if (kind == domain_.LOG_Resolve) {
-        if (a < traits_.TRAITS_Instance or a > traits_.TRAITS_Activation) {
-            return false;
-        }
-
-        const owners: u32 = switch (a) {
-            traits_.TRAITS_Script => info.scriptCount(),
-            traits_.TRAITS_Activation => @intCast(dom.bodyTraits.get(abc).len),
+    if (kind == .resolve) {
+        const owned = TraitsKind.owned(a) orelse return false;
+        const owners: u32 = switch (owned) {
+            .script => info.scriptCount(),
+            .activation => @intCast(dom.bodyTraits.get(abc).len),
             else => info.classCount(),
         };
-        const t = if (b < owners) traitsOf(dom, abc, a, b) else -1;
+        const t = if (b < owners) traitsOf(dom, abc, owned, b) else -1;
         return t >= 0 and try dom.traits.resolve(dom, @intCast(t)) == 0;
     }
 
-    return kind == domain_.LOG_Sign and b < info.methodCount() and try dom.traits.sign(dom, dom.methodStart.get(abc) + b) == 0;
+    return kind == .sign and b < info.methodCount() and try dom.traits.sign(dom, dom.methodStart.get(abc) + b) == 0;
 }
 
 /// Keep entry `e` of `from`'s log, not done, for when its domain is revived.
 fn keepEntry(dom: *Domain, from: *const Domain, e: u32) Allocator.Error!void {
     const gpa = dom.gpa;
     var a = from.logA.get(e);
-    if (from.logKind.get(e) == domain_.LOG_Found) {
+    if (from.logKind.get(e) == .found) {
         const f = a;
         a = dom.foundDomain.len;
         try dom.foundEntry.push(gpa, dom.logKind.len);
@@ -590,7 +586,7 @@ pub fn saveDomain(dom: *const Domain, gpa: Allocator, out: *std.ArrayList(u8)) A
         const d: u32 = @intCast(d_);
         try w.word(out, gpa, @bitCast(dom.domainParent.get(d)));
         try w.word(out, gpa, dom.domainDepth.get(d));
-        try w.word(out, gpa, dom.domainState.get(d));
+        try w.word(out, gpa, @backingInt(dom.domainState.get(d)));
         try w.word(out, gpa, dom.domainEvicted.get(d));
     }
 
@@ -610,7 +606,7 @@ pub fn saveDomain(dom: *const Domain, gpa: Allocator, out: *std.ArrayList(u8)) A
     try w.word(out, gpa, entries);
     for (0..entries) |e_| {
         const e: u32 = @intCast(e_);
-        try w.word(out, gpa, dom.logKind.get(e));
+        try w.word(out, gpa, @backingInt(dom.logKind.get(e)));
         try w.word(out, gpa, dom.logAt.get(e));
         try w.word(out, gpa, dom.logAbc.get(e));
         try w.word(out, gpa, dom.logA.get(e));
@@ -622,7 +618,7 @@ pub fn saveDomain(dom: *const Domain, gpa: Allocator, out: *std.ArrayList(u8)) A
     for (0..found) |f_| {
         const f: u32 = @intCast(f_);
         try w.word(out, gpa, dom.foundDomain.get(f));
-        try w.word(out, gpa, dom.foundKind.get(f));
+        try w.word(out, gpa, @backingInt(dom.foundKind.get(f)));
         try w.word(out, gpa, dom.foundAbc.get(f));
         try w.word(out, gpa, dom.foundAsType.get(f));
         for ([_][]const u8{ dom.foundUri.get(f), dom.foundName.get(f) }) |text| {
@@ -713,7 +709,7 @@ pub fn loadDomain(loaded: *Loaded, words: []const u8) Allocator.Error!bool {
     for (0..domains) |_| {
         try dom.domainParent.push(gpa, @bitCast(reader.next()));
         try dom.domainDepth.push(gpa, reader.next());
-        try dom.domainState.push(gpa, @truncate(reader.next()));
+        try dom.domainState.push(gpa, @fromBackingInt(@as(u8, @truncate(reader.next()))));
         try dom.domainEvicted.push(gpa, reader.next());
     }
 
@@ -730,7 +726,7 @@ pub fn loadDomain(loaded: *Loaded, words: []const u8) Allocator.Error!bool {
 
     const entries = reader.count(5);
     for (0..entries) |_| {
-        try dom.logKind.push(gpa, @truncate(reader.next()));
+        try dom.logKind.push(gpa, @fromBackingInt(@as(u8, @truncate(reader.next()))));
         try dom.logAt.push(gpa, reader.next());
         try dom.logAbc.push(gpa, reader.next());
         try dom.logA.push(gpa, reader.next());
@@ -740,7 +736,7 @@ pub fn loadDomain(loaded: *Loaded, words: []const u8) Allocator.Error!bool {
     const found = reader.count(6);
     for (0..found) |_| {
         try dom.foundDomain.push(gpa, reader.next());
-        try dom.foundKind.push(gpa, @truncate(reader.next()));
+        try dom.foundKind.push(gpa, @fromBackingInt(@as(u8, @truncate(reader.next()))));
         try dom.foundAbc.push(gpa, reader.next());
         try dom.foundAsType.push(gpa, @truncate(reader.next()));
         try dom.foundUri.push(gpa, try reader.text(gpa));
@@ -755,7 +751,7 @@ pub fn loadDomain(loaded: *Loaded, words: []const u8) Allocator.Error!bool {
 fn livesGiven(loaded: *const Loaded) bool {
     const dom = loaded.dom;
     for (0..dom.abcs.len) |i| {
-        const live = dom.domainState.get(dom.abcDomain.get(@intCast(i))) == DOMAIN_Live;
+        const live = dom.domainState.get(dom.abcDomain.get(@intCast(i))) == .live;
         if (live and loaded.flags.items[i] & SAVED_Live == 0) {
             return false;
         }
@@ -769,7 +765,7 @@ fn consistent(dom: *const Domain) bool {
     const domains = dom.domainParent.len;
     const abcs = dom.abcs.len;
     // The root is never evicted nor dropped: what walks up evicted parents stops at it.
-    if (domains == 0 or dom.domainState.get(0) != DOMAIN_Live) {
+    if (domains == 0 or dom.domainState.get(0) != .live) {
         return false;
     }
 
@@ -777,7 +773,7 @@ fn consistent(dom: *const Domain) bool {
         const d: u32 = @intCast(d_);
         const parent = dom.domainParent.get(d);
         const bad = if (d == 0) parent != -1 else parent < 0 or @as(u32, @intCast(parent)) >= d;
-        if (bad or dom.domainState.get(d) > 2) {
+        if (bad or !dom.domainState.get(d).isNamed()) {
             return false;
         }
 
@@ -809,8 +805,8 @@ fn consistent(dom: *const Domain) bool {
         if (dom.logAt.get(e) < at or
             dom.logAt.get(e) > abcs or
             dom.logAbc.get(e) >= dom.logAt.get(e) or
-            kind > domain_.LOG_Verify or
-            (kind == domain_.LOG_Found and dom.logA.get(e) >= dom.foundDomain.len))
+            !kind.isNamed() or
+            (kind == .found and dom.logA.get(e) >= dom.foundDomain.len))
         {
             return false;
         }

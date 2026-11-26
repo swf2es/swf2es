@@ -36,11 +36,11 @@ pub fn slotMember(out: *Output, slot: u32) Error!void {
 /// Whether typeRef writes type t as T[k], a class's instances; else a literal.
 pub fn isClassRef(e: *MethodEmitter, t: i32) bool {
     // What typeExpr writes as a literal stays one.
-    const bt = if (t < 0) traits_.BUILTIN_Any else e.domain.builtin(t);
+    const bt = if (t < 0) .any else e.domain.builtin(t);
     return t >= 0 and
-        (bt == traits_.BUILTIN_Other or bt == traits_.BUILTIN_Namespace) and
+        (bt == .other or bt == .namespace) and
         t != e.domain.voidType and
-        e.domain.traits.kind.get(@intCast(t)) == traits_.TRAITS_Instance;
+        e.domain.traits.kind.get(@intCast(t)) == .instance;
 }
 
 /// Type t in a method: an entry of the module's table T for a class or
@@ -73,13 +73,13 @@ pub fn typeExpr(e: *MethodEmitter, type_: i32) Error!void {
         }
 
         const literal: ?[]const u8 = switch (domain.builtin(t)) {
-            traits_.BUILTIN_Int => "\"int\"",
-            traits_.BUILTIN_Uint => "\"uint\"",
-            traits_.BUILTIN_Float => "\"float\"",
-            traits_.BUILTIN_Number => "\"Number\"",
-            traits_.BUILTIN_Boolean => "\"Boolean\"",
-            traits_.BUILTIN_String => "\"String\"",
-            traits_.BUILTIN_Object => "\"Object\"",
+            .int => "\"int\"",
+            .uint => "\"uint\"",
+            .float => "\"float\"",
+            .number => "\"Number\"",
+            .boolean => "\"Boolean\"",
+            .string => "\"String\"",
+            .object => "\"Object\"",
             else => null,
         };
         if (literal) |l| {
@@ -90,7 +90,7 @@ pub fn typeExpr(e: *MethodEmitter, type_: i32) Error!void {
         const u: u32 = @intCast(t);
         if (t == domain.voidType) {
             try out.text("\"void\"");
-        } else if (traits.kind.get(u) != traits_.TRAITS_Instance) {
+        } else if (traits.kind.get(u) != .instance) {
             try out.text("null");
         } else if (traits.param.get(u) != TYPE_Any) {
             try out.text("rt.vector(");
@@ -130,7 +130,7 @@ fn className_(e: *MethodEmitter, t: u32) Error!void {
     const name = domain.abcString.get(index)[pool.mnB[mn]];
     try out.text("cls(");
     const id = domain.abcNs.get(index)[ns];
-    if (domain.nsType.get(id) == domain_.NS_Private and index == e.index) {
+    if (domain.nsType.get(id) == .private and index == e.index) {
         // A private namespace is its module's own object, N[k].
         try out.text("N[");
         try out.uint(ns);
@@ -148,7 +148,7 @@ fn className_(e: *MethodEmitter, t: u32) Error!void {
 pub fn namespace(e: *MethodEmitter, id: u32) Error!void {
     const out = &e.out;
     try out.text("ns(");
-    try out.uint(e.domain.nsType.get(id));
+    try out.uint(@backingInt(e.domain.nsType.get(id)));
     try out.text(", ");
     try uri(e, e.domain.nsUri.get(id));
     try out.text(")");
@@ -172,7 +172,7 @@ pub fn aliasedMember(domain: *const Domain, ifc: u32, disp: u32) i32 {
     while (m < last) : (m += 1) {
         const b = traits.memberBinding.get(m);
         if ((b & 7) == traits_.BKIND_Method and b >> 3 == disp) {
-            return if (domain.nsType.get(traits.memberNs.get(m)) == domain_.NS_Private) -1 else @intCast(m);
+            return if (domain.nsType.get(traits.memberNs.get(m)) == .private) -1 else @intCast(m);
         }
     }
 
@@ -184,7 +184,7 @@ pub fn aliasedMember(domain: *const Domain, ifc: u32, disp: u32) i32 {
 /// interface's member `name` in `ns` to (refs.ts tells its parts).
 pub fn interfaceAlias(out: *Output, domain: *const Domain, ns: u32, name: u32) Error!void {
     try out.text("\"$i");
-    try out.uint(domain.nsType.get(ns));
+    try out.uint(@backingInt(domain.nsType.get(ns)));
     const id = domain.nsUri.get(ns);
     if (id == domain_.URI_None) {
         try out.text("n:");
@@ -253,7 +253,7 @@ pub fn constant(e: *MethodEmitter, value: u32, kind: C.Constant, type_: i32) Err
     const pool = &e.abc.pool;
     if (kind == .float and e.abc.hasFloatSupport()) {
         const bt = e.domain.builtin(type_);
-        const numeric = bt == traits_.BUILTIN_Int or bt == traits_.BUILTIN_Uint or bt == traits_.BUILTIN_Number;
+        const numeric = bt == .int or bt == .uint or bt == .number;
         if (!numeric) {
             try out.text("rt.float(");
         }
@@ -301,11 +301,11 @@ pub fn constant(e: *MethodEmitter, value: u32, kind: C.Constant, type_: i32) Err
 fn defaultOf(e: *MethodEmitter, type_: i32) Error!void {
     const out = &e.out;
     try out.text(switch (e.domain.builtin(type_)) {
-        traits_.BUILTIN_Any => "void 0",
-        traits_.BUILTIN_Int, traits_.BUILTIN_Uint => "0",
-        traits_.BUILTIN_Float => "rt.float(NaN)",
-        traits_.BUILTIN_Number => "NaN",
-        traits_.BUILTIN_Boolean => "false",
+        .any => "void 0",
+        .int, .uint => "0",
+        .float => "rt.float(NaN)",
+        .number => "NaN",
+        .boolean => "false",
         else => "null",
     });
 }

@@ -30,8 +30,8 @@ fn u(r: i32) usize {
 fn mayBeXml(em: *const MethodEmitter, r: i32) bool {
     const ty = em.regType[u(r)];
     const bt = em.domain.builtin(ty);
-    return bt == traits_.BUILTIN_Any or
-        bt == traits_.BUILTIN_Object or
+    return bt == .any or
+        bt == .object or
         ty == em.domain.xmlType or
         ty == em.domain.xmlListType;
 }
@@ -662,11 +662,11 @@ fn setProperty(em: *MethodEmitter, i: u32, a: u32, src: i32) Error!void {
             try receiver(em, src);
             try out.text(".$a.length > ");
             try em.reg(src + 1);
-            if (index == traits_.BUILTIN_Int) {
+            if (index == .int) {
                 try out.text(" && ");
                 try em.reg(src + 1);
                 try out.text(" >= 0");
-            } else if (index != traits_.BUILTIN_Uint) {
+            } else if (index != .uint) {
                 try out.text(" && ");
                 try em.reg(src + 1);
                 try out.text(" >>> 0 === ");
@@ -910,7 +910,7 @@ fn stringMethod(em: *MethodEmitter, ty: i32, disp: u32, src: i32, argc: u32) []c
 /// string's: String is final and has no other getter.
 fn stringLength(em: *MethodEmitter, r: i32, getter: i32) bool {
     return getter >= 0 and
-        em.builtinOf(r) == traits_.BUILTIN_String and
+        em.builtinOf(r) == .string and
         em.domain.traits.returnType.get(@intCast(getter)) == em.domain.intType;
 }
 
@@ -919,7 +919,7 @@ fn stringLength(em: *MethodEmitter, r: i32, getter: i32) bool {
 /// namespace in its set, on a value typed * or Object (objects.ts tells why).
 fn maybeStringLength(em: *MethodEmitter, a: u32, r: i32) bool {
     const bt = em.builtinOf(r);
-    if (bt != traits_.BUILTIN_Any and bt != traits_.BUILTIN_Object) {
+    if (bt != .any and bt != .object) {
         return false;
     }
 
@@ -929,7 +929,7 @@ fn maybeStringLength(em: *MethodEmitter, a: u32, r: i32) bool {
     if (kind == .qname) {
         const ns = domain.abcNs.get(em.index)[pool.mnA[a]];
         const uri = domain.nsUri.get(ns);
-        if (domain.nsType.get(ns) != domain_.NS_Public or (uri != domain_.URI_None and domain.stringLength.get(uri) != 0)) {
+        if (domain.nsType.get(ns) != .public or (uri != domain_.URI_None and domain.stringLength.get(uri) != 0)) {
             return false;
         }
     } else if (kind != .multiname or !domain.hasPublicNamespace(em.index, a)) {
@@ -964,16 +964,16 @@ fn storedType(em: *MethodEmitter, kind: Kind, src: i32) Error!i32 {
 
     const from = em.regType[u(src + 2)];
     const fromBt = domain.builtin(from);
-    if (ty == CONVERTS or fromBt == traits_.BUILTIN_Float) {
+    if (ty == CONVERTS or fromBt == .float) {
         return CONVERTS;
     }
 
-    const numeric = fromBt == traits_.BUILTIN_Int or fromBt == traits_.BUILTIN_Uint or fromBt == traits_.BUILTIN_Number;
+    const numeric = fromBt == .int or fromBt == .uint or fromBt == .number;
     return switch (domain.builtin(ty)) {
-        traits_.BUILTIN_Int, traits_.BUILTIN_Uint => if (numeric or fromBt == traits_.BUILTIN_Boolean) ty else CONVERTS,
-        traits_.BUILTIN_Number => if (numeric) ty else CONVERTS,
-        traits_.BUILTIN_Boolean, traits_.BUILTIN_Object => ty,
-        traits_.BUILTIN_String => if (try values.keeps(em, ty, from)) ty else CONVERTS,
+        .int, .uint => if (numeric or fromBt == .boolean) ty else CONVERTS,
+        .number => if (numeric) ty else CONVERTS,
+        .boolean, .object => ty,
+        .string => if (try values.keeps(em, ty, from)) ty else CONVERTS,
         // A class's instances: an instance check, which throws as the helper would.
         else => if (refs.isClassRef(em, ty)) ty else CONVERTS,
     };
@@ -987,7 +987,7 @@ fn interpretedKey(em: *MethodEmitter, a: u32, r: i32) bool {
     return em.staticInit and
         (kind == .multiname_la or
             (kind == .multiname_l and !em.domain.hasPublicNamespace(em.index, a))) and
-        em.builtinOf(r) != traits_.BUILTIN_String;
+        em.builtinOf(r) != .string;
 }
 
 /// Whether multiname `a` is a runtime name alone, not an attribute, whose
@@ -1003,7 +1003,7 @@ fn keyed(em: *MethodEmitter, a: u32, r: i32) bool {
     return !em.staticInit and
         em.abc.pool.mnKind[a] == .multiname_l and
         !values.isNumber(em, r) and
-        em.builtinOf(r) != traits_.BUILTIN_String;
+        em.builtinOf(r) != .string;
 }
 
 /// Whether the indexed access by multiname `a` on register r reads an
@@ -1174,18 +1174,18 @@ fn virtual(em: *MethodEmitter, disp: u32, src: i32, argc: u32, m: i32) Error!voi
 
     const bt = em.builtinOf(src);
     const primitive = switch (bt) {
-        traits_.BUILTIN_Int,
-        traits_.BUILTIN_Uint,
-        traits_.BUILTIN_Number,
-        traits_.BUILTIN_Float,
-        traits_.BUILTIN_Boolean,
-        traits_.BUILTIN_String,
-        traits_.BUILTIN_Namespace,
+        .int,
+        .uint,
+        .number,
+        .float,
+        .boolean,
+        .string,
+        .namespace,
         => true,
         else => false,
     };
     if (primitive) {
-        const own = if (bt == traits_.BUILTIN_String) stringMethod(em, ty, disp, src, argc) else "";
+        const own = if (bt == .string) stringMethod(em, ty, disp, src, argc) else "";
         if (own.len > 0) {
             try receiver(em, src);
             try out.text(own);
@@ -1216,7 +1216,7 @@ fn virtual(em: *MethodEmitter, disp: u32, src: i32, argc: u32, m: i32) Error!voi
 
     // An Object may be a primitive, or a Namespace, whose methods are its
     // class prototype's; any other object has its own.
-    if (bt == traits_.BUILTIN_Object) {
+    if (bt == .object) {
         try out.text("(");
         try em.member(src);
         try out.text(".$m");

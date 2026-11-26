@@ -89,10 +89,10 @@ pub fn parameterized(dom: *Domain, base: i32, param: i32) Allocator.Error!i32 {
     }
 
     switch (dom.builtin(param)) {
-        traits_.BUILTIN_Any => return dom.vectorObjectType,
-        traits_.BUILTIN_Int => return dom.vectorIntType,
-        traits_.BUILTIN_Uint => return dom.vectorUintType,
-        traits_.BUILTIN_Number => return dom.vectorDoubleType,
+        .any => return dom.vectorObjectType,
+        .int => return dom.vectorIntType,
+        .uint => return dom.vectorUintType,
+        .number => return dom.vectorDoubleType,
         else => {},
     }
 
@@ -104,7 +104,7 @@ pub fn parameterized(dom: *Domain, base: i32, param: i32) Allocator.Error!i32 {
     // As Traits::newParameterizedITraits: a subclass of Vector.<*> with no members of its own.
     const traits = &dom.traits;
     const objects: u32 = @intCast(dom.vectorObjectType);
-    const t = try traits.create(dom.gpa, traits_.TRAITS_Instance, traits.abc.get(objects), traits.owner.get(objects), @intCast(objects), -1, 0, 0);
+    const t = try traits.create(dom.gpa, .instance, traits.abc.get(objects), traits.owner.get(objects), @intCast(objects), -1, 0, 0);
     traits.param.set(t, param);
     traits.slotCount.set(t, traits.slotCount.get(objects));
     traits.methodCount.set(t, traits.methodCount.get(objects));
@@ -296,7 +296,7 @@ pub fn addClassNames(dom: *Domain, index: u32) Allocator.Error!void {
         const nsId = ids[ns];
         const name = strings[pool.mnB[mn]];
         const domain = dom.abcDomain.get(index);
-        if (dom.nsType.get(nsId) != domain_.NS_Private and findTypeOf(dom, nsId, name, version, -1, domain) < 0) {
+        if (dom.nsType.get(nsId) != .private and findTypeOf(dom, nsId, name, version, -1, domain) < 0) {
             const id = dom.classStart.get(index) + abc.traitIndex[t];
             try nameType(dom, nsId, name, version, @intCast(id), -1, domain);
         }

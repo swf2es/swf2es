@@ -34,10 +34,10 @@ pub fn stackName(dom: *Domain, gpa: Allocator, index: u32, m: u32) Allocator.Err
         const kind = traits.kind.get(tu);
         const owner = traits.owner.get(tu);
         var declaring = false;
-        if (kind == traits_.TRAITS_Instance or kind == traits_.TRAITS_Class) {
+        if (kind == .instance or kind == .class) {
             try className(dom, gpa, &out, traits.abc.get(tu), owner);
             declaring = out.items.len > 0;
-            if (kind == traits_.TRAITS_Class) {
+            if (kind == .class) {
                 try out.append(gpa, '$');
                 declaring = true;
                 if (abc.classInit[owner] == local) {
@@ -47,7 +47,7 @@ pub fn stackName(dom: *Domain, gpa: Allocator, index: u32, m: u32) Allocator.Err
             } else if (abc.instanceInit[owner] == local) {
                 return out.items;
             }
-        } else if (kind == traits_.TRAITS_Script) {
+        } else if (kind == .script) {
             if (abc.scriptInit[owner] == local) {
                 try ascii(gpa, &out, "global$init");
                 return out.items;
@@ -115,7 +115,7 @@ fn className(dom: *Domain, gpa: Allocator, out: *Units, index: u32, owner: u32) 
 /// Interned name `name` in interned namespace `ns`, as shown.
 fn shown(dom: *Domain, gpa: Allocator, out: *Units, ns: u32, name: u32) Allocator.Error!void {
     const uri = dom.nsUri.get(ns);
-    if (dom.nsType.get(ns) == domain_.NS_Public and uri != domain_.URI_None and dom.stringLength.get(uri) != 0) {
+    if (dom.nsType.get(ns) == .public and uri != domain_.URI_None and dom.stringLength.get(uri) != 0) {
         try out.appendSlice(gpa, try output.decodeUnits(gpa, dom.stringOf(uri)));
         try ascii(gpa, out, "::");
     }

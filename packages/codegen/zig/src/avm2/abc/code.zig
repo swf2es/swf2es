@@ -1091,7 +1091,7 @@ pub fn verifyMethods(domain: *Domain, index: u32) Error![]i32 {
 /// between parts of a large ABC: run until it returns true, with nothing
 /// else decoding in between. The parts verify what verifyMethods does, in
 /// its order, however they are cut. init counts the ABC as verified and
-/// logs LOG_Verify at once, as verifyMethods does, so one left before it
+/// logs .verify at once, as verifyMethods does, so one left before it
 /// is done leaves both, and what it resolved, in the domain (compile.zig's
 /// abandon).
 pub const Verifier = struct {
@@ -1125,7 +1125,7 @@ pub const Verifier = struct {
             .captures = domain.captures,
         };
         try domain.put(domain.abcVerified.at(index), 1);
-        try domain.logged(domain_.LOG_Verify, index, 0, 0);
+        try domain.logged(.verify, index, 0, 0);
         try self.start();
         return self;
     }
@@ -1185,7 +1185,7 @@ pub const Verifier = struct {
                 domain.logA.truncate(entry);
                 domain.logB.truncate(entry);
             } else {
-                try domain.put(domain.logKind.at(entry), domain_.LOG_None);
+                try domain.put(domain.logKind.at(entry), .none);
             }
         }
 

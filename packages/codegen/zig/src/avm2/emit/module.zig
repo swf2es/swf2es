@@ -262,7 +262,7 @@ pub const ModuleEmitter = struct {
         while (i < pool.nsCount()) : (i += 1) {
             try o.text(", ");
             const id = ids[i];
-            if (domain.nsType.get(id) == domain_.NS_Private) {
+            if (domain.nsType.get(id) == .private) {
                 try o.text("rt.privateNs(");
                 try refs.uri(&self.methods, domain.nsUri.get(id));
                 try o.text(")");
@@ -577,9 +577,9 @@ pub const ModuleEmitter = struct {
 
         const tu: u32 = @intCast(t);
         const kind = table.kind.get(tu);
-        if (kind == traits_.TRAITS_Instance or kind == traits_.TRAITS_Class) {
+        if (kind == .instance or kind == .class) {
             try text.appendSlice(gpa, try refs.className(&self.methods, table, tu));
-            try text.append(gpa, if (kind == traits_.TRAITS_Class) '.' else '#');
+            try text.append(gpa, if (kind == .class) '.' else '#');
         }
 
         // The trait that binds the method names it.
@@ -656,7 +656,7 @@ pub const ModuleEmitter = struct {
             try o.text(if (first) "[" else ", [");
             first = false;
             const ns = table.memberNs.get(m);
-            if (domain.nsType.get(ns) == domain_.NS_Private) {
+            if (domain.nsType.get(ns) == .private) {
                 try o.text("N[");
                 try o.uint(self.poolIndexOf(ns));
                 try o.text("]");
@@ -1021,7 +1021,7 @@ pub const ModuleEmitter = struct {
             var m = table.memberStart.get(ifc);
             while (m < last) : (m += 1) {
                 const ns = table.memberNs.get(m);
-                if ((table.memberBinding.get(m) & 7) != traits_.BKIND_Method or domain.nsType.get(ns) == domain_.NS_Private) {
+                if ((table.memberBinding.get(m) & 7) != traits_.BKIND_Method or domain.nsType.get(ns) == .private) {
                     continue;
                 }
 
