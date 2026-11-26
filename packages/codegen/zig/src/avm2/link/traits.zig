@@ -97,9 +97,6 @@ pub const TypeId = enum(i32) {
     }
 };
 
-/// The verifier's and the IR's type as an i32, until they hold TypeId.
-pub const TYPE_Any: i32 = -1;
-
 /// A traits id that may be absent: a traits' base, a class's instance or
 /// class object traits, which a class has once it links. Its none is -1,
 /// the number of *, but it is no type: a ref becomes one by toType, which

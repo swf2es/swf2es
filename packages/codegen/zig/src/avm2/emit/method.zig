@@ -17,7 +17,6 @@ const ir_ = @import("../ir/ir.zig");
 const Ir = ir_.Ir;
 const Domain = @import("../link/domain.zig").Domain;
 const traits_ = @import("../link/traits.zig");
-const TYPE_Any = traits_.TYPE_Any;
 const blocks = @import("blocks.zig");
 const copies = @import("copies.zig");
 const CONSTANT = copies.CONSTANT;
@@ -627,7 +626,7 @@ pub const MethodEmitter = struct {
         }
 
         if (coerce) {
-            try values.convert(self, "p", @intCast(p), ir_.typeColumn(ty), TYPE_Any, self.unboxed[p] != 0);
+            try values.convert(self, "p", @intCast(p), ir_.typeColumn(ty), ir_.typeColumn(.any), self.unboxed[p] != 0);
         } else {
             try out.text("p");
             try out.uint(p);

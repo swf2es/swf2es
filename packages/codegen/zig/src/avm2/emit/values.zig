@@ -14,8 +14,12 @@ const columnType = ir_.columnType;
 const typeColumn = ir_.typeColumn;
 const IrOp = ir_.Op;
 
-/// No type: a conversion, convert_s or convert_o, that always calls the runtime.
-pub const CONVERTS: i32 = -2;
+/// No type: a conversion, convert_s or convert_o, that always calls the
+/// runtime. An i32 of the emitters' own, never a type: no IR column or
+/// TypeId holds it (TypeId.failed is -2, so it is not that either), and
+/// what may return it is tested against it before anything reads it as a
+/// type through ir.columnType.
+pub const CONVERTS: i32 = std.math.minInt(i32);
 
 /// The comparison `op` of instruction i's two operands, negated if `not`:
 /// JavaScript's own operator where the types make it AS3's, else the
