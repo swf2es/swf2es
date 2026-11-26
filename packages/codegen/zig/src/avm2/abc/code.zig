@@ -1167,8 +1167,8 @@ pub fn verifyMethods(domain: *Domain, index: u32) Allocator.Error![]i32 {
 /// else decoding in between. The parts verify what verifyMethods does, in
 /// its order, however they are cut. init counts the ABC as verified and
 /// logs .verify at once, as verifyMethods does, so one left before it
-/// is done leaves both, and what it resolved, in the domain (compile.zig's
-/// abandon).
+/// is done leaves both, and what it resolved, in the domain
+/// (compile/modules.zig's abandon).
 pub const Verifier = struct {
     domain: *Domain,
     /// Where its results and queue are, which a module written a part at a
