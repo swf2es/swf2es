@@ -19,6 +19,7 @@ const Verifier = code.Verifier;
 const C = @import("../abc/constants.zig");
 const Diagnostics = @import("../abc/errors.zig").Diagnostics;
 const ir_ = @import("../ir/ir.zig");
+const SlotIds = @import("../link/bindings.zig").SlotIds;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
@@ -624,12 +625,14 @@ pub const ModuleEmitter = struct {
             error.OutOfMemory => return error.OutOfMemory,
         };
 
+        const count = table.slotCount.get(t);
         try o.text("{ slots: ");
-        try o.uint(table.slotCount.get(t));
+        try o.uint(count);
         try o.text(", defaults: [");
         var first = true;
         const slotStart = table.slotStart.get(t);
         const base = table.base.get(t);
+        var slots = SlotIds.init(table, t);
         var i = table.first.get(t);
         while (i < table.end.get(t)) : (i += 1) {
             const kind = abc.traitTag[i].kind;
@@ -637,9 +640,12 @@ pub const ModuleEmitter = struct {
                 continue;
             }
 
-            table.readName(domain, self.index, i);
-            const b = table.own(t, table.nameNs, table.nameId, table.nameVersion);
-            const slot = b.index();
+            // In range once t has resolved, as fill's are.
+            const slot = slots.next(abc.traitId[i]);
+            if (slot >= count) {
+                continue;
+            }
+
             try o.text(if (first) "[" else ", [");
             first = false;
             try o.uint(slot);
@@ -746,6 +752,7 @@ pub const ModuleEmitter = struct {
             const v = chain.items[c];
             const index = table.abc.get(v);
             const abc = domain.abcs.get(index);
+            var slots = SlotIds.init(table, v);
             var i = table.first.get(v);
             while (i < table.end.get(v)) : (i += 1) {
                 const kind = abc.traitTag[i].kind;
@@ -753,8 +760,7 @@ pub const ModuleEmitter = struct {
                     continue;
                 }
 
-                table.readName(domain, index, i);
-                const slot = table.own(v, table.nameNs, table.nameId, table.nameVersion).index();
+                const slot = slots.next(abc.traitId[i]);
                 if (slot < count) {
                     self.fillAbc.items[slot] = @intCast(index);
                     self.fillTrait.items[slot] = i;
@@ -857,20 +863,29 @@ pub const ModuleEmitter = struct {
         const table = &self.domain.traits;
         const abc = self.domain.abcs.get(self.index);
         var count: u32 = 0;
+        var slots = SlotIds.init(table, t);
         var i = table.first.get(t);
         while (i < table.end.get(t)) : (i += 1) {
+            // Every slot trait takes its slot, with metadata or not.
+            const kind = abc.traitTag[i].kind;
+            const slot = if (kind.bindsSlot()) slots.next(abc.traitId[i]) else 0;
             if (abc.traitMetadataStart[i] == abc.traitMetadataStart[i + 1]) {
                 continue;
             }
 
-            const kind = abc.traitTag[i].kind;
-            table.readName(self.domain, self.index, i);
-            const b = table.own(t, table.nameNs, table.nameId, table.nameVersion);
+            // As avmplus' TraitsMetadata: a slot's by its slot, a method's by its binding.
+            var id = slot;
+            if (!kind.bindsSlot()) {
+                table.readName(self.domain, self.index, i);
+                const b = table.own(t, table.nameNs, table.nameId, table.nameVersion);
+                id = b.index() + @as(u32, if (kind == .setter) 1 else 0);
+            }
+
             try o.text(if (count != 0) ", [" else ", meta: [[");
             count += 1;
             try o.uint(@backingInt(kind));
             try o.text(", ");
-            try o.uint(b.index() + @as(u32, if (kind == .setter) 1 else 0));
+            try o.uint(id);
             try o.text(", ");
             try self.metadataOf(i);
             try o.text("]");
