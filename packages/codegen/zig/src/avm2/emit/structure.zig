@@ -79,7 +79,7 @@ fn successors(em: *MethodEmitter, k: u32) Error!void {
         .lookupswitch => {
             try em.succ.append(gpa, ir.a[last]);
             var c: u32 = 0;
-            while (c <= @as(u32, @bitCast(ir.c[last]))) : (c += 1) {
+            while (c <= ir.cLastCase(last)) : (c += 1) {
                 try em.succ.append(gpa, ir.cases[ir.b[last] + c]);
             }
         },

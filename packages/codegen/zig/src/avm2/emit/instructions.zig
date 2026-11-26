@@ -371,7 +371,7 @@ pub fn instruction(em: *MethodEmitter, i: u32) Error!void {
             try out.text(") {");
             const first = ir.b[i];
             var c: u32 = 0;
-            while (c <= @as(u32, @bitCast(ir.c[i]))) : (c += 1) {
+            while (c <= ir.cLastCase(i)) : (c += 1) {
                 try em.space();
                 try out.text("case ");
                 try out.uint(c);

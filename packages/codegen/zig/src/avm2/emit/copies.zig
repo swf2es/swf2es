@@ -123,7 +123,7 @@ fn walk(em: *MethodEmitter, k: u32) Error!bool {
         } else if (op == .lookupswitch) {
             back = join(em, ir.a[i], k) or back;
             var c: u32 = 0;
-            while (c <= @as(u32, @bitCast(ir.c[i]))) : (c += 1) {
+            while (c <= ir.cLastCase(i)) : (c += 1) {
                 back = join(em, ir.cases[ir.b[i] + c], k) or back;
             }
         }

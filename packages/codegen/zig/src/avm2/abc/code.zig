@@ -505,7 +505,7 @@ pub const BodyDecoder = struct {
         if (dst >= 0) {
             const d: u32 = @intCast(dst);
             ir.type[i] = self.valueType[d];
-            ir.notNull[i] = @intFromBool(self.valueFlags[d].not_null);
+            ir.notNull[i] = self.valueFlags[d].not_null;
         }
     }
 
@@ -1047,7 +1047,7 @@ pub const BodyDecoder = struct {
     /// local it copies, unchanged since, is checked too.
     pub fn checkNull(self: *BodyDecoder, i: u32) Error!void {
         if (self.emitPass and !self.valueFlags[i].isKnown()) {
-            try self.emit(.ir_check_null, -1, @intCast(i), 1, 0, 0, 0, self.pc);
+            try self.emit(.ir_check_null, ir_.no_register, @intCast(i), 1, 0, 0, 0, self.pc);
         }
 
         self.valueFlags[i].not_null = true;
