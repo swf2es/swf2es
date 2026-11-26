@@ -1316,3 +1316,9 @@ For the user to decide:
     switches are now. Tail-called handlers would dispatch through
     `call_indirect`, usually slower than `br_table`, and make the shipped
     wasm need the tail-call feature.
+    `dtoa.zig`, AssemblyScript's Grisu2, stays on purpose (P11, #1236,
+    closed): Zig's `std.fmt.float` (Ryu) would print each double as
+    JavaScript's `String` does, the same double in every case, but its
+    64-bit tables cost 13.4 KB raw and 11.1 KB gzipped for a change of
+    spelling alone, as `std.fmt.float` uses its small tables only in
+    ReleaseSmall.
