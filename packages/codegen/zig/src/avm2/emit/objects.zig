@@ -834,9 +834,8 @@ fn name(em: *MethodEmitter, a: u32, from: i32) Error!void {
 const Kind = enum { none, Int, Uint, Double, Float, Object };
 
 /// The kind of Vector type t's elements.
-fn vectorKind(em: *MethodEmitter, type_: TypeId) Error!Kind {
+fn vectorKind(em: *MethodEmitter, t: TypeId) Error!Kind {
     const domain = em.domain;
-    const t = type_;
     if (!t.isTraits()) {
         return .none;
     }
@@ -1170,8 +1169,7 @@ fn virtual(em: *MethodEmitter, disp: u32, src: i32, argc: u32, m: i32) Error!voi
     const out = &em.out;
     const ty = em.regType[u(src)];
     // XML's methods look names up in the default XML namespace.
-    const t = ty;
-    if (t == em.domain.xmlType or t == em.domain.xmlListType) {
+    if (ty == em.domain.xmlType or ty == em.domain.xmlListType) {
         em.seesDxns = true;
     }
 

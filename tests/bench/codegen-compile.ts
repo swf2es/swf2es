@@ -1,5 +1,5 @@
 // Compile time of a reference build of the compiler (a git ref, the tag
-// zig-last-parity by default; tests/parity/reference.ts builds it) against
+// zig-parity-2 by default, as parity's; tests/parity/reference.ts builds it) against
 // this tree's, the release builds, interleaved, each module written a part
 // at a time as the host writes it:
 //
@@ -44,7 +44,7 @@ const option = (name: string, fallback: string) => {
   const at = args.indexOf(name);
   return at >= 0 ? args[at + 1] : fallback;
 };
-const ref = option("--reference", "zig-last-parity");
+const ref = option("--reference", "zig-parity-2");
 const runs = Number(option("--runs", "8"));
 if (!Number.isInteger(runs) || runs < 2 || runs % 2 !== 0) {
   console.log("--runs takes an even number, 2 or more, so that each build goes first as often");

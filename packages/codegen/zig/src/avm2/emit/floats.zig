@@ -13,12 +13,10 @@ pub fn floatLocals(em: *MethodEmitter) Error!void {
     }
 
     @memset(em.unboxed[0..ir.localCount], 0);
-    const float = em.domain.floatType;
-    if (!em.abc.hasFloatSupport() or float == .any) {
+    const ty = em.domain.floatType;
+    if (!em.abc.hasFloatSupport() or ty == .any) {
         return;
     }
-
-    const ty = float;
 
     // Bit 2 stays set until a non-float use; bit 1 records a float value.
     for (0..ir.localCount) |r| {
