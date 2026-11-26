@@ -736,7 +736,9 @@ pub const TraitsTable = struct {
     }
 
     /// Whether t resolves, for a caller with no use for the VerifyError.
-    pub fn resolves(self: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!bool {
+    /// Out of line: inlined into the module's walks, it cost 461 bytes and
+    /// no time those walks would notice.
+    pub noinline fn resolves(self: *TraitsTable, dom: *Domain, t: u32) Allocator.Error!bool {
         var diag: Diagnostics = .{};
         self.resolve(dom, t, &diag) catch |err| return switch (err) {
             error.Verify => false,
