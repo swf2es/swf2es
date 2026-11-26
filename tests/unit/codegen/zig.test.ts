@@ -177,7 +177,9 @@ test("the Zig tests' ABCs are the ones the node tests build", async () => {
   assert.deepEqual(await zigBytes("domain/abcs.zig", "link_failing"), [...failing]);
   assert.deepEqual(await zigBytes("domain/abcs.zig", "link_wide"), [...wide]);
   assert.deepEqual(await zigBytes("domain/abcs.zig", "link_created"), [...created]);
-  assert.deepEqual(await zigBytes("domain/abcs.zig", "link_contested"), [...verifyErrorAbcs()[2][1]]);
+  assert.deepEqual(await zigBytes("domain/abcs.zig", "link_contested"), [
+    ...verifyErrorAbcs()[2][1],
+  ]);
 });
 
 test("index.ts asks wantsRebuild by the numbers lifetime.zig's Want gives them", async () => {

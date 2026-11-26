@@ -15,7 +15,6 @@ const Allocator = std.mem.Allocator;
 const options = @import("options");
 const memory = @import("../../memory.zig");
 const Rows = memory.Rows;
-const output = @import("../../output.zig");
 const Abc = @import("../abc/abc.zig").Abc;
 const errors = @import("../abc/errors.zig");
 const Diagnostics = errors.Diagnostics;

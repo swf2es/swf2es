@@ -598,12 +598,37 @@ pub fn domainTraitsCount() Allocator.Error!i32 {
 }
 
 const memory = @import("../memory.zig");
-const lifetime = @import("../avm2/link/lifetime.zig");
+const testing = std.testing;
 
 fn isTerminal(op: ops.Op) bool {
     return op.info().flags.terminal;
 }
 
 test {
+    _ = @import("domain/abcs.zig");
     _ = @import("domain/rollback.zig");
+}
+
+test "a name that is not valid UTF-8 is looked up as AssemblyScript decodes and encodes it again" {
+    var arena: memory.Arena = .init(testing.allocator);
+    defer arena.deinit();
+    var dom: Domain = try .init(arena.allocator(), arena.allocator());
+    const lone = try dom.internString("\xc3");
+    const tail = try dom.internString("a\xc3");
+    const surrogate = try dom.internString("\xed\xa0\x80b");
+    const plain = try dom.internString("c");
+    // A pair of surrogates each encoded alone decodes to the pair, which encodes as one code point.
+    const pair = try dom.internString("\xed\xa0\x80\xed\xb0\x80");
+    try testing.expectEqual(-1, try dom.underscoredName(lone));
+    // A sequence cut short at the end decodes to nothing; a lone surrogate stays one, in WTF-8.
+    const underscore = try dom.internString("_");
+    const a = try dom.internString("_a");
+    const kept = try dom.internString("_\xed\xa0\x80b");
+    const c = try dom.internString("_c");
+    const joined = try dom.internString("_\xf0\x90\x80\x80");
+    try testing.expectEqual(@as(i32, @intCast(joined)), try dom.underscoredName(pair));
+    try testing.expectEqual(@as(i32, @intCast(underscore)), try dom.underscoredName(lone));
+    try testing.expectEqual(@as(i32, @intCast(a)), try dom.underscoredName(tail));
+    try testing.expectEqual(@as(i32, @intCast(kept)), try dom.underscoredName(surrogate));
+    try testing.expectEqual(@as(i32, @intCast(c)), try dom.underscoredName(plain));
 }

@@ -140,45 +140,6 @@ fn hashValue(h: *std.hash.Wyhash, value: anytype) void {
     }
 }
 
-test "the link ABCs are tests/parity/link-abc.ts's, and link as AssemblyScript links them" {
-    memory.arenas();
-    defer compile.release();
-    try compile.domainReset(50);
-    try testing.expectEqual(0, try compile.domainAdd(&link_builtin, true, 0));
-    const child = try compile.domainChild(0);
-    try testing.expectEqual(0, try compile.domainAdd(&link_user, false, child));
-    try testing.expectEqual(1103, try compile.domainAdd(&link_failing, false, 0));
-    try testing.expectEqual(0, try compile.changed(domainResolve, .{0}));
-    try testing.expectEqual(18, try domainTraitsCount());
-    try testing.expectEqualStrings("abc 0 class 4, abc 0 class 0", try compile.changed(domainSlotTypes, .{ memory.call.allocator(), 0, 4 }));
-    try testing.expectEqualStrings("abc 0 class 4, abc 0 class 0, abc 0 class 5", try compile.changed(domainSlotTypes, .{ memory.call.allocator(), 1, 0 }));
-    memory.call.reset();
-}
-
-test "a name that is not valid UTF-8 is looked up as AssemblyScript decodes and encodes it again" {
-    var arena: memory.Arena = .init(testing.allocator);
-    defer arena.deinit();
-    var dom: Domain = try .init(arena.allocator(), arena.allocator());
-    const lone = try dom.internString("\xc3");
-    const tail = try dom.internString("a\xc3");
-    const surrogate = try dom.internString("\xed\xa0\x80b");
-    const plain = try dom.internString("c");
-    // A pair of surrogates each encoded alone decodes to the pair, which encodes as one code point.
-    const pair = try dom.internString("\xed\xa0\x80\xed\xb0\x80");
-    try testing.expectEqual(-1, try dom.underscoredName(lone));
-    // A sequence cut short at the end decodes to nothing; a lone surrogate stays one, in WTF-8.
-    const underscore = try dom.internString("_");
-    const a = try dom.internString("_a");
-    const kept = try dom.internString("_\xed\xa0\x80b");
-    const c = try dom.internString("_c");
-    const joined = try dom.internString("_\xf0\x90\x80\x80");
-    try testing.expectEqual(@as(i32, @intCast(joined)), try dom.underscoredName(pair));
-    try testing.expectEqual(@as(i32, @intCast(underscore)), try dom.underscoredName(lone));
-    try testing.expectEqual(@as(i32, @intCast(a)), try dom.underscoredName(tail));
-    try testing.expectEqual(@as(i32, @intCast(kept)), try dom.underscoredName(surrogate));
-    try testing.expectEqual(@as(i32, @intCast(c)), try dom.underscoredName(plain));
-}
-
 /// A domain's life through compile.zig's entries, over the module's pages
 /// replaced by `p`'s: each call that runs out of memory leaves the domain
 /// as it was, which its fingerprint shows.

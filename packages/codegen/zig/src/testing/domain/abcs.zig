@@ -1,6 +1,16 @@
 // The test build's ABCs, which tests/unit/codegen/zig.test.ts holds to the
-// node tests' and the rollback tests and testing.zig link.
-// The ABCs of tests/parity/link-abc.ts, which a unit test holds these to:
+// node tests' and the rollback tests and testing.zig link, and the test
+// that links them.
+const std = @import("std");
+const testing = std.testing;
+const memory = @import("../../memory.zig");
+const compile = @import("../../compile.zig");
+const dumps = @import("../domain.zig");
+const domainResolve = dumps.domainResolve;
+const domainSlotTypes = dumps.domainSlotTypes;
+const domainTraitsCount = dumps.domainTraitsCount;
+
+// The ABCs of tests/unit/codegen/link-abc.ts, which a unit test holds these to:
 // a builtin one that links with nothing before it, a user one extending
 // its class from another application domain, one that fails to link, and
 // a wide one whose strings, namespaces and members outgrow an id table's
@@ -263,3 +273,18 @@ pub const link_contested = [_]u8{
     0x29, 0x47, 0x01, 0x05, 0x4b, 0x4c, 0x00, 0x03, 0x00, 0x04, 0x02, 0x01, 0x00, 0x01, 0x01,
     0x47, 0x00, 0x00,
 };
+
+test "the link ABCs are tests/unit/codegen/link-abc.ts's, and link as AssemblyScript links them" {
+    memory.arenas();
+    defer compile.release();
+    try compile.domainReset(50);
+    try testing.expectEqual(0, try compile.domainAdd(&link_builtin, true, 0));
+    const child = try compile.domainChild(0);
+    try testing.expectEqual(0, try compile.domainAdd(&link_user, false, child));
+    try testing.expectEqual(1103, try compile.domainAdd(&link_failing, false, 0));
+    try testing.expectEqual(0, try compile.changed(domainResolve, .{0}));
+    try testing.expectEqual(18, try domainTraitsCount());
+    try testing.expectEqualStrings("abc 0 class 4, abc 0 class 0", try compile.changed(domainSlotTypes, .{ memory.call.allocator(), 0, 4 }));
+    try testing.expectEqualStrings("abc 0 class 4, abc 0 class 0, abc 0 class 5", try compile.changed(domainSlotTypes, .{ memory.call.allocator(), 1, 0 }));
+    memory.call.reset();
+}
