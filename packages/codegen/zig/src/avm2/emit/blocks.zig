@@ -5,8 +5,6 @@
 // branch, the copies its target needs and does not know (see copies.zig).
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
-const ops = @import("../abc/opcodes.zig");
-const ir_ = @import("../ir/ir.zig");
 const traits_ = @import("../link/traits.zig");
 const copies = @import("copies.zig");
 const NONE = copies.NONE;

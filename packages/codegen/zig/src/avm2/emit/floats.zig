@@ -2,7 +2,6 @@
 // JavaScript's own (assembly/avm2/emit/floats.ts).
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
-const ops = @import("../abc/opcodes.zig");
 const MethodEmitter = @import("method.zig").MethodEmitter;
 
 /// Keep a local unboxed only when every read and write knows its float identity.

@@ -17,7 +17,6 @@ const BodyDecoder = code_.BodyDecoder;
 const NOT_NULL = code_.NOT_NULL;
 const START = code_.START;
 const C = @import("constants.zig");
-const ops = @import("opcodes.zig");
 
 /// Save the current state as known target t's entry state.
 pub fn saveEntry(bd: *BodyDecoder, t: u32) Error!void {

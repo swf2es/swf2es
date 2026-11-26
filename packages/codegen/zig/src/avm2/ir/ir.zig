@@ -7,7 +7,8 @@ const Allocator = std.mem.Allocator;
 const ops = @import("../abc/opcodes.zig");
 
 /// The IR's own instructions, beyond the ABC's opcodes: their names in Op
-/// and their numbers, from 0x100.
+/// and their numbers, from 0x100. The `.ir_*` tags used across emit/ are
+/// declared here, nowhere else.
 const ir_only = [_]struct { []const u8, u16 }{
     // dst = src coerced to type `c`.
     .{ "ir_coerce", 0x100 },
@@ -97,7 +98,8 @@ pub fn opcodeName(op: Op) []const u8 {
 
 /// Whether `op` is an opcode that `is` holds of; never one of the IR's own.
 pub fn opcodeIs(op: Op, comptime is: fn (ops.Op) bool) bool {
-    return if (opcode(op)) |o| is(o) else false;
+    const b = @backingInt(op);
+    return b < 0x100 and is(@fromBackingInt(@as(u8, @truncate(b))));
 }
 
 pub const Ir = struct {

@@ -204,7 +204,8 @@ pub const Op = enum(u8) {
 
     /// Whether it branches: jump, or a conditional branch.
     pub fn isBranch(op: Op) bool {
-        return inRange(op, .ifnlt, .ifstrictne) != null;
+        const b = @backingInt(op);
+        return b >= @backingInt(Op.ifnlt) and b <= @backingInt(Op.ifstrictne);
     }
 
     /// Whether it branches on a condition.

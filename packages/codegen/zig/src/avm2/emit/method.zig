@@ -13,7 +13,6 @@ const output = @import("../../output.zig");
 const Output = output.Output;
 const Abc = @import("../abc/abc.zig").Abc;
 const C = @import("../abc/constants.zig");
-const ops = @import("../abc/opcodes.zig");
 const ir_ = @import("../ir/ir.zig");
 const Ir = ir_.Ir;
 const Domain = @import("../link/domain.zig").Domain;

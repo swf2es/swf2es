@@ -9,7 +9,6 @@ const TYPE_Any = @import("../link/traits.zig").TYPE_Any;
 const code_ = @import("code.zig");
 const BodyDecoder = code_.BodyDecoder;
 const C = @import("constants.zig");
-const ops = @import("opcodes.zig");
 const ConstantPool = @import("pool.zig").ConstantPool;
 const typing = @import("typing.zig");
 const Op = @import("opcodes.zig").Op;

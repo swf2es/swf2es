@@ -6,8 +6,6 @@
 // (see MethodEmitter.checkEntry).
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
-const C = @import("../abc/constants.zig");
-const ops = @import("../abc/opcodes.zig");
 const ir_ = @import("../ir/ir.zig");
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;

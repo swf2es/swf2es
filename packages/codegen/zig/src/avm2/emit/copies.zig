@@ -28,12 +28,12 @@ pub fn pushesConstant(op: IrOp) bool {
 
 /// Whether op is a getlocal, which makes its stack register a copy.
 pub fn getsLocal(op: IrOp) bool {
-    return op == .getlocal or (if (ir_.opcode(op)) |o| o.getLocalN() != null else false);
+    return op == .getlocal or ir_.opcodeIs(op, isGetLocalN);
 }
 
 /// Whether op is a setlocal, which takes its stack register.
 pub fn setsLocal(op: IrOp) bool {
-    return op == .setlocal or (if (ir_.opcode(op)) |o| o.setLocalN() != null else false);
+    return op == .setlocal or ir_.opcodeIs(op, isSetLocalN);
 }
 
 fn grow(em: *MethodEmitter, comptime T: type, table: *[]T, n: usize) Error!void {
@@ -280,4 +280,12 @@ fn join(em: *MethodEmitter, t: u32, k: u32) bool {
 
     em.dirty[t] = 1;
     return t <= k;
+}
+
+fn isGetLocalN(op: ops.Op) bool {
+    return op.getLocalN() != null;
+}
+
+fn isSetLocalN(op: ops.Op) bool {
+    return op.setLocalN() != null;
 }

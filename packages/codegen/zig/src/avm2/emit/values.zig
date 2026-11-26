@@ -5,8 +5,6 @@
 // coercions.
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
-const ops = @import("../abc/opcodes.zig");
-const ir_ = @import("../ir/ir.zig");
 const traits_ = @import("../link/traits.zig");
 const TYPE_Any = traits_.TYPE_Any;
 const MethodEmitter = @import("method.zig").MethodEmitter;

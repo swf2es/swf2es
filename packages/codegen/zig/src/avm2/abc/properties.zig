@@ -16,7 +16,6 @@ const BodyDecoder = code_.BodyDecoder;
 const NOT_NULL = code_.NOT_NULL;
 const WITH = code_.WITH;
 const C = @import("constants.zig");
-const ops = @import("opcodes.zig");
 const Op = @import("opcodes.zig").Op;
 const IrOp = @import("../ir/ir.zig").Op;
 

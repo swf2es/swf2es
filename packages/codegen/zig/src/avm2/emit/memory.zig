@@ -3,7 +3,6 @@
 // an int or uint address, and the DataView method each one uses. The view's
 // own range check rejects an address avmplus rejects, with a RangeError of
 // its own that the method's code turns into avmplus' (inPlaceMemory).
-const ops = @import("../abc/opcodes.zig");
 const traits_ = @import("../link/traits.zig");
 const MethodEmitter = @import("method.zig").MethodEmitter;
 const IrOp = @import("../ir/ir.zig").Op;

@@ -2,7 +2,6 @@
 // Name clashes, overrides and slot layout (Traits::verifyBindings) need the
 // base class, which may live in another ABC, so they are checked when
 // classes are linked.
-const std = @import("std");
 const abc_ = @import("abc.zig");
 const Abc = abc_.Abc;
 const Lists = abc_.Lists;

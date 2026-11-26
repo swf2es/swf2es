@@ -10,7 +10,6 @@ const Writer = std.Io.Writer;
 const memory = @import("../memory.zig");
 const output = @import("../output.zig");
 const Output = output.Output;
-const dtoa = @import("../dtoa.zig");
 const decode = @import("../avm1/actions/decode.zig");
 const Action = decode.Action;
 const Actions = decode.Actions;

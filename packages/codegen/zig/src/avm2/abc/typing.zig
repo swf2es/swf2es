@@ -5,7 +5,6 @@
 // is properties.zig's.
 const std = @import("std");
 const Error = std.mem.Allocator.Error;
-const ir_ = @import("../ir/ir.zig");
 const traits_ = @import("../link/traits.zig");
 const Scope = traits_.Scope;
 const Scopes = traits_.Scopes;
@@ -18,7 +17,6 @@ const KNOWN = code_.KNOWN;
 const NOT_NULL = code_.NOT_NULL;
 const WITH = code_.WITH;
 const C = @import("constants.zig");
-const ops = @import("opcodes.zig");
 const p = @import("properties.zig");
 const Op = @import("opcodes.zig").Op;
 
