@@ -40,7 +40,14 @@ pub const Reader = struct {
     pub inline fn byteAs(self: *Reader, comptime T: type) T {
         const b: u8 = @truncate(self.u8_());
         return switch (@typeInfo(T)) {
-            .@"enum" => @fromBackingInt(@intCast(b)),
+            .@"enum" => |e| {
+                // An exhaustive enum would panic on a byte it does not name.
+                if (e.mode == .exhaustive) {
+                    @compileError(@typeName(T) ++ " must be non-exhaustive to read any byte");
+                }
+
+                return @fromBackingInt(@intCast(b));
+            },
             else => @bitCast(b),
         };
     }

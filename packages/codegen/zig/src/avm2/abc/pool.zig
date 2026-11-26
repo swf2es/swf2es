@@ -118,14 +118,15 @@ pub const ConstantPool = struct {
 
     /// Multiname `i`, as its kind lays it out.
     pub fn multiname(self: *const ConstantPool, i: u32) Multiname {
+        const kind = self.mnKind[i];
         const a = self.mnA[i];
         const b = self.mnB[i];
-        return switch (self.mnKind[i]) {
-            .qname, .qname_a => .{ .qname = .{ .ns = a, .name = b, .attribute = self.mnKind[i] == .qname_a } },
-            .rtqname, .rtqname_a => .{ .rtqname = .{ .name = b, .attribute = self.mnKind[i] == .rtqname_a } },
-            .rtqname_l, .rtqname_la => .{ .rtqname_late = .{ .attribute = self.mnKind[i] == .rtqname_la } },
-            .multiname, .multiname_a => .{ .multiname = .{ .set = a, .name = b, .attribute = self.mnKind[i] == .multiname_a } },
-            .multiname_l, .multiname_la => .{ .multiname_late = .{ .set = a, .attribute = self.mnKind[i] == .multiname_la } },
+        return switch (kind) {
+            .qname, .qname_a => .{ .qname = .{ .ns = a, .name = b, .attribute = kind == .qname_a } },
+            .rtqname, .rtqname_a => .{ .rtqname = .{ .name = b, .attribute = kind == .rtqname_a } },
+            .rtqname_l, .rtqname_la => .{ .rtqname_late = .{ .attribute = kind == .rtqname_la } },
+            .multiname, .multiname_a => .{ .multiname = .{ .set = a, .name = b, .attribute = kind == .multiname_a } },
+            .multiname_l, .multiname_la => .{ .multiname_late = .{ .set = a, .attribute = kind == .multiname_la } },
             .type_name => .{ .type_name = .{ .base = a, .param = b } },
             else => .none,
         };

@@ -36,6 +36,11 @@ pub const Constant = enum(u8) {
     type_name = 0x1d,
     _,
 
+    /// 0, no kind: what a slot without a value, or entry 0 of a table the
+    /// parse did not reach, holds. A declaration, not a field, so that
+    /// switches still reject it with the unnamed values.
+    pub const none: Constant = @fromBackingInt(0);
+
     /// Whether it is a namespace's kind.
     pub fn isNamespace(self: Constant) bool {
         return switch (self) {
@@ -100,11 +105,11 @@ pub const TraitKind = enum(u4) {
 /// traits_info.kind: the trait's kind, then its attributes; the top bit,
 /// which no attribute names, is kept as read.
 pub const TraitTag = packed struct(u8) {
-    kind: TraitKind,
-    final: bool,
-    override: bool,
-    metadata: bool,
-    _: u1,
+    kind: TraitKind = .slot,
+    final: bool = false,
+    override: bool = false,
+    metadata: bool = false,
+    _: u1 = 0,
 };
 
 // VerifyError numbers avmplus reports (core/ErrorConstants.h), so a rejected
