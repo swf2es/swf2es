@@ -47,8 +47,8 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
     }
 
     var baseSlots: u32 = 0;
-    if (base >= 0) {
-        const b: u32 = @intCast(base);
+    if (base != .none) {
+        const b = base.index();
         baseSlots = traits.slotCount.get(b);
         const from = traits.slotStart.get(b);
         for (0..baseSlots) |s_| {
@@ -93,7 +93,8 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
 
             var ty: i32 = undefined;
             if (kind == .class) {
-                ty = dom.classStatic.get(dom.classStart.get(index) + abc.traitIndex[i]);
+                // A class not linked yet reads as *.
+                ty = dom.classStatic.get(dom.classStart.get(index) + abc.traitIndex[i]).orAny();
             } else {
                 ty = try resolveTypeId(dom, index, abc.traitIndex[i], false);
                 if (ty < TYPE_Any) {
@@ -118,7 +119,7 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32) Alloca
                     (hasGetter(bb) and kind == .getter) or
                     (hasSetter(bb) and kind == .setter))
                 {
-                    const virt = traits.dispatch.get(traits.dispatchStart.get(@intCast(base)) + d);
+                    const virt = traits.dispatch.get(traits.dispatchStart.get(base.index()) + d);
                     if (virt >= 0 and traits.methodFinal.get(@intCast(virt)) != 0) {
                         return C.kIllegalOverrideError;
                     }
@@ -139,7 +140,7 @@ pub fn checkInitialValues(traits: *const TraitsTable, dom: *const Domain, t: u32
     const early = traits.allowEarlyBinding(t);
     const base = traits.base.get(t);
     const slots = traits.slotStart.get(t);
-    var next = if (base >= 0) traits.slotCount.get(@intCast(base)) else 0;
+    var next = if (base != .none) traits.slotCount.get(base.index()) else 0;
     var i = traits.first.get(t);
     while (i < traits.end.get(t)) : (i += 1) {
         const kind = abc.traitTag[i].kind;

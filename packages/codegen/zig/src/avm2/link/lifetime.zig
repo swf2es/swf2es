@@ -13,6 +13,7 @@ const DomainState = domain_.DomainState;
 const Domain = domain_.Domain;
 const traits_ = @import("traits.zig");
 const TraitsKind = traits_.TraitsKind;
+const TypeRef = traits_.TypeRef;
 const code = @import("../abc/code.zig");
 const output = @import("../../output.zig");
 
@@ -293,8 +294,8 @@ pub fn addWeights(dom: *Domain) void {
     dom.deadWeight = dead;
 }
 
-/// The traits of ABC `abc` of `kind` and `owner`, as loggedResolve logged them, or -1.
-pub fn traitsOf(dom: *const Domain, abc: u32, kind: TraitsKind, owner: u32) i32 {
+/// The traits of ABC `abc` of `kind` and `owner`, as loggedResolve logged them, or none.
+pub fn traitsOf(dom: *const Domain, abc: u32, kind: TraitsKind, owner: u32) TypeRef {
     if (kind == .instance) {
         return dom.classTraits.get(dom.classStart.get(abc) + owner);
     }
@@ -304,10 +305,10 @@ pub fn traitsOf(dom: *const Domain, abc: u32, kind: TraitsKind, owner: u32) i32 
     }
 
     if (kind == .script) {
-        return @intCast(dom.scriptTraits.get(abc)[owner]);
+        return .of(dom.scriptTraits.get(abc)[owner]);
     }
 
-    return dom.bodyTraits.get(abc)[owner];
+    return .ofType(dom.bodyTraits.get(abc)[owner]);
 }
 
 // The rebuild, saving and loading (stage 6).
@@ -530,8 +531,8 @@ fn replay(dom: *Domain, from: *const Domain, e: u32) Allocator.Error!bool {
             .activation => @intCast(dom.bodyTraits.get(abc).len),
             else => info.classCount(),
         };
-        const t = if (b < owners) traitsOf(dom, abc, owned, b) else -1;
-        return t >= 0 and try dom.traits.resolve(dom, @intCast(t)) == 0;
+        const t = if (b < owners) traitsOf(dom, abc, owned, b) else .none;
+        return t != .none and try dom.traits.resolve(dom, t.index()) == 0;
     }
 
     return kind == .sign and b < info.methodCount() and try dom.traits.sign(dom, dom.methodStart.get(abc) + b) == 0;

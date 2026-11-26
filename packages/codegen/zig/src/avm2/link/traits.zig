@@ -63,6 +63,42 @@ pub const TraitsKind = enum(u8) {
 
 pub const TYPE_Any: i32 = -1;
 
+/// A traits id that may be absent: a traits' base, a class's instance or
+/// class object traits, which a class has once it links. Its none is -1,
+/// the number a type id gives *, but it is no type: a ref becomes one by
+/// toType, which none has not, or by orAny, which says where an absent
+/// ref is read as *. The same i32 as before.
+pub const TypeRef = enum(i32) {
+    none = -1,
+    _,
+
+    pub fn of(t: u32) TypeRef {
+        return @fromBackingInt(@intCast(t));
+    }
+
+    /// A type's traits: none for *, which has no traits.
+    pub fn ofType(type_: i32) TypeRef {
+        return if (type_ < 0) .none else of(@intCast(type_));
+    }
+
+    /// Its traits id; a ref that is not none.
+    pub fn index(ref: TypeRef) u32 {
+        return @intCast(@backingInt(ref));
+    }
+
+    /// As a type id; a ref that is not none.
+    pub fn toType(ref: TypeRef) i32 {
+        std.debug.assert(ref != .none);
+        return @backingInt(ref);
+    }
+
+    /// As a type id, none as *: where an absent ref has always been read
+    /// as *, which each caller says.
+    pub fn orAny(ref: TypeRef) i32 {
+        return @backingInt(ref);
+    }
+};
+
 /// A binding's kind, as avmplus' BindingKind: the low three bits of a
 /// Binding. Kind 4 is one avmplus does not use.
 pub const BindingKind = enum(u3) {
@@ -228,8 +264,8 @@ pub const TraitsTable = struct {
     abc: Rows(u32) = .{},
     /// The class, script or body index in its ABC.
     owner: Rows(u32) = .{},
-    /// The traits whose members these inherit, or -1.
-    base: Rows(i32) = .{},
+    /// The traits whose members these inherit, or none.
+    base: Rows(TypeRef) = .{},
     /// Namespace id of the protected namespace, or -1.
     protectedNs: Rows(i32) = .{},
     isInterface: Rows(u8) = .{},
@@ -308,7 +344,7 @@ pub const TraitsTable = struct {
     }
 
     /// New traits over traits_info entries [first, end) of ABC `abc`.
-    pub fn create(self: *TraitsTable, gpa: Allocator, kind: TraitsKind, abc: u32, owner: u32, base: i32, protectedNs: i32, first: u32, end: u32) Allocator.Error!u32 {
+    pub fn create(self: *TraitsTable, gpa: Allocator, kind: TraitsKind, abc: u32, owner: u32, base: TypeRef, protectedNs: i32, first: u32, end: u32) Allocator.Error!u32 {
         const t = self.kind.len;
         try self.kind.push(gpa, kind);
         try self.abc.push(gpa, abc);
@@ -438,9 +474,14 @@ pub const TraitsTable = struct {
 
     /// As TraitsBindings::findBinding: t's own members, then its base's.
     pub fn find(self: *const TraitsTable, type_: i32, ns: u32, name: u32, version: u8) Binding {
-        var t = type_;
-        while (t >= 0) : (t = self.base.get(@intCast(t))) {
-            const b = self.own(@intCast(t), ns, name, version);
+        return self.findFrom(.ofType(type_), ns, name, version);
+    }
+
+    /// find from traits `ref`, none finding nothing.
+    pub fn findFrom(self: *const TraitsTable, ref: TypeRef, ns: u32, name: u32, version: u8) Binding {
+        var t = ref;
+        while (t != .none) : (t = self.base.get(t.index())) {
+            const b = self.own(t.index(), ns, name, version);
             if (b != Binding.none) {
                 return b;
             }
@@ -452,10 +493,10 @@ pub const TraitsTable = struct {
     /// As TraitsBindings::findBinding by name alone: the first member named
     /// `name` in any namespace of t or its bases.
     pub fn findName(self: *const TraitsTable, type_: i32, name: u32) Binding {
-        var t = type_;
-        while (t >= 0) : (t = self.base.get(@intCast(t))) {
-            const last = self.memberEnd.get(@intCast(t));
-            var m = self.memberStart.get(@intCast(t));
+        var t = TypeRef.ofType(type_);
+        while (t != .none) : (t = self.base.get(t.index())) {
+            const last = self.memberEnd.get(t.index());
+            var m = self.memberStart.get(t.index());
             while (m < last) : (m += 1) {
                 if (self.memberName.get(m) == name) {
                     return self.memberBinding.get(m);
@@ -535,12 +576,12 @@ pub const TraitsTable = struct {
     pub fn allowEarlyBinding(self: *const TraitsTable, t: u32) bool {
         const abc = self.abc.get(t);
         var b = self.base.get(t);
-        while (b >= 0) : (b = self.base.get(@intCast(b))) {
-            if (self.slotCount.get(@intCast(b)) == 0) {
+        while (b != .none) : (b = self.base.get(b.index())) {
+            if (self.slotCount.get(b.index()) == 0) {
                 break;
             }
 
-            if (self.abc.get(@intCast(b)) != abc) {
+            if (self.abc.get(b.index()) != abc) {
                 return false;
             }
         }
@@ -557,11 +598,11 @@ pub const TraitsTable = struct {
     pub fn allInterfaces(self: *const TraitsTable, scratch: Allocator, t: u32) Allocator.Error![]u32 {
         var all: std.ArrayList(u32) = .empty;
         var stack: std.ArrayList(InterfaceFrame) = .empty;
-        var c: i32 = @intCast(t);
-        while (c >= 0) : (c = self.base.get(@intCast(c))) {
+        var c = TypeRef.of(t);
+        while (c != .none) : (c = self.base.get(c.index())) {
             // Most bases name none: nothing taken for them, along a chain as long as the input's.
-            if (self.interfaceStart.get(@intCast(c)) != self.interfaceEnd.get(@intCast(c))) {
-                try self.addInterfaces(scratch, @intCast(c), &all, &stack);
+            if (self.interfaceStart.get(c.index()) != self.interfaceEnd.get(c.index())) {
+                try self.addInterfaces(scratch, c.index(), &all, &stack);
             }
         }
 
@@ -591,9 +632,9 @@ pub const TraitsTable = struct {
 
     /// As Traits::subtypeof: t is s, extends it, or implements it.
     pub fn subtypeOf(self: *const TraitsTable, scratch: Allocator, t: u32, s: u32) Allocator.Error!bool {
-        var c: i32 = @intCast(t);
-        while (c >= 0) : (c = self.base.get(@intCast(c))) {
-            if (@as(u32, @intCast(c)) == s) {
+        var c = TypeRef.of(t);
+        while (c != .none) : (c = self.base.get(c.index())) {
+            if (c.index() == s) {
                 return true;
             }
         }
@@ -634,8 +675,8 @@ pub const TraitsTable = struct {
 
                     frame.stage = 1;
                     const base = self.base.get(frame.t);
-                    if (base >= 0) {
-                        try stack.append(dom.scratch, .{ .t = @intCast(base) });
+                    if (base != .none) {
+                        try stack.append(dom.scratch, .{ .t = base.index() });
                     }
                 },
                 1 => {
@@ -696,9 +737,9 @@ pub const TraitsTable = struct {
         }
 
         var legal = true;
-        if (base >= 0) {
-            const baseDispatch = self.dispatchStart.get(@intCast(base));
-            for (0..self.methodCount.get(@intCast(base))) |d| {
+        if (base != .none) {
+            const baseDispatch = self.dispatchStart.get(base.index());
+            for (0..self.methodCount.get(base.index())) |d| {
                 const virt = self.dispatch.get(baseDispatch + @as(u32, @intCast(d)));
                 const over = self.dispatch.get(dispatch + @as(u32, @intCast(d)));
                 if (virt >= 0 and virt != over) {

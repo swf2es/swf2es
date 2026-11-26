@@ -33,6 +33,7 @@ const traits_ = @import("traits.zig");
 const Binding = traits_.Binding;
 const TraitsTable = traits_.TraitsTable;
 const TYPE_Any = traits_.TYPE_Any;
+const TypeRef = traits_.TypeRef;
 const typenames = @import("typenames.zig");
 const types = @import("types.zig");
 
@@ -404,9 +405,10 @@ pub const Domain = struct {
     /// The base class's id, or -1.
     classBase: Rows(i32) = .{},
     classFlags: Rows(C.InstanceFlags) = .{},
-    /// The traits of the class's instances, and of the class object; -1 for void.
-    classTraits: Rows(i32) = .{},
-    classStatic: Rows(i32) = .{},
+    /// The traits of the class's instances, and of the class object; none
+    /// for void's class object, and for both until the class links.
+    classTraits: Rows(TypeRef) = .{},
+    classStatic: Rows(TypeRef) = .{},
 
     traits: TraitsTable,
     /// Each ABC's first method id; the ABC of each method id.
@@ -756,12 +758,14 @@ pub const Domain = struct {
 
     /// The traits of Class's instances, which class objects are.
     pub fn classInstanceType(self: *const Domain) i32 {
-        return if (self.classClass < 0) TYPE_Any else self.classTraits.get(@intCast(self.classClass));
+        // Class's, unlinked, reads as *, as no Class does.
+        return if (self.classClass < 0) TYPE_Any else self.classTraits.get(@intCast(self.classClass)).orAny();
     }
 
     /// The class object traits of class `i` of ABC `index`.
     pub fn staticTraitsOf(self: *const Domain, index: u32, i: u32) i32 {
-        return self.classStatic.get(self.classStart.get(index) + i);
+        // An unlinked class's reads as *.
+        return self.classStatic.get(self.classStart.get(index) + i).orAny();
     }
 
     /// As Traits::itraits: for a class object's traits, its instances'; else *.
@@ -772,7 +776,8 @@ pub const Domain = struct {
         }
 
         const t: u32 = @intCast(type_);
-        return self.classTraits.get(self.classStart.get(traits.abc.get(t)) + traits.owner.get(t));
+        // An unlinked class's reads as *.
+        return self.classTraits.get(self.classStart.get(traits.abc.get(t)) + traits.owner.get(t)).orAny();
     }
 
     /// As Verifier::checkTypeName: the type multiname `mn` of ABC `index` names,
@@ -793,7 +798,8 @@ pub const Domain = struct {
             }
 
             if (!isTypeName) {
-                break if (c < 0) self.voidType else self.classTraits.get(@intCast(c));
+                // A class not linked yet reads as *.
+                break if (c < 0) self.voidType else self.classTraits.get(@intCast(c)).orAny();
             }
 
             try classes_.append(self.scratch, c);
@@ -965,24 +971,24 @@ pub const Domain = struct {
     /// protected member belonging to the first base that has it; -1 if none.
     pub fn initOfDeclarer(self: *Domain, type_: i32, index: u32, mn: u32) i32 {
         const traits = &self.traits;
-        var t = type_;
-        while (t >= 0) : (t = traits.base.get(@intCast(t))) {
-            const b = types.getOwnBinding(self, index, @intCast(t), mn);
+        var t = TypeRef.ofType(type_);
+        while (t != .none) : (t = traits.base.get(t.index())) {
+            const b = types.getOwnBinding(self, index, t.index(), mn);
             if (b == Binding.none) {
                 continue;
             }
 
             var declarer = t;
             var ns = self.foundNs;
-            while (ns == traits.protectedNs.get(@intCast(declarer))) {
-                const parent = traits.base.get(@intCast(declarer));
-                if (parent < 0 or traits.protectedNs.get(@intCast(parent)) < 0) {
+            while (ns == traits.protectedNs.get(declarer.index())) {
+                const parent = traits.base.get(declarer.index());
+                if (parent == .none or traits.protectedNs.get(parent.index()) < 0) {
                     break;
                 }
 
-                const parentNs: u32 = @intCast(traits.protectedNs.get(@intCast(parent)));
+                const parentNs: u32 = @intCast(traits.protectedNs.get(parent.index()));
                 const name = self.nameOf(index, mn);
-                if (traits.find(parent, parentNs, name, API_Internal) != b) {
+                if (traits.find(parent.toType(), parentNs, name, API_Internal) != b) {
                     break;
                 }
 
@@ -990,7 +996,7 @@ pub const Domain = struct {
                 ns = @intCast(parentNs);
             }
 
-            return traits.init.get(@intCast(declarer));
+            return traits.init.get(declarer.index());
         }
 
         return -1;
@@ -1029,7 +1035,8 @@ pub const Domain = struct {
         const traits = &self.traits;
         const s: u32 = @intCast(slotType);
         if (traits.kind.get(s) == .class and
-            traits.base.get(s) == self.classInstanceType() and
+            // No base reads as *, which classInstanceType gives with no Class.
+            traits.base.get(s).orAny() == self.classInstanceType() and
             !self.abcs.get(traits.abc.get(s)).builtin)
         {
             return self.instanceTraitsOf(slotType);
@@ -1055,7 +1062,8 @@ pub const Domain = struct {
         const traits = &self.traits;
         const t: u32 = @intCast(type_);
         const index = traits.abc.get(t);
-        return self.classStatic.get(self.classStart.get(index) + traits.owner.get(t));
+        // An unlinked class's reads as *.
+        return self.classStatic.get(self.classStart.get(index) + traits.owner.get(t)).orAny();
     }
 
     /// The catch scope of handler `h` of ABC `index`, as Traits::newCatchTraits:
@@ -1079,7 +1087,7 @@ pub const Domain = struct {
         }
 
         const traits = &self.traits;
-        const t = try traits.create(gpa, .catch_scope, index, h, -1, -1, 0, 0);
+        const t = try traits.create(gpa, .catch_scope, index, h, .none, -1, 0, 0);
         const start = traits.memberTraits.len;
         traits.memberStart.set(t, start);
         traits.memberEnd.set(t, start);
@@ -1128,7 +1136,8 @@ pub const Domain = struct {
 
     pub fn builtinType(self: *const Domain, name: []const u8) i32 {
         const c = self.findBuiltin(name);
-        return if (c < 0) -1 else self.classTraits.get(@intCast(c));
+        // -1 for a builtin absent or not linked yet, as the builtin type fields hold it.
+        return if (c < 0) -1 else @backingInt(self.classTraits.get(@intCast(c)));
     }
 
     /// As DomainMgr::findBuiltinTraitsByName: the first class of the ABC being
@@ -1150,7 +1159,8 @@ pub const Domain = struct {
     }
 
     pub fn objectType(self: *const Domain) i32 {
-        return if (self.objectClass < 0) TYPE_Any else self.classTraits.get(@intCast(self.objectClass));
+        // Object's, unlinked, reads as *, as no Object does.
+        return if (self.objectClass < 0) TYPE_Any else self.classTraits.get(@intCast(self.objectClass)).orAny();
     }
 
     /// As Traits::getBuiltinType.

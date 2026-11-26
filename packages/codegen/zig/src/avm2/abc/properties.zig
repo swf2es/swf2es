@@ -121,15 +121,15 @@ pub fn coerceArgs(bd: *BodyDecoder, m: u32, argc: u32) Error!bool {
 
 /// As Verifier::emitCoerceSuper: the receiver at i becomes the declaring class's base.
 pub fn coerceSuper(bd: *BodyDecoder, i: u32) Error!i32 {
-    const base = if (bd.declarer >= 0) bd.domain.traits.base.get(@intCast(bd.declarer)) else -1;
-    if (base < 0) {
+    const base = if (bd.declarer >= 0) bd.domain.traits.base.get(@intCast(bd.declarer)) else .none;
+    if (base == .none) {
         _ = bd.fail(C.kIllegalSuperCallError);
         return -2;
     }
 
-    try bd.coerce(i, base);
-    bd.rowC = base;
-    return base;
+    try bd.coerce(i, base.toType());
+    bd.rowC = base.toType();
+    return base.toType();
 }
 
 /// As Verifier::checkEarlySlotBinding and checkSlot: `type` must come from

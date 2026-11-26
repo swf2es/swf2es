@@ -20,6 +20,7 @@ const C = @import("../abc/constants.zig");
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
+const TypeRef = traits_.TypeRef;
 const method_ = @import("method.zig");
 const MethodEmitter = method_.MethodEmitter;
 const METHOD_SLOT = method_.METHOD_SLOT;
@@ -676,8 +677,8 @@ pub const ModuleEmitter = struct {
         try o.text("], methods: [");
         first = true;
         const dispatch = table.dispatchStart.get(t);
-        const baseDispatch = if (base >= 0) table.dispatchStart.get(@intCast(base)) else 0;
-        const baseMethods: u32 = if (base >= 0) table.methodCount.get(@intCast(base)) else 0;
+        const baseDispatch = if (base != .none) table.dispatchStart.get(base.index()) else 0;
+        const baseMethods: u32 = if (base != .none) table.methodCount.get(base.index()) else 0;
         const start = domain.methodStart.get(self.index);
         for (0..table.methodCount.get(t)) |d_| {
             const d: u32 = @intCast(d_);
@@ -728,9 +729,9 @@ pub const ModuleEmitter = struct {
         // slot named twice has the value the runtime sets last.
         const chain = &self.fillChain;
         chain.clearRetainingCapacity();
-        var u: i32 = @intCast(t);
-        while (u >= 0) : (u = table.base.get(@intCast(u))) {
-            try chain.append(gpa, @intCast(u));
+        var u = TypeRef.of(t);
+        while (u != .none) : (u = table.base.get(u.index())) {
+            try chain.append(gpa, u.index());
         }
 
         var c = chain.items.len;
@@ -965,10 +966,10 @@ pub const ModuleEmitter = struct {
             try o.text(", protectedNs: ");
             try o.uint(abc.instanceProtectedNs[i]);
             try o.text(",\n      instance: ");
-            const instance: u32 = @intCast(domain.classTraits.get(classStart + i));
+            const instance = domain.classTraits.get(classStart + i).index();
             try self.traits(instance);
             try o.text(",\n      static: ");
-            try self.traits(@intCast(domain.classStatic.get(classStart + i)));
+            try self.traits(domain.classStatic.get(classStart + i).index());
             try o.text(",\n      init: F[");
             try o.uint(abc.instanceInit[i]);
             try o.text("], cinit: F[");
@@ -1009,14 +1010,14 @@ pub const ModuleEmitter = struct {
 
         const base = table.base.get(t);
         const dispatch = table.dispatchStart.get(t);
-        const baseDispatch = if (base >= 0) table.dispatchStart.get(@intCast(base)) else 0;
-        const baseMethods: u32 = if (base >= 0) table.methodCount.get(@intCast(base)) else 0;
+        const baseDispatch = if (base != .none) table.dispatchStart.get(base.index()) else 0;
+        const baseMethods: u32 = if (base != .none) table.methodCount.get(base.index()) else 0;
         const all = try table.allInterfaces(gpa, t);
-        const baseAll = if (base >= 0) try table.allInterfaces(gpa, @intCast(base)) else all;
+        const baseAll = if (base != .none) try table.allInterfaces(gpa, base.index()) else all;
         const written = &self.aliasMembers;
         written.clearRetainingCapacity();
         for (all) |ifc| {
-            const inherited = base >= 0 and std.mem.indexOfScalar(u32, baseAll, ifc) != null;
+            const inherited = base != .none and std.mem.indexOfScalar(u32, baseAll, ifc) != null;
             const last = table.memberEnd.get(ifc);
             var m = table.memberStart.get(ifc);
             while (m < last) : (m += 1) {
@@ -1034,7 +1035,7 @@ pub const ModuleEmitter = struct {
 
                 const d = b.index();
                 if (inherited and
-                    table.find(base, ns, name, version) == b and
+                    table.findFrom(base, ns, name, version) == b and
                     d < baseMethods and
                     table.dispatch.get(dispatch + d) == table.dispatch.get(baseDispatch + d))
                 {

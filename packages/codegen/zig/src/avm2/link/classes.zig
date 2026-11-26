@@ -31,8 +31,8 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
         try dom.classInstance.push(gpa, @intCast(i));
         try dom.classBase.push(gpa, -1);
         try dom.classFlags.push(gpa, abc.instanceFlags[i]);
-        try dom.classTraits.push(gpa, -1);
-        try dom.classStatic.push(gpa, -1);
+        try dom.classTraits.push(gpa, .none);
+        try dom.classStatic.push(gpa, .none);
     }
 
     const ids = dom.abcNs.get(index);
@@ -78,7 +78,8 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
                 return diag.fail(C.kCannotImplementError);
             }
 
-            try dom.traits.interfaceList.push(gpa, @bitCast(dom.classTraits.get(@intCast(t))));
+            // As the word it is: an interface not linked yet goes in as none's.
+            try dom.traits.interfaceList.push(gpa, @bitCast(@backingInt(dom.classTraits.get(@intCast(t)))));
         }
 
         if (flags.interface and baseName != 0) {
@@ -92,11 +93,11 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
 
         const base = dom.classBase.get(id);
         const protectedNs: i32 = if (flags.protected_ns) @intCast(ids[abc.instanceProtectedNs[i]]) else -1;
-        const t = try dom.traits.create(gpa, .instance, index, i, if (base >= 0) dom.classTraits.get(@intCast(base)) else -1, protectedNs, abc.instanceTraitStart[i], abc.instanceTraitStart[i + 1]);
+        const t = try dom.traits.create(gpa, .instance, index, i, if (base >= 0) dom.classTraits.get(@intCast(base)) else .none, protectedNs, abc.instanceTraitStart[i], abc.instanceTraitStart[i + 1]);
         dom.traits.isInterface.set(t, if (flags.interface) 1 else 0);
         dom.traits.interfaceStart.set(t, interfaces);
         dom.traits.interfaceEnd.set(t, dom.traits.interfaceList.len);
-        dom.classTraits.set(id, @intCast(t));
+        dom.classTraits.set(id, .of(t));
         const err = try layout(&dom.traits, dom, t);
         if (err != 0) {
             return diag.fail(err);
@@ -124,10 +125,10 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
         try dom.classInstance.push(gpa, 0xffffffff);
         try dom.classBase.push(gpa, -1);
         try dom.classFlags.push(gpa, .{ .final = true });
-        dom.voidType = @intCast(try dom.traits.create(gpa, .void, index, 0, -1, -1, 0, 0));
-        dom.nullType = @intCast(try dom.traits.create(gpa, .null, index, 0, -1, -1, 0, 0));
-        try dom.classTraits.push(gpa, dom.voidType);
-        try dom.classStatic.push(gpa, -1);
+        dom.voidType = @intCast(try dom.traits.create(gpa, .void, index, 0, .none, -1, 0, 0));
+        dom.nullType = @intCast(try dom.traits.create(gpa, .null, index, 0, .none, -1, 0, 0));
+        try dom.classTraits.push(gpa, .of(@intCast(dom.voidType)));
+        try dom.classStatic.push(gpa, .none);
         findBuiltinTypes(dom);
         const empty = try dom.internNamespace(.public, try dom.internText(""));
         try typenames.nameType(dom, empty, try dom.internText("void"), domain_.API_AllVersions, dom.voidClass, -1, 0);
@@ -146,11 +147,11 @@ pub fn link(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
 fn layoutStatics(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
     const abc = dom.abcs.get(index);
     const first = dom.classStart.get(index);
-    const classTraits = if (dom.classClass >= 0) dom.classTraits.get(@intCast(dom.classClass)) else -1;
+    const classTraits = if (dom.classClass >= 0) dom.classTraits.get(@intCast(dom.classClass)) else .none;
     for (0..abc.classCount()) |i_| {
         const i: u32 = @intCast(i_);
-        const t = try dom.traits.create(dom.gpa, .class, index, i, classTraits, dom.traits.protectedNs.get(@intCast(dom.classTraits.get(first + i))), abc.classTraitStart[i], abc.classTraitStart[i + 1]);
-        dom.classStatic.set(first + i, @intCast(t));
+        const t = try dom.traits.create(dom.gpa, .class, index, i, classTraits, dom.traits.protectedNs.get(dom.classTraits.get(first + i).index()), abc.classTraitStart[i], abc.classTraitStart[i + 1]);
+        dom.classStatic.set(first + i, .of(t));
         const err = try layout(&dom.traits, dom, t);
         if (err != 0) {
             return diag.fail(err);
@@ -164,7 +165,7 @@ fn layoutStatics(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
 fn layoutScripts(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
     const gpa = dom.gpa;
     const abc = dom.abcs.get(index);
-    const objectTraits = if (dom.objectClass >= 0) dom.classTraits.get(@intCast(dom.objectClass)) else -1;
+    const objectTraits = if (dom.objectClass >= 0) dom.classTraits.get(@intCast(dom.objectClass)) else .none;
     const scripts = try memory.allocZeroed(gpa, u32, abc.scriptCount());
     try dom.scriptTraits.push(gpa, scripts);
     for (0..abc.scriptCount()) |s_| {
@@ -195,7 +196,7 @@ fn layoutActivations(dom: *Domain, index: u32, diag: *Diagnostics) Error!void {
         const flags = abc.methodFlags[abc.bodyMethod[b]];
         bodies[b] = -1;
         if (flags.need_activation or end > first) {
-            const t = try dom.traits.create(gpa, .activation, index, b, -1, -1, first, end);
+            const t = try dom.traits.create(gpa, .activation, index, b, .none, -1, first, end);
             bodies[b] = @intCast(t);
             const err = try layout(&dom.traits, dom, t);
             if (err != 0) {
@@ -257,6 +258,7 @@ fn findBuiltinTypes(dom: *Domain) void {
     dom.arrayType = dom.builtinType("Array");
     dom.functionType = dom.builtinType("Function");
     const math = dom.findBuiltin("Math");
-    dom.mathStatic = if (math < 0) -1 else dom.classStatic.get(@intCast(math));
+    // -1 where Math is absent or not linked yet, as the builtin type fields hold it.
+    dom.mathStatic = if (math < 0) -1 else @backingInt(dom.classStatic.get(@intCast(math)));
     dom.builtinAbc = @intCast(dom.abcs.len - 1);
 }

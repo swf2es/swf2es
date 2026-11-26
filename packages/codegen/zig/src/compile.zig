@@ -1142,8 +1142,8 @@ fn replayed(dom: *Domain, kind: domain_.LogKind, abc: u32, a: u32, b: u32) Alloc
         .activation => @intCast(dom.bodyTraits.get(abc).len),
         else => info.classCount(),
     };
-    const t = if (b < owners) lifetime.traitsOf(dom, abc, owned, b) else -1;
-    return t >= 0 and try dom.traits.resolve(dom, @intCast(t)) == 0;
+    const t = if (b < owners) lifetime.traitsOf(dom, abc, owned, b) else .none;
+    return t != .none and try dom.traits.resolve(dom, t.index()) == 0;
 }
 
 // The rebuild, saving and loading (compile.ts tells each export's why).

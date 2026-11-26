@@ -163,11 +163,11 @@ pub fn domainSlotTypes(dom: *Domain, gpa: Allocator, index: i32, cls: i32) Alloc
 
     const traits = &dom.traits;
     const t = dom.classTraits.get(dom.classStart.get(@intCast(index)) + @as(u32, @intCast(cls)));
-    if (t < 0 or try traits.resolve(dom, @intCast(t)) != 0) {
+    if (t == .none or try traits.resolve(dom, t.index()) != 0) {
         return "unresolved";
     }
 
-    const u: u32 = @intCast(t);
+    const u = t.index();
     var out: std.ArrayList(u8) = .empty;
     const start = traits.slotStart.get(u);
     for (0..traits.slotCount.get(u)) |s| {
@@ -549,7 +549,7 @@ fn writeType(w: *std.Io.Writer, dom: *const Domain, ty: i32, notNull: u8) std.Io
         const kind = traits.kind.get(u);
         const isVector = traits.param.get(u) != -1 or
             (kind == .instance and traits.first.get(u) == traits.end.get(u) and
-                traits.base.get(u) == dom.vectorObjectType and t != dom.vectorObjectType);
+                traits.base.get(u).orAny() == dom.vectorObjectType and t != dom.vectorObjectType);
         if (!isVector) {
             break;
         }
