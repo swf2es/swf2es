@@ -32,6 +32,8 @@ function definitions(names: [string, string][], kind = 0x16): Uint8Array {
   return abc(pool, tables({ methods: [{}], scripts: [{ init: 0, traits }] }));
 }
 
+const METHOD_M = { name: mn("m"), kind: METHOD };
+
 const find = (uri: string, name: string, version = SWF_31) =>
   testing.domainFind(NS_PUBLIC, uri, name, version) as string;
 
@@ -543,6 +545,67 @@ test("members bind to slot and dispatch ids after their base's", {
     "  ::I 2 1",
     `traits ${first + 2} kind 2 base 1 slots 0 methods 5`,
   ]);
+});
+
+test("a method that takes a slot's name leaves the slot its storage, in the module too", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  const slot = { name: mn("m"), kind: SLOT, index: mn("int"), value: 1, valueKind: 0x03 };
+  const method = { name: mn("m"), kind: METHOD };
+  const shapes = [
+    { name: mn("A"), base: mn("Object"), traits: [slot, method] },
+    { name: mn("A"), base: mn("Object"), traits: [{ ...slot, id: 1 }, method] },
+    { name: mn("A"), base: mn("Object"), statics: [slot, method] },
+  ];
+  for (const [i, shape] of shapes.entries()) {
+    testing.domainReset(SWF_31);
+    assert.equal(testing.domainAdd(builtin, true), 0);
+    const first = testing.domainTraitsCount() as number;
+    assert.equal(testing.domainAdd(classes([shape], true), false), 0, `shape ${i}`);
+    assert.match(testing.domainVerifyAll() as string, /^verified 2 of 2 bodies$/);
+    const js = testing.domainModule("") as string;
+
+    // m binds the method, after Object's 3 methods (Class's 5 for statics).
+    const id = shape.statics ? 5 : 3;
+    const lines = (testing.domainTraits(first + (shape.statics ? 1 : 0)) as string).split("\n");
+    assert.deepEqual(lines.slice(1, 2), [`  ::m 1 ${id}`], `shape ${i}`);
+    assert.ok(
+      js.includes(
+        `{ slots: 1, defaults: [[0, 3, "int"]], bindings: [[ns(0, ""), 50, "m", ${(id << 3) | 1}]]`,
+      ),
+      `shape ${i}`,
+    );
+    assert.ok(js.includes("fill: (o, v) => { o.$0 = 3; }"), `shape ${i}`);
+  }
+});
+
+test("every class that links compiles, whatever its members' names share", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  for (const c of linkCases.filter((c) => c.error === undefined)) {
+    testing.domainReset(SWF_31);
+    assert.equal(testing.domainAdd(builtin, true), 0);
+    assert.equal(testing.domainAdd(c.abc, false), 0, c.name);
+    testing.domainVerifyAll();
+    assert.match(testing.domainModule("") as string, /^export default function/, c.name);
+  }
+
+  // A setter, then a method of its name: the method binds it, after the
+  // setter's two ids, and the setter has no id of its own left.
+  testing.domainReset(SWF_31);
+  testing.domainAdd(builtin, true);
+  const first = testing.domainTraitsCount() as number;
+  const setter = { name: mn("m"), kind: SETTER };
+  const taken = classes([{ name: mn("A"), base: mn("Object"), traits: [setter, METHOD_M] }]);
+  assert.equal(testing.domainAdd(taken, false), 0);
+  const js = testing.domainModule("") as string;
+  assert.deepEqual((testing.domainTraits(first) as string).split("\n").slice(0, 2), [
+    `traits ${first} kind 1 base 0 slots 0 methods 6`,
+    "  ::m 1 5",
+  ]);
+  assert.match(js, /bindings: \[\[ns\(0, ""\), 50, "m", 41\]\], methods: \[\[5, F\[4\], 4, null/);
 });
 
 test("classes resolve their types as avmplus resolves them when created", {

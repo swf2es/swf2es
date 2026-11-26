@@ -15,6 +15,38 @@ const errors = @import("../abc/errors.zig");
 const Diagnostics = errors.Diagnostics;
 const Error = errors.Error;
 
+/// As avmplus' SlotIdCalcer: the slot each slot trait of a traits takes, in
+/// trait order after its base's slots. The traits' bindings cannot say:
+/// a method may take over a slot's name, as avmplus lets it, and leave the
+/// slot without one.
+pub const SlotIds = struct {
+    count: u32,
+    early: bool,
+
+    pub fn init(traits: *const TraitsTable, t: u32) SlotIds {
+        const base = traits.base.get(t);
+        return .{
+            .count = if (base != .none) traits.slotCount.get(base.index()) else 0,
+            .early = traits.allowEarlyBinding(t),
+        };
+    }
+
+    /// The next slot trait's slot, given its id: that id where slots may
+    /// bind early, else the one after the last.
+    pub fn next(self: *SlotIds, id: u32) u32 {
+        if (id == 0 or !self.early) {
+            self.count +%= 1;
+            return self.count -% 1;
+        }
+
+        if (self.count < id) {
+            self.count = id;
+        }
+
+        return id -% 1;
+    }
+};
+
 /// As Traits::verifyBindings: bind t's members, whose base traits are
 /// already laid out.
 pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32, diag: *Diagnostics) Error!void {
@@ -45,8 +77,7 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32, diag: *Diagnostics) Er
     const first = traits.first.get(t);
     const end = traits.end.get(t);
     const nameCount = end - first;
-    const early = traits.allowEarlyBinding(t);
-    var slotCount = baseSlots;
+    var slots = SlotIds.init(traits, t);
     var i = first;
     while (i < end) : (i += 1) {
         traits.readName(dom, index, i);
@@ -58,25 +89,14 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32, diag: *Diagnostics) Er
         const kind = tag.kind;
         switch (kind) {
             .slot, .constant, .class => {
-                // As SlotIdCalcer: explicit ids only where slots may bind early.
                 const id = abc.traitId[i];
-                var slot: u32 = undefined;
-                if (id == 0 or !early) {
-                    slotCount +%= 1;
-                    slot = slotCount;
-                } else {
-                    slot = id;
-                    if (slotCount < id) {
-                        slotCount = id;
-                    }
-                }
-
-                if (id > nameCount and early) {
+                const slot = slots.next(id);
+                if (id > nameCount and slots.early) {
                     return diag.fail(C.kCorruptABCError);
                 }
 
                 // Slots are final, and cannot override anything else.
-                if (slot -% 1 < baseSlots) {
+                if (slot < baseSlots) {
                     return diag.fail(C.kIllegalOverrideError);
                 }
 
@@ -89,9 +109,12 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32, diag: *Diagnostics) Er
                 }
 
                 const bkind: BindingKind = if (kind == .slot) .variable else .constant;
-                try traits.add(gpa, t, nsId, name, version, .of(slot -% 1, bkind));
+                try traits.add(gpa, t, nsId, name, version, .of(slot, bkind));
             },
             .method => {
+                // As avmplus, a method may take over the name of a slot defined
+                // before it, which keeps its storage; a slot after the method
+                // is refused above.
                 const baseBinding = overridden(traits, t, nsId, nsVersion, name, tag) orelse return diag.fail(C.kIllegalOverrideError);
                 if (baseBinding == Binding.none) {
                     try traits.add(gpa, t, nsId, name, version, .of(methodCount, .method));
@@ -124,7 +147,7 @@ pub fn layout(traits: *TraitsTable, dom: *Domain, t: u32, diag: *Diagnostics) Er
         }
     }
 
-    traits.slotCount.set(t, slotCount);
+    traits.slotCount.set(t, slots.count);
     traits.methodCount.set(t, methodCount);
     if (traits.kind.get(t) == .instance and traits.isInterface.get(t) == 0) {
         try bindInterfaces(traits, dom, t);
@@ -196,4 +219,20 @@ pub fn overridden(traits: *const TraitsTable, t: u32, ns: u32, version: u8, name
     }
 
     return binding;
+}
+
+const testing = std.testing;
+
+test "slot ids follow the base's, an explicit one only where slots bind early" {
+    var early: SlotIds = .{ .count = 2, .early = true };
+    try testing.expectEqual(@as(u32, 2), early.next(0));
+    try testing.expectEqual(@as(u32, 5), early.next(6));
+    try testing.expectEqual(@as(u32, 0), early.next(1));
+    try testing.expectEqual(@as(u32, 6), early.next(0));
+    try testing.expectEqual(@as(u32, 7), early.count);
+
+    var late: SlotIds = .{ .count = 2, .early = false };
+    try testing.expectEqual(@as(u32, 2), late.next(6));
+    try testing.expectEqual(@as(u32, 3), late.next(0));
+    try testing.expectEqual(@as(u32, 4), late.count);
 }

@@ -109,7 +109,14 @@ pub fn resolveSlotsAndMethods(traits: *TraitsTable, dom: *Domain, t: u32, diag: 
                 continue;
             }
 
+            // Where a method took a setter's name, the setter finds the
+            // method's id plus one, past the table. avmplus writes the
+            // setter there all the same, which nothing reads.
             const d = b.index() + @intFromBool(kind == .setter);
+            if (d >= methodCount) {
+                continue;
+            }
+
             const baseBinding = overridden(traits, t, traits.nameNs, traits.nameNsVersion, traits.nameId, tag) orelse Binding.none;
             if (baseBinding != Binding.none) {
                 const bb = baseBinding;
