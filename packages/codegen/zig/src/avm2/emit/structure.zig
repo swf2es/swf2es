@@ -497,8 +497,8 @@ pub fn branchTo(em: *MethodEmitter, t: u32) Error!void {
     }
 }
 
-/// What save keeps of the emitter's scalars: words in a frame, as a
-/// list of its own would be another copy of append and pop.
+/// What save keeps of the emitter's scalars: words at a frame's end, as a
+/// list of their own would be another copy of append and pop.
 const SavedScalars = extern struct {
     scopeDepth: u32,
     region: i32,
@@ -512,31 +512,32 @@ comptime {
     }
 }
 
-/// A frame of em.saved: the scalars, then each register's type, checked
-/// and promoted, each scope's with, and each scope and stack register's
-/// copy, a word each.
+/// A frame of em.saved: each register's type, checked and promoted, each
+/// scope's with, each scope and stack register's copy, a word each, and
+/// the scalars.
 const SavedFrame = struct {
-    scalars: *SavedScalars,
     types: []i32,
     checked: []i32,
     promoted: []i32,
     withs: []i32,
     copies: []i32,
+    scalars: *SavedScalars,
 
     fn size(ir: *const ir_.Ir) usize {
-        return 4 + 3 * ir.frameSize + ir.maxScope + (ir.frameSize - ir.localCount);
+        return 3 * ir.frameSize + ir.maxScope + (ir.frameSize - ir.localCount) + 4;
     }
 
     fn of(ir: *const ir_.Ir, words: []i32) SavedFrame {
         const frame = ir.frameSize;
-        const regs = words[4..];
+        const copies = 3 * frame + ir.maxScope;
+        const scalars = copies + frame - ir.localCount;
         return .{
-            .scalars = @ptrCast(words[0..4]),
-            .types = regs[0..frame],
-            .checked = regs[frame..][0..frame],
-            .promoted = regs[2 * frame ..][0..frame],
-            .withs = regs[3 * frame ..][0..ir.maxScope],
-            .copies = regs[3 * frame + ir.maxScope ..][0 .. frame - ir.localCount],
+            .types = words[0..frame],
+            .checked = words[frame..][0..frame],
+            .promoted = words[2 * frame ..][0..frame],
+            .withs = words[3 * frame ..][0..ir.maxScope],
+            .copies = words[copies..scalars],
+            .scalars = @ptrCast(words[scalars..][0..4]),
         };
     }
 };
@@ -544,23 +545,39 @@ const SavedFrame = struct {
 /// Push what writing a block follows: its registers' types and copies, scopes and region.
 fn save(em: *MethodEmitter) Error!void {
     const ir = em.ir;
+    const gpa = em.gpa;
+    const saved = &em.saved;
     const frame = ir.frameSize;
-    const f = SavedFrame.of(ir, try em.saved.addManyAsSlice(em.gpa, SavedFrame.size(ir)));
-    f.scalars.* = .{ .scopeDepth = em.scopeDepth, .region = em.region, .file = em.file, .line = em.line };
-    for (f.types, em.regType[0..frame]) |*w, t| {
-        w.* = @backingInt(t);
+    // Word by word, with the copies as one slice after as many words as
+    // before: a list grows by the length asked for, so it grows at the
+    // lengths it always did, which the memory's high water follows (one
+    // addManyAsSlice for the frame raised conformance's by 0.375 MiB).
+    for (em.regType[0..frame]) |t| {
+        try saved.append(gpa, @backingInt(t));
     }
 
-    for (f.checked, f.promoted, em.checked[0..frame], em.promoted[0..frame]) |*c, *p, checked, promoted| {
-        c.* = checked;
-        p.* = promoted;
+    for (em.checked[0..frame]) |c| {
+        try saved.append(gpa, c);
     }
 
-    for (f.withs, em.scopeWith[0..ir.maxScope]) |*w, with| {
-        w.* = with;
+    for (em.promoted[0..frame]) |p| {
+        try saved.append(gpa, p);
     }
 
-    @memcpy(f.copies, @as([]const i32, @ptrCast(em.copyOf[ir.localCount..frame])));
+    for (em.scopeWith[0..ir.maxScope]) |w| {
+        try saved.append(gpa, w);
+    }
+
+    try saved.appendSlice(gpa, @ptrCast(em.copyOf[ir.localCount..frame]));
+    const scalars: [4]i32 = @bitCast(std.mem.toBytes(SavedScalars{
+        .scopeDepth = em.scopeDepth,
+        .region = em.region,
+        .file = em.file,
+        .line = em.line,
+    }));
+    for (scalars) |w| {
+        try saved.append(gpa, w);
+    }
 }
 
 /// Pop what save pushed.
