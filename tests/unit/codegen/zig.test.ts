@@ -54,6 +54,17 @@ test("strings come out as the compiler reads bytes, checking nothing", () => {
   assert.equal(read([0xf7, 0xbf, 0xbf, 0xbf]), "\udfbf\udfff");
 });
 
+test("a codegen.wasm without the exports the wrapper binds is refused plainly", async () => {
+  // A module that exports nothing, as a stale or another package's build lacks some.
+  const empty = await WebAssembly.compile(Uint8Array.of(0, 0x61, 0x73, 0x6d, 1, 0, 0, 0));
+  await assert.rejects(
+    createCodegen(empty),
+    (e) =>
+      !(e instanceof CodegenPanic) &&
+      /does not match this @swf2es\/codegen: it lacks memory, input/.test((e as Error).message),
+  );
+});
+
 test("codegen.wasm exports what the wrapper binds, and abcVersion reads both versions", async () => {
   const exported = WebAssembly.Module.exports(await compile("dist/codegen.wasm")).map(
     (e) => e.name,

@@ -9,7 +9,13 @@
  */
 import { AIR_API_VERSION, API_VERSION, checkApiVersion, isAirApiVersion } from "@swf2es/format";
 import { KeyChains, type KeyContext } from "./keys.js";
-import { CodegenOutOfMemory, CodegenPanic, instantiate, recoveryInstance } from "./zig.js";
+import {
+  CodegenOutOfMemory,
+  CodegenPanic,
+  checkExports,
+  instantiate,
+  recoveryInstance,
+} from "./zig.js";
 
 export { KeyChains, type KeyContext, type KeyLog } from "./keys.js";
 export { hex, sha256Here } from "./sha256.js";
@@ -370,6 +376,7 @@ export interface Codegen {
  * this package free of I/O. The file ships as `@swf2es/codegen/codegen.wasm`.
  */
 export async function createCodegen(module: WebAssembly.Module): Promise<Codegen> {
+  checkExports(module);
   let wasm = await instantiate(module);
   const version = wasm.compilerVersion();
   if (version !== COMPILER_VERSION) {

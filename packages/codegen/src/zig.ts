@@ -454,6 +454,24 @@ function bindInstance<T>(
   return bound as T & { panicked(): string | null };
 }
 
+/**
+ * Throws, plainly, where `module` lacks an export the wrapper binds: a
+ * stale build, or another package's, which would otherwise fail on its
+ * first call as a trap.
+ */
+export function checkExports(module: WebAssembly.Module): void {
+  const exported = new Set(WebAssembly.Module.exports(module).map((e) => e.name));
+  const missing = ["memory", "input", "codegenError", ...Object.keys(SIGNATURES)].filter(
+    (name) => !exported.has(name),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `this codegen.wasm does not match this @swf2es/codegen: it lacks ${missing.slice(0, 5).join(", ")}` +
+        `${missing.length > 5 ? ` and ${missing.length - 5} more` : ""}`,
+    );
+  }
+}
+
 /** The compiler's exports, bound, from its compiled module, for createCodegen. */
 export async function instantiate(
   module: WebAssembly.Module,
