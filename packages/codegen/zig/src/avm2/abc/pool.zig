@@ -201,27 +201,33 @@ pub const ConstantPool = struct {
     }
 };
 
+/// `table`, init's default, where it is the `count` entries long a
+/// section needs; else a new zeroed table that long.
+fn sized(gpa: Allocator, comptime T: type, table: []T, count: u32) Allocator.Error![]T {
+    return if (table.len == count) table else memory.allocZeroed(gpa, T, count);
+}
+
 /// Read the constant pool at `r` into `pool`, its tables in `gpa` and what
 /// only the read needs in `scratch` (the call's arena, so that a domain's
 /// arena keeps the tables alone); the ABC starts at offset 0 of `r`'s data.
-/// A pool rejected keeps what it read, for the tests' dumps.
+/// `pool` holds init's defaults, which a table of no entries past its
+/// default keeps, and which the tables the read does not reach keep. A pool
+/// rejected keeps what it read, for the tests' dumps.
 pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloats: bool, pool: *ConstantPool, diag: *Diagnostics) Error!void {
-    pool.* = try .init(gpa);
-
     const intCount = readCount(r);
-    pool.ints = try memory.allocZeroed(gpa, i32, @max(intCount, 1));
+    pool.ints = try sized(gpa, i32, pool.ints, @max(intCount, 1));
     for (1..@max(intCount, 1)) |i| {
         pool.ints[i] = r.s32();
     }
 
     const uintCount = readCount(r);
-    pool.uints = try memory.allocZeroed(gpa, u32, @max(uintCount, 1));
+    pool.uints = try sized(gpa, u32, pool.uints, @max(uintCount, 1));
     for (1..@max(uintCount, 1)) |i| {
         pool.uints[i] = r.u32_();
     }
 
     const doubleCount = readCount(r);
-    pool.doubles = try memory.allocZeroed(gpa, f64, @max(doubleCount, 1));
+    pool.doubles = try sized(gpa, f64, pool.doubles, @max(doubleCount, 1));
     pool.doubles[0] = std.math.nan(f64);
     for (1..@max(doubleCount, 1)) |i| {
         pool.doubles[i] = r.d64();
@@ -237,7 +243,7 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
             return diag.fail(C.kCorruptABCError);
         }
 
-        pool.floats = try memory.allocZeroed(gpa, f32, @max(count, 1));
+        pool.floats = try sized(gpa, f32, pool.floats, @max(count, 1));
         pool.floats[0] = std.math.nan(f32);
         for (1..@max(count, 1)) |i| {
             pool.floats[i] = r.f32_();
@@ -249,7 +255,7 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
     }
 
     const stringCount = @max(readCount(r), 1);
-    pool.strings = try memory.allocZeroed(gpa, Range, stringCount);
+    pool.strings = try sized(gpa, Range, pool.strings, stringCount);
     for (1..stringCount) |i| {
         // As avmplus: a string may not end at the end of the ABC, and its
         // UTF-8 is not validated.
@@ -263,8 +269,8 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
     }
 
     const nsCount = @max(readCount(r), 1);
-    pool.nsKind = try memory.allocZeroed(gpa, u8, nsCount);
-    pool.nsName = try memory.allocZeroed(gpa, u32, nsCount);
+    pool.nsKind = try sized(gpa, u8, pool.nsKind, nsCount);
+    pool.nsName = try sized(gpa, u32, pool.nsName, nsCount);
     for (1..nsCount) |i| {
         const kind: u8 = @truncate(r.u8_());
         if (!isNamespaceKind(kind)) {
@@ -281,7 +287,7 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
     }
 
     const nsSetCount = @max(readCount(r), 1);
-    pool.nsSetStart = try memory.allocZeroed(gpa, u32, nsSetCount + 1);
+    pool.nsSetStart = try sized(gpa, u32, pool.nsSetStart, nsSetCount + 1);
     var members: std.ArrayList(u32) = .empty;
     for (1..nsSetCount) |i| {
         pool.nsSetStart[i] = @intCast(members.items.len);
@@ -303,9 +309,9 @@ pub fn readConstantPool(gpa: Allocator, scratch: Allocator, r: *Reader, hasFloat
     pool.nsSetMembers = try gpa.dupe(u32, members.items);
 
     const mnCount = @max(readCount(r), 1);
-    pool.mnKind = try memory.allocZeroed(gpa, u8, mnCount);
-    pool.mnA = try memory.allocZeroed(gpa, u32, mnCount);
-    pool.mnB = try memory.allocZeroed(gpa, u32, mnCount);
+    pool.mnKind = try sized(gpa, u8, pool.mnKind, mnCount);
+    pool.mnA = try sized(gpa, u32, pool.mnA, mnCount);
+    pool.mnB = try sized(gpa, u32, pool.mnB, mnCount);
     for (1..mnCount) |i| {
         const kind: u8 = @truncate(r.u8_());
         var a: u32 = 0;

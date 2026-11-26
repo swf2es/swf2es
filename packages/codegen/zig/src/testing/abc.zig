@@ -80,7 +80,7 @@ pub fn poolDump(gpa: Allocator, bytes: []const u8) Error![]const u8 {
     var r: Reader = .init(data, 0, bytes.len);
     const minor = r.u16_();
     const major = r.u16_();
-    var pool: ConstantPool = .{};
+    var pool: ConstantPool = try .init(gpa);
     var diag: Diagnostics = .{};
     readConstantPool(gpa, gpa, &r, major == 47 and minor >= 16, &pool, &diag) catch |err| switch (err) {
         error.Verify => {},
