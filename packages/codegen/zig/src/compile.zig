@@ -45,6 +45,7 @@ pub const leaveRebuild = rebuilds.leaveRebuild;
 pub const domainCompact = rebuilds.domainCompact;
 pub const domainRebuild = rebuilds.domainRebuild;
 pub const domainRebuildStep = rebuilds.domainRebuildStep;
+pub const domainRebuildBudget = rebuilds.domainRebuildBudget;
 pub const domainSaveBytes = rebuilds.domainSaveBytes;
 pub const domainSavedAbcBytes = rebuilds.domainSavedAbcBytes;
 pub const domainLoad = rebuilds.domainLoad;
@@ -264,7 +265,7 @@ pub fn domainRevive(appDomain: i32, stepped: bool) Allocator.Error!i32 {
         startRebuild(newRebuild(dom, null, null) catch |err| {
             lifetime.unrevive(dom, bottom, top);
             return err;
-        }, partBudget());
+        }, rebuilds.steppedBudget(partBudget()));
         rebuilds.revived_bottom = appDomain;
         rebuilds.revived_top = top;
         return 2;

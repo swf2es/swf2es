@@ -1151,11 +1151,14 @@ async function playNested(
   const lines: string[] = [];
   const codegen = await createCodegen(wasm);
   const counts = { compacted: 0, revived: 0 };
-  const { compact, reviveDomain } = codegen;
-  codegen.compact = () => {
-    const rebuilt = compact();
-    counts.compacted += rebuilt && counts.revived === 0 ? 1 : 0;
-    return rebuilt;
+  const { compactStep, reviveDomain } = codegen;
+  // Each move made whole in the call that asks for it, so that the compiler
+  // has let the parent's ABCs go before the child loads however busy the
+  // machine running the tests is.
+  codegen.compactStep = () => {
+    const progress = compactStep({ timeRemaining: () => Number.POSITIVE_INFINITY });
+    counts.compacted += progress === "done" && counts.revived === 0 ? 1 : 0;
+    return progress;
   };
   codegen.reviveDomain = (domain, abcs) => {
     counts.revived++;

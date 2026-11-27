@@ -48,6 +48,21 @@ const Loading = struct {
 var loading: ?*Loading = null;
 var loading_budget: u64 = 0;
 
+/// The garbage a part of a stepped rebuild of a move or a revival may make
+/// at most, where the host asks for smaller parts than the default's
+/// (domainRebuildBudget), so that each part blocks it for less; 0 for the
+/// default's. What the rebuild builds is the same however it is parted.
+var rebuild_budget: u64 = 0;
+
+pub fn domainRebuildBudget(bytes: i32) void {
+    rebuild_budget = if (bytes > 0) @intCast(bytes) else 0;
+}
+
+/// A stepped rebuild's budget, `default` unless domainRebuildBudget asked for less.
+pub fn steppedBudget(default: u64) u64 {
+    return if (rebuild_budget > 0) @min(rebuild_budget, default) else default;
+}
+
 /// A rebuild of `from`, `source`'s domain if one is given, into a new domain.
 pub fn newRebuild(from: *Domain, source: ?*Box, target: ?*Box) Allocator.Error!*Rebuilding {
     const pages = memory.pages().allocator();
@@ -277,7 +292,7 @@ pub fn domainLoad(words: []const u8, recovery: bool) Allocator.Error!bool {
 
     // Zig grows in 64 KiB pages. Reserving the estimated AssemblyScript heap here
     // can make a move exceed the memory of the domain it is supposed to shrink.
-    loading_budget = compile.part_budget;
+    loading_budget = steppedBudget(compile.part_budget);
     if (!recovery) {
         const size = saved.loadedSize(&loaded, loading_budget);
         if (size >= lifetime.MOVE_Limit) {

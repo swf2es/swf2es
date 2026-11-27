@@ -342,6 +342,10 @@ pub export fn domainRebuildStep() i32 {
     };
 }
 
+pub export fn domainRebuildBudget(bytes: i32) void {
+    avm2.domainRebuildBudget(bytes);
+}
+
 pub export fn domainSaveBytes() usize {
     return handed(avm2.domainSaveBytes(gpa()));
 }
