@@ -15,14 +15,19 @@
 // The candidate is built first where this tree's sources moved since its
 // modules were built (build.ts). Any suite that differs fails the run; one
 // with nothing to run (no corpus fetched, no ABCs in the oracle's cache, no
-// cases) is reported as skipped, so "all 45 suites the same" means all 45
+// cases) is reported as skipped, so "all 56 suites the same" means all 56
 // ran. Each build's results go to out/, and where a case's large result (a
 // module) differs, both, with the first line they differ at. Ruffle's corpus
 // is used where it was fetched (tests/player/corpus/fetch-ruffle.ts), the
 // oracle's ABCs where its cache holds them, and SWF2ES_LOCAL_SWFS adds
 // local SWFs (local.ts), reported by number only.
 //
-//   node tests/parity/run.ts [--reference <ref>] [suite...]
+// The fuzz-* suites (fuzz/) generate their cases: a standard size that adds
+// about five minutes to a run, or with --deep the counts of the review that
+// wrote them, for changes to arenas, saving and loading, and compaction;
+// --seed and --cases set their numbers.
+//
+//   node tests/parity/run.ts [--reference <ref>] [--deep] [--seed <n>] [--cases <n>] [suite...]
 import "./guard.ts";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -31,7 +36,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shellToplevelLibrary } from "../../packages/cli/dist/shell-toplevel-library.js";
 import { AIR_API_VERSION, API_VERSION } from "../../packages/codegen/dist/index.js";
-import { type CodegenExports, instantiate } from "../../packages/codegen/dist/zig.js";
+import { instantiate } from "../../packages/codegen/dist/zig.js";
 import {
   isAs3,
   readActions,
@@ -52,69 +57,13 @@ import { linkCases, resolveCases } from "../unit/codegen/link-cases.ts";
 import { richAbc } from "../unit/codegen/rich-abc.ts";
 import { bindTesting, testingModule } from "../unit/codegen/testing-module.ts";
 import { verifyErrorAbcs } from "../unit/codegen/verify-errors.ts";
+import { fuzzSuites } from "./fuzz/index.ts";
 import { localSwfs } from "./local.ts";
 import { candidateBuild, referenceBuild } from "./reference.ts";
+import { type Compiler, Results, type Suite } from "./suite.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const out = fileURLToPath(new URL("out/", import.meta.url));
-
-/**
- * A suite's results: a line a case, large results by their digests. The
- * bytes of a large result are kept only for the cases named in `capture`,
- * which a second run asks for where the digests differ, so that a suite
- * of a corpus does not hold every module of three compilers.
- */
-class Results {
-  readonly lines: string[] = [];
-  /** Each line's case name, which a large result's bytes are kept by. */
-  readonly names: string[] = [];
-  readonly blobs = new Map<string, Uint8Array>();
-
-  readonly capture: ReadonlySet<string>;
-  /** Which build's: reference, candidate or poison. */
-  readonly compiler: string;
-
-  constructor(compiler: string, capture: ReadonlySet<string> = new Set()) {
-    this.compiler = compiler;
-    this.capture = capture;
-  }
-
-  /** Case `name`'s result, or what it threw. */
-  case(name: string, run: () => string | number | boolean): void {
-    this.names.push(name);
-    try {
-      this.lines.push(`${name}: ${run()}`);
-    } catch (error) {
-      const e = error as Error;
-      this.lines.push(`${name}: threw ${e?.name}: ${e?.message}`);
-    }
-  }
-
-  /** A large result, as its length and digest; its bytes too where they are asked for. */
-  blob(name: string, bytes: Uint8Array): string {
-    if (this.capture.has(name)) {
-      this.blobs.set(name, bytes.slice());
-    }
-
-    return `${bytes.length} ${createHash("sha256").update(bytes).digest("hex")}`;
-  }
-}
-
-/** Either build, bound; the test builds' exports beyond are reached by name. */
-// biome-ignore lint/suspicious/noExplicitAny: the test builds' exports are typed by their signatures alone
-type Compiler = CodegenExports & Record<string, any>;
-
-interface Suite {
-  name: string;
-  /** Why the suite cannot run here, if it cannot: one of what only some hosts have, which the ratchet leaves out. */
-  unavailable?: () => string | null;
-  /** The release builds, or the test builds with their dumps. */
-  build: "release" | "testing";
-  /** The exports it calls. */
-  needs: string[];
-  /** Its cases on `compiler`; `fresh` makes another instance of the same compiler, for a case that may kill one. */
-  run(compiler: Compiler, results: Results, fresh: () => Promise<Compiler>): void | Promise<void>;
-}
 
 /** The ABCs there are without the oracle: the libraries the player ships, and the tests' own. */
 function abcs(): [string, Uint8Array][] {
@@ -1951,6 +1900,42 @@ const LINK_EXPORTS = [
   "domainTraitsCount",
 ];
 
+/** The options that take a value, and those that do not. */
+const VALUED = ["--reference", "--seed", "--cases"];
+const args = process.argv.slice(2);
+const option = (name: string): string | undefined => {
+  const at = args.indexOf(name);
+  if (at < 0) {
+    return undefined;
+  }
+
+  const value = args[at + 1];
+  if (value === undefined || value.startsWith("--")) {
+    throw new Error(`${name} needs a value`);
+  }
+
+  return value;
+};
+const number = (name: string): number | undefined => {
+  const value = option(name);
+  if (value !== undefined && !/^\d+$/.test(value)) {
+    throw new Error(`${name} needs a number`);
+  }
+
+  return value === undefined ? undefined : Number(value);
+};
+const fuzz = {
+  deep: args.includes("--deep"),
+  seed: number("--seed") ?? 1,
+  cases: number("--cases"),
+};
+const strange = args.filter(
+  (arg) => arg.startsWith("--") && arg !== "--deep" && !VALUED.includes(arg),
+);
+if (strange.length > 0) {
+  throw new Error(`parity: no option ${strange.join(", ")}`);
+}
+
 const SUITES: Suite[] = [
   {
     name: "version",
@@ -2591,16 +2576,11 @@ const SUITES: Suite[] = [
       libraries(c, r, AIR_API_VERSION, [...fp, ["air", airLibrary]]);
     },
   },
+  ...fuzzSuites(fuzz),
 ];
 
-const args = process.argv.slice(2);
-const at = args.indexOf("--reference");
-const ref = at >= 0 ? args[at + 1] : "zig-parity-2";
-if (!ref) {
-  throw new Error("--reference needs a git ref");
-}
-
-const wanted = args.filter((arg, i) => arg !== "--reference" && args[i - 1] !== "--reference");
+const ref = option("--reference") ?? "zig-parity-2";
+const wanted = args.filter((arg, i) => !arg.startsWith("--") && !VALUED.includes(args[i - 1]));
 const unknown = wanted.filter((name) => !SUITES.some((suite) => suite.name === name));
 if (unknown.length > 0) {
   console.log(
@@ -2740,6 +2720,7 @@ for (const suite of selected) {
     continue;
   }
 
+  const started = performance.now();
   const results: Record<string, Results> = {};
   for (const [compiler, made] of Object.entries(await instances(suite.build))) {
     results[compiler] = new Results(compiler);
@@ -2780,7 +2761,9 @@ for (const suite of selected) {
     skipped.push(suite.name);
   } else {
     report[suite.name] = `same, ${count} cases`;
-    console.log(`  ${suite.name}: ${report[suite.name]}`);
+    console.log(
+      `  ${suite.name}: ${report[suite.name]} (${((performance.now() - started) / 1000).toFixed(0)} s)`,
+    );
     ran++;
     cases += count;
   }
