@@ -11,12 +11,15 @@ JavaScript. It has one compiler, which runs at two different times:
   place of compiling them (see [Compiling ahead of time and caching
   modules](modules.md#compiling-ahead-of-time-and-caching-modules)).
 
-The compiler is written in AssemblyScript and ships as `codegen.wasm`, with
-a thin TypeScript wrapper. The one wasm binary runs in browsers and workers, in
-node, and in any server-side wasm runtime (for example wazero in a Go
-server), so there is only one implementation to keep correct. It uses
-AssemblyScript's minimal runtime, whose garbage the wrapper collects between
-calls (see [benchmarks.md](../benchmarks.md#the-assemblyscript-runtime)).
+The compiler is written in Zig and ships as `codegen.wasm`, built
+ReleaseSafe, with a thin TypeScript wrapper. The one wasm binary runs in
+browsers and workers, in node, and in any server-side wasm runtime (for
+example wazero in a Go server), so there is only one implementation to keep
+correct. Its memory is arenas: one a call, given back as the next call
+starts, and one a domain; a failed safety check is a panic, from which the
+wrapper recovers in a new instance (see [zig-codegen.md](../zig-codegen.md)).
+It replaced a compiler in AssemblyScript, whose output it reproduces byte
+for byte.
 
 The wrapper's `Codegen` (`createCodegen` in `packages/codegen/src`) is the
 compiler's API; besides `identity`, `epoch`, `abcVersion`, `usage` and
@@ -34,8 +37,8 @@ compiler's API; besides `identity`, `epoch`, `abcVersion`, `usage` and
 - `context`, `revision`, `compileModuleLogged` and `replay` serve a cache
   of modules (see [Caching modules](modules.md#caching-modules)).
 
-A module is written a part at a time, a call each, the wrapper collecting
-each part's garbage and decoding its text before it asks for the next:
+A module is written a part at a time, a call each, each part's arena
+given back and its text decoded before the next is asked for:
 verifying an ABC's methods and writing all their entries in one call
 held every method's garbage and the whole module's text at once, and
 wasm never gives memory back. A part makes about 2 MiB of garbage, so a
@@ -46,14 +49,14 @@ little more than the tables it keeps live. A player that has loaded a few
 SWFs after the libraries is at 16 MiB (`tests/player/leak.ts`). The parts are cut only between bodies, so the module
 is the same however it is cut (`ModuleEmitter.begin` and `step`). The
 source map and the entries are written each in a call of its own, after
-the module's garbage is collected, and only when asked for: written with
+the module's arena is given back, and only when asked for: written with
 the module, a large ABC's entries alone took codegen's memory from 128
 to 256 MiB. All go through
-`assembly/compile.ts`, which the test build (`assembly/testing.ts`, with
+`zig/src/compile.zig`, which the test build (`zig/src/testing.zig`, with
 the reader, verifier and emitter exposed for the node tests by its parts in
-`assembly/testing/`) exports too,
+`zig/src/testing/`) exports too,
 so the tests exercise the code that ships, and the determinism check
-compiles every chain through both builds.
+compiles every chain through the test builds and the release build.
 
 ## The JIT/AOT invariant
 
@@ -90,9 +93,9 @@ over the builtins, then each conformance case (also compiled with asc's
 
 - **Determinism:** each compiles to the same modules and source maps, byte
   for byte, in a compiler instance of its own, in one instance after the
-  others, in the reverse order twice in a row, and in the build that checks
-  every array access, so that nothing the compiler keeps between calls,
-  such as its reused buffers, leaks into its output.
+  others, in the reverse order twice in a row, and in the build that fills
+  freed and rolled-back memory with 0xAA, so that nothing the compiler
+  keeps between calls, such as its reused buffers, leaks into its output.
 - **The JIT/AOT invariant:** each method compiled alone (the test build's
   `domainEmitEach`) is byte for byte its entry in its module: in order with
   a new emitter each, and in the reverse order with one emitter for all,
@@ -110,7 +113,7 @@ over the builtins, then each conformance case (also compiled with asc's
 |-----------|-----------------------------------------------------------------|---------------------------|
 | `native`  | the WebAssembly modules, each a sub-path with its own binary: `compress` (zlib and LZMA), `mp3` (minimp3), `audio` (ADPCM and Nellymoser, in Zig), `render` (fills with libtess2, and lyon for densely crossing ones, lines and BitmapData's CPU kernels) and `atf` (Stage3D's ATF textures, their JPEG XR images by jxrlib), C and Zig built by one Zig project | — |
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | native |
-| `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
+| `codegen` | bytecode → IR → ES modules, in Zig (`zig/src/`)                 | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
 | `context3d` | Stage3D's renderer contracts, AGAL translation and optional WebGL2 backend; the WebGL 2 device layer it shares with `render` | — |
 | `render`  | the renderer ([renderer.md](../renderer.md)): scene list, planner and WebGL 2 backend | context3d |
@@ -270,7 +273,7 @@ blocks and is listed in `corrupt`, its events in `corruptEvents`. A malformed bu
 its button's list and keeps the records before it.
 
 `codegen` compiles that list to one ES module a SWF (`Codegen.compileActions`,
-`assembly/avm1/`): `export default function (rt)` whose `rt.version(v)`
+`zig/src/avm1/`): `export default function (rt)` whose `rt.version(v)`
 gives the operations of the SWF's version once, `V`, and which returns an
 entry per block, in the list's order, each the array of its regions'
 functions, the block's code first and then its functions' bodies, each in

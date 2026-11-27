@@ -126,6 +126,15 @@ const sourceUrl = (file: string) => `${blob}${file}`;
     <a href={licence("native-third-party.txt")}>notice</a>), both compiled to WebAssembly.
   </p>
 
+  <h2>Zig and AssemblyScript</h2>
+  <p>
+    The compiler, <code>codegen.wasm</code>, served with the player, is built by
+    <a href="https://ziglang.org">Zig</a> and holds the parts of its standard library it uses
+    (MIT), and ports of AssemblyScript's number formatting and parsing
+    (<a href="https://github.com/AssemblyScript/assemblyscript">AssemblyScript</a>, Apache License
+    2.0, with its NOTICE). <a href={licence("codegen-third-party.txt")}>Notices</a>.
+  </p>
+
   <h2>W3C</h2>
   <p>
     The turbulence of <code>BitmapData.perlinNoise</code> is derived from the

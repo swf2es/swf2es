@@ -1,9 +1,9 @@
 // The test build of codegen (tests/unit/codegen/testing-module.ts) as the
 // shell's compiler, so that what runs ABCs as avmshell does in the tests
-// runs the build pnpm test:checked checks every array access of.
+// runs the 0xAA build under pnpm test:checked.
 import type { ShellCompiler } from "../../packages/cli/dist/shell.js";
 
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+// biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
 export function testingCompiler(testing: any): ShellCompiler {
   return {
     reset: (apiVersion = 50) => testing.domainReset(apiVersion),

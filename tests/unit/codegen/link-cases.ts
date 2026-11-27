@@ -132,6 +132,9 @@ export function classes(list: Class[], create = false): Uint8Array {
 }
 
 export const SLOT = 0;
+const A_OBJECT = { name: mn("A"), base: mn("Object") };
+/** A trait named m of `kind`. */
+const member = (kind: number): Member => ({ name: mn("m"), kind });
 const SEALED = 0x01;
 const FINAL = 0x02;
 const INTERFACE = 0x04;
@@ -296,6 +299,84 @@ export const linkCases: Case[] = [
     ]),
     error: 1107,
   },
+  // A method may take the name of a slot before it, as avmplus' layout lets
+  // a later binding replace an earlier: the slot keeps its storage, unnamed.
+  // Nothing else may share a name with a slot.
+  {
+    name: "a method takes a slot's name",
+    abc: classes([{ ...A_OBJECT, traits: [member(SLOT), member(METHOD)] }]),
+  },
+  {
+    name: "a method takes the name of a slot with an id",
+    abc: classes([{ ...A_OBJECT, traits: [{ name: mn("m"), kind: SLOT, id: 1 }, member(METHOD)] }]),
+  },
+  {
+    name: "a static method takes a static slot's name",
+    abc: classes([{ ...A_OBJECT, statics: [member(SLOT), member(METHOD)] }]),
+  },
+  {
+    name: "a slot after a method of its name",
+    abc: classes([{ ...A_OBJECT, traits: [member(METHOD), member(SLOT)] }]),
+    error: 1107,
+  },
+  {
+    name: "a static slot after a static method of its name",
+    abc: classes([{ ...A_OBJECT, statics: [member(METHOD), member(SLOT)] }]),
+    error: 1107,
+  },
+  {
+    name: "a getter after a slot of its name",
+    abc: classes([{ ...A_OBJECT, traits: [member(SLOT), member(GETTER)] }]),
+    error: 1107,
+  },
+  {
+    name: "a slot after a getter of its name",
+    abc: classes([{ ...A_OBJECT, traits: [member(GETTER), member(SLOT)] }]),
+    error: 1107,
+  },
+  {
+    name: "a setter after a slot of its name",
+    abc: classes([{ ...A_OBJECT, traits: [member(SLOT), member(SETTER)] }]),
+    error: 1107,
+  },
+  {
+    name: "a slot after a setter of its name",
+    abc: classes([{ ...A_OBJECT, traits: [member(SETTER), member(SLOT)] }]),
+    error: 1107,
+  },
+  // A method may take an accessor's or another method's name too.
+  {
+    name: "a method takes a setter's name",
+    abc: classes([{ ...A_OBJECT, traits: [member(SETTER), member(METHOD)] }]),
+  },
+  {
+    name: "a method takes a getter and setter's name",
+    abc: classes([{ ...A_OBJECT, traits: [member(GETTER), member(SETTER), member(METHOD)] }]),
+  },
+  {
+    name: "a method takes a method's name",
+    abc: classes([{ ...A_OBJECT, traits: [member(METHOD), member(METHOD)] }]),
+  },
+  {
+    name: "a getter after a method of its name",
+    abc: classes([{ ...A_OBJECT, traits: [member(METHOD), member(GETTER)] }]),
+    error: 1107,
+  },
+  {
+    name: "a method cannot hide a base slot",
+    abc: classes([
+      { ...A_OBJECT, traits: [member(SLOT)] },
+      { name: mn("B"), base: mn("A"), traits: [member(METHOD)] },
+    ]),
+    error: 1053,
+  },
+  {
+    name: "a slot hides a base method",
+    abc: classes([
+      { ...A_OBJECT, traits: [member(METHOD)] },
+      { name: mn("B"), base: mn("A"), traits: [member(SLOT)] },
+    ]),
+  },
   {
     name: "a slot id past the trait count",
     abc: classes([
@@ -317,7 +398,6 @@ export const linkCases: Case[] = [
   },
 ];
 
-const A_OBJECT = { name: mn("A"), base: mn("Object") };
 const INT = 0x03;
 const DOUBLE = 0x06;
 const UTF8 = 0x01;

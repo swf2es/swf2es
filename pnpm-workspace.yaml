@@ -6,7 +6,3 @@ packages:
 # `pnpm --filter @swf2es/desktop fetch-electron` fetches it for those who run the app.
 ignoredBuiltDependencies:
   - electron
-# AssemblyScript's Grisu2 reads past its table of powers of ten; the patch
-# keeps the digits codegen has always printed (tests/unit/codegen/double.test.ts).
-patchedDependencies:
-  assemblyscript@0.28.20: patches/assemblyscript@0.28.20.patch

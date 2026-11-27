@@ -27,8 +27,8 @@ the runtime.
 | Piece | Where | Depends on |
 |---|---|---|
 | A SWF's action blocks, found and listed | `format/src/actions.ts` | — |
-| Decoding, control flow, emission | `codegen/assembly/avm1/` | — |
-| What both bytecodes' emitters share (`Output`, the source map) | `codegen/assembly/` beside `avm2/` | — |
+| Decoding, control flow, emission | `codegen/zig/src/avm1/` | — |
+| What both bytecodes' emitters share (`Output`, the source map) | `codegen/zig/src/` beside `avm2/` | — |
 | Values, conversions, objects, functions, scopes, the language's classes | `runtime/src/avm1/` | format |
 | Paths and targets on the display list, the action queue, events, the display, input and I/O classes | `player/src/avm1/` | runtime, codegen, format |
 | AVM1 modules ahead of time | `cli` | codegen, format |
@@ -100,7 +100,7 @@ wrapper copies a SWF into Wasm once and holds it (`actionsHold`) for the
 four SWFs it compiled last: a copy for each block cost some 2 ms a block
 for a SWF of 35 MB. It collects after each block, so the compiler's
 memory is bounded by the block being compiled. In
-`codegen/assembly/avm1/`, by stage:
+`codegen/zig/src/avm1/`, by stage:
 
 - `actions/`: the decoder reads every action reachable from a block's
   start, following jumps, and decodes each offset once, so a jump into

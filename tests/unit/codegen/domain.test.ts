@@ -32,6 +32,8 @@ function definitions(names: [string, string][], kind = 0x16): Uint8Array {
   return abc(pool, tables({ methods: [{}], scripts: [{ init: 0, traits }] }));
 }
 
+const METHOD_M = { name: mn("m"), kind: METHOD };
+
 const find = (uri: string, name: string, version = SWF_31) =>
   testing.domainFind(NS_PUBLIC, uri, name, version) as string;
 
@@ -545,6 +547,78 @@ test("members bind to slot and dispatch ids after their base's", {
   ]);
 });
 
+test("a method that takes a slot's name leaves the slot its storage, in the module too", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  const slot = { name: mn("m"), kind: SLOT, index: mn("int"), value: 1, valueKind: 0x03 };
+  const method = { name: mn("m"), kind: METHOD };
+  const shapes = [
+    { name: mn("A"), base: mn("Object"), traits: [slot, method] },
+    { name: mn("A"), base: mn("Object"), traits: [{ ...slot, id: 1 }, method] },
+    { name: mn("A"), base: mn("Object"), statics: [slot, method] },
+  ];
+  for (const [i, shape] of shapes.entries()) {
+    testing.domainReset(SWF_31);
+    assert.equal(testing.domainAdd(builtin, true), 0);
+    const first = testing.domainTraitsCount() as number;
+    assert.equal(testing.domainAdd(classes([shape], true), false), 0, `shape ${i}`);
+    assert.match(testing.domainVerifyAll() as string, /^verified 2 of 2 bodies$/);
+    const js = testing.domainModule("") as string;
+
+    // m binds the method, after Object's 3 methods (Class's 5 for statics).
+    const id = shape.statics ? 5 : 3;
+    const lines = (testing.domainTraits(first + (shape.statics ? 1 : 0)) as string).split("\n");
+    assert.deepEqual(lines.slice(1, 2), [`  ::m 1 ${id}`], `shape ${i}`);
+    assert.ok(
+      js.includes(
+        `{ slots: 1, defaults: [[0, 3, "int"]], bindings: [[ns(0, ""), 50, "m", ${(id << 3) | 1}]]`,
+      ),
+      `shape ${i}`,
+    );
+    assert.ok(js.includes("fill: (o, v) => { o.$0 = 3; }"), `shape ${i}`);
+  }
+
+  // With more slots than the method's dispatch id, the slot is still its own,
+  // not the one at the method's id.
+  testing.domainReset(SWF_31);
+  testing.domainAdd(builtin, true);
+  const others = ["x", "n", "F"].map((name) => ({ name: mn(name), kind: SLOT }));
+  const wide = classes([{ name: mn("A"), base: mn("Object"), traits: [slot, ...others, method] }]);
+  assert.equal(testing.domainAdd(wide, false), 0);
+  const js = testing.domainModule("") as string;
+  assert.match(js, /defaults: \[\[0, 3, "int"\], \[1, void 0, null\], \[2, /);
+  assert.ok(js.includes("o.$3 = void 0; o.$2 = void 0; o.$1 = void 0; o.$0 = 3; }"));
+});
+
+test("every class that links compiles, whatever its members' names share", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  for (const c of linkCases.filter((c) => c.error === undefined)) {
+    testing.domainReset(SWF_31);
+    assert.equal(testing.domainAdd(builtin, true), 0);
+    assert.equal(testing.domainAdd(c.abc, false), 0, c.name);
+    testing.domainVerifyAll();
+    assert.match(testing.domainModule("") as string, /^export default function/, c.name);
+  }
+
+  // A setter, then a method of its name: the method binds it, after the
+  // setter's two ids, and the setter has no id of its own left.
+  testing.domainReset(SWF_31);
+  testing.domainAdd(builtin, true);
+  const first = testing.domainTraitsCount() as number;
+  const setter = { name: mn("m"), kind: SETTER };
+  const taken = classes([{ name: mn("A"), base: mn("Object"), traits: [setter, METHOD_M] }]);
+  assert.equal(testing.domainAdd(taken, false), 0);
+  const js = testing.domainModule("") as string;
+  assert.deepEqual((testing.domainTraits(first) as string).split("\n").slice(0, 2), [
+    `traits ${first} kind 1 base 0 slots 0 methods 6`,
+    "  ::m 1 5",
+  ]);
+  assert.match(js, /bindings: \[\[ns\(0, ""\), 50, "m", 41\]\], methods: \[\[5, F\[4\], 4, null/);
+});
+
 test("classes resolve their types as avmplus resolves them when created", {
   skip: !existsSync(generated) && "oracle/avmplus missing",
 }, () => {
@@ -570,13 +644,12 @@ test("the first builtin ABC supplies the builtin types", {
   }
 });
 
-test("collecting garbage between calls keeps the domain and frees what was dropped", {
+test("each call giving the last one's memory back keeps the domain and frees what was dropped", {
   skip: !existsSync(generated) && "oracle/avmplus missing",
 }, () => {
   const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
   testing.domainReset(SWF_31);
   testing.domainAdd(builtin, true);
-  testing.__collect();
   assert.notEqual(find("", "Object"), "none");
   assert.match(testing.domainVerifyAll() as string, /^verified 630 of 630 bodies$/);
 
@@ -585,7 +658,6 @@ test("collecting garbage between calls keeps the domain and frees what was dropp
     testing.domainReset(SWF_31);
     testing.domainAdd(builtin, true);
     testing.domainVerifyAll();
-    testing.__collect();
   }
 
   const size = testing.memory.buffer.byteLength;
@@ -593,7 +665,6 @@ test("collecting garbage between calls keeps the domain and frees what was dropp
     testing.domainReset(SWF_31);
     testing.domainAdd(builtin, true);
     testing.domainVerifyAll();
-    testing.__collect();
   }
 
   assert.equal(testing.memory.buffer.byteLength, size);
@@ -625,30 +696,49 @@ test("dropping other domains changes no module, and memory stops growing", {
       ],
       true,
     );
-  testing.domainReset(SWF_31);
-  testing.domainAdd(builtin, true);
-  const domain = testing.domainChild(0) as number;
-  assert.equal(testing.domainAdd(layered(0), false, domain), 0);
-  const module = testing.domainModule("b\nx", 1) as string;
+  const loads = 2000;
+  const run = () => {
+    testing.domainReset(SWF_31);
+    testing.domainAdd(builtin, true);
+    const domain = testing.domainChild(0) as number;
+    assert.equal(testing.domainAdd(layered(0), false, domain), 0);
+    const module = testing.domainModule("b\nx", 1) as string;
 
-  // Each other domain loads the same names, compiles and is dropped.
-  let size = 0;
-  for (let n = 1; n <= 1000; n++) {
-    const other = testing.domainChild(0) as number;
-    assert.equal(testing.domainAdd(layered(n), false, other), 0);
-    assert.notEqual(testing.domainModule("", -1, false), "");
-    testing.domainDrop(other);
-    if (testing.domainCompact()) {
-      testing.__collect();
+    let compacted = 0;
+    let atThousand = 0;
+    for (let n = 1; n <= loads; n++) {
+      const other = testing.domainChild(0) as number;
+      assert.equal(testing.domainAdd(layered(n), false, other), 0);
+      assert.notEqual(testing.domainModule("", -1, false), "");
+      testing.domainDrop(other);
+      if (testing.domainCompact()) {
+        compacted++;
+      }
+
+      if (n === 1000) {
+        atThousand = testing.memory.buffer.byteLength;
+      }
     }
 
-    if (n === 250) {
-      size = testing.memory.buffer.byteLength;
-    }
-  }
+    // Memory grows by whole pages as domain and ABC indices are given out,
+    // about 220 bytes a load as measured: bounded per load.
+    assert.ok(compacted > 0);
+    const perLoad = (testing.memory.buffer.byteLength - atThousand) / (loads - 1000);
+    assert.ok(perLoad <= 512, `${perLoad} bytes a load from load 1,000 on`);
+    assert.equal(testing.domainModule("b\nx", 1), module);
+    return module;
+  };
 
+  // Memory grows by pages as more domain and ABC indices are given out:
+  // equal sessions are compared, once the free runs they leave have settled:
+  // the first two sessions end one page (65,536 bytes) below the steady
+  // 2,949,120, which every session from the third keeps.
+  const module = run();
+  assert.equal(run(), module);
+  assert.equal(run(), module);
+  const size = testing.memory.buffer.byteLength;
+  assert.equal(run(), module);
   assert.equal(testing.memory.buffer.byteLength, size);
-  assert.equal(testing.domainModule("b\nx", 1), module);
 
   // As compiled in a domain that never had the others.
   testing.domainReset(SWF_31);
@@ -661,8 +751,8 @@ test("a compaction in place, a part at a time, never grows memory", {
   skip: !existsSync(generated) && "oracle/avmplus missing",
 }, () => {
   // With no spare instance to move to: the new tables made beside the old
-  // and the dead ones only where the three fit, each part's garbage
-  // collected before the next, as the wrapper does.
+  // and the dead ones only where the three fit, each part's arena given
+  // back as the next starts.
   const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
   testing.domainReset(SWF_31);
   testing.domainAdd(builtin, true);
@@ -672,22 +762,33 @@ test("a compaction in place, a part at a time, never grows memory", {
     assert.notEqual(testing.domainModule("", -1, false), "");
   }
 
+  // Release a previous workload to leave contiguous free runs beside the live ABCs.
+  const previous = testing.domainChild(main) as number;
+  for (let n = 0; n < 60; n++) {
+    assert.equal(testing.domainAdd(builtin, true, previous), 0);
+  }
+
+  testing.domainDrop(previous);
+  assert.ok(testing.domainRebuild());
+
   let compactions = 0;
   for (let n = 0; n < 150; n++) {
     const child = testing.domainChild(main) as number;
     assert.equal(testing.domainAdd(builtin, true, child), 0);
     assert.notEqual(testing.domainModule("", -1, false), "");
     testing.domainDrop(child);
-    testing.__collect();
     const before = testing.memory.buffer.byteLength;
     if (testing.domainCompact(true)) {
+      if (compactions === 0) {
+        // A repeated request can replace the pending rebuild or leave it in progress.
+        testing.domainCompact(true);
+      }
+
       let step = testing.domainRebuildStep();
       while (step === 0) {
-        testing.__collect();
         step = testing.domainRebuildStep();
       }
 
-      testing.__collect();
       assert.equal(step, 1);
       assert.equal(testing.memory.buffer.byteLength, before, `load ${n}`);
       compactions++;
@@ -754,4 +855,66 @@ test("what resolved lazily resolves alike after a rebuild, though an ancestor de
     assert.equal(testing.domainRevive(domain), 1);
     assert.equal(testing.domainSlotTypes(2, 0), "abc 1 class 0");
   }
+});
+
+test("an ABC rejected after it named a class leaves no class by that name to the next", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  testing.domainReset(SWF_31);
+  testing.domainAdd(builtin, true);
+  const child = testing.domainChild(0) as number;
+  // A is named, then B fails to link: it overrides nothing.
+  const rejected = classes([
+    { name: mn("A"), base: mn("Object") },
+    {
+      name: mn("B"),
+      base: mn("Object"),
+      traits: [{ name: mn("m"), kind: METHOD, attr: OVERRIDE }],
+    },
+  ]);
+  assert.equal(testing.domainAdd(rejected, false, child), 1053);
+  // The next ABC takes the rejected one's index: a finding of A as a type of it binds nothing.
+  assert.equal(
+    testing.domainAdd(classes([{ name: mn("F"), base: mn("Object") }]), false, child),
+    0,
+  );
+  const revision = testing.domainRevision();
+  testing.domainFound(child, NS_PUBLIC, "", "A", 1, true);
+  assert.equal(testing.domainRevision(), revision);
+  // Nor does a later ABC extend A.
+  assert.equal(testing.domainAdd(classes([{ name: mn("B"), base: mn("A") }]), false, child), 1014);
+  assert.equal(find("", "A"), "none");
+});
+
+test("a first builtin ABC rejected after its builtin classes were set leaves none of them", {
+  skip: !existsSync(generated) && "oracle/avmplus missing",
+}, () => {
+  const builtin = new Uint8Array(readFileSync(new URL("builtin.abc", generated)));
+  const user = classes(
+    [
+      {
+        name: mn("A"),
+        base: mn("Object"),
+        traits: [{ name: mn("x"), kind: SLOT, index: mn("A") }],
+      },
+    ],
+    true,
+  );
+  const compiled = () => {
+    assert.equal(testing.domainAdd(builtin, true), 0);
+    assert.equal(testing.domainAdd(user, false, testing.domainChild(0)), 0);
+    return testing.domainModule("", -1, false, false) as string;
+  };
+  testing.domainReset(SWF_31);
+  const want = compiled();
+
+  // Its classes link, then its class objects' layout fails: a static
+  // method that overrides nothing.
+  const rejected = classes([
+    { name: mn("Object"), statics: [{ name: mn("m"), kind: METHOD, attr: OVERRIDE }] },
+  ]);
+  testing.domainReset(SWF_31);
+  assert.equal(testing.domainAdd(rejected, true), 1053);
+  assert.equal(compiled(), want);
 });

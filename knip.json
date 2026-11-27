@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "ignore": ["oracle/avmplus/**", "packages/codegen/assembly/**"],
+  "ignore": ["oracle/avmplus/**"],
   "ignoreBinaries": ["amxmlc", "import", "openssl", "wine", "zig"],
   "ignoreExportsUsedInFile": {
     "interface": true,
@@ -8,7 +8,7 @@
   },
   "workspaces": {
     ".": {
-      "entry": ["tools/**/*.ts"]
+      "entry": ["tools/**/*.ts", "tests/parity/run.ts"]
     },
     "apps/desktop": {
       "entry": ["src/renderer/index.ts", "src/renderer/open-url.ts"],
@@ -16,6 +16,9 @@
     },
     "apps/site": {
       "entry": ["src/main.ts", "src/service-worker.ts"]
+    },
+    "packages/codegen": {
+      "entry": ["stamp.ts"]
     },
     "packages/swf2es": {
       "entry": ["src/swf2es.ts", "src/worker.ts", "src/plugin.ts"]

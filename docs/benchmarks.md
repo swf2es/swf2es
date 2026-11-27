@@ -1009,7 +1009,10 @@ memory's, `findDef` in a small method) gained nothing when kept.
 
 ## The AssemblyScript runtime
 
-codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator
+What follows is history: codegen.wasm is Zig's since the port
+([zig-codegen.md](zig-codegen.md)), its memory arenas given back a call at
+a time, its every access checked in the build that ships. The compiler in
+AssemblyScript used its `minimal` runtime: the TLSF allocator
 and a collector that runs only when the host calls `__collect()`, which
 the wrapper does between calls once memory has grown by 64 MB. The
 `incremental` runtime collects during calls and pays a write barrier on
@@ -1018,8 +1021,8 @@ per instruction on abcdump.abc and as3pb (67.5 → 37.0 and 61.6 → 30.0
 ns) and took loading and verifying every Tamarin ABC from 9.8 to 5.5 s.
 The `stub` runtime, which never frees, was no faster. Neither were the
 optimizer's `converge` and `noAssert`, nor `uncheckedBehavior: "always"`;
-releases use the last anyway, so the code needs no `unchecked()`, and
-`pnpm test:checked` runs the tests with every access checked instead.
+releases used the last anyway, and a checked build ran the tests with
+every access checked instead.
 
 ## Inputs
 

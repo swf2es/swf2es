@@ -9,17 +9,24 @@
 // compiled by ASC in the oracle's image, so that it adds an ABC the
 // compiler has not seen. Prints, a window of loads at a time, the size of
 // codegen's memory, that of the instance compiling, what its live and dead ABCs
-// weigh (Codegen.usage), and which of codegen.wasm's exports grew its
-// memory and by how much.
+// weigh (Codegen.usage), what the recovery from a panic holds, and which
+// of codegen.wasm's exports grew its memory and by how much; and each
+// compaction's pause, with where its time went and its longest call.
 //
 //   node --expose-gc tests/bench/codegen-session.ts [--loads N] [--seed N] [--window N]
 //     [--main-methods N] [--checkout DIR] [--cache] [--json FILE] [--grows]
+//     [--testing [--report]]
 //
 // --main-methods sizes the main SWF's class, 3000 methods by default, its
 // ABC some 600 KB; --checkout plays on another built checkout's player,
 // codegen and libraries, to compare two; --cache gives the player a
 // module cache in memory, so that each load is keyed (moduleKey) as with
 // the web element's cache on; --grows prints each call that grew memory.
+// --testing plays on the test build (dist-test/testing.wasm), whose
+// rebuilds do one kind of work a step, so that a pause splits into saving,
+// parsing, linking, verifying and replaying the log; it prints what the
+// domain's tables take (testing/measure.zig) a window of loads at a time,
+// and --report the whole report at the end.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { compileScripts } from "../player/scripts.ts";
@@ -37,6 +44,8 @@ const WINDOW = Number(option("window") ?? 25);
 const checkout = (option("checkout") ?? `${here}../..`).replace(/\/$/, "");
 const cached = args.includes("--cache");
 const printGrows = args.includes("--grows");
+const testing = args.includes("--testing");
+const fullReport = args.includes("--report");
 const json = option("json");
 const gc = (globalThis as { gc?: () => void }).gc;
 if (!gc) {
@@ -56,7 +65,59 @@ let load = 0;
 const rebuilds = { done: 0, moved: 0 };
 const instantiate = WebAssembly.instantiate;
 /** The exports of the codegen.wasm instance called last, the one compiling, for domainState. */
-let raw: { domainState(d: number): number } | null = null;
+let raw: Raw | null = null;
+interface Raw {
+  memory: WebAssembly.Memory;
+  outputLength(): number;
+  domainState(d: number): number;
+  domainMemoryReport?(): number;
+  domainRebuildPhases?(on: boolean): void;
+  domainRebuildStepWork?(): number;
+  domainOutsideFindings?(): number;
+}
+/** What a call into `exports` handed out, as text. */
+const text = (exports: Raw, address: number) =>
+  Buffer.from(exports.memory.buffer, address, exports.outputLength()).toString("latin1");
+
+/**
+ * A compaction's pause, from the host's compact() to its return, and
+ * where its time went, by the calls it made: saving the domain, parsing
+ * the ABCs into the new instance, each step's kind of work (the test
+ * build's; "steps" in the release build), and the longest single call.
+ */
+interface Pause {
+  load: number;
+  ms: number;
+  by: Record<string, number>;
+  longest: { call: string; ms: number; work: string };
+}
+const pauses: Pause[] = [];
+let pause: Pause | null = null;
+const PHASES = ["steps", "link", "verify", "replay"];
+/** Which part of a pause a call is. */
+const part = (name: string, exports: Raw): { part: string; work: string } | null => {
+  switch (name) {
+    case "domainSaveBytes":
+    case "domainSavedAbcBytes":
+      return { part: "save", work: "" };
+    case "domainLoad":
+    case "domainLoadAbc":
+      return { part: "parse", work: "" };
+    case "domainCompact":
+    case "domainLoadRebuild":
+      return { part: "start", work: "" };
+    case "domainRebuildStep": {
+      if (!exports.domainRebuildStepWork) {
+        return { part: "steps", work: "" };
+      }
+
+      const work = text(exports, exports.domainRebuildStepWork());
+      return { part: PHASES[Number(work.split(" ")[0])] ?? "steps", work };
+    }
+    default:
+      return null;
+  }
+};
 /** How many application domains the compiler has live, evicted and dropped. */
 const states = () => {
   const counts = [0, 0, 0];
@@ -73,15 +134,29 @@ WebAssembly.instantiate = (async (module: WebAssembly.Module, imports?: object) 
     return instance;
   }
 
+  const exports = instance.exports as unknown as Raw;
+  exports.domainRebuildPhases?.(true);
   const wrapped: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(instance.exports)) {
     wrapped[name] =
       typeof value !== "function"
         ? value
         : (...a: unknown[]) => {
-            raw = wrapped as typeof raw;
+            raw = wrapped as unknown as Raw;
             const from = memory.buffer.byteLength;
+            const before = pause ? performance.now() : 0;
             const result = (value as (...a: unknown[]) => unknown)(...a);
+            if (pause) {
+              const ms = performance.now() - before;
+              const kind = part(name, exports);
+              if (kind) {
+                pause.by[kind.part] = (pause.by[kind.part] ?? 0) + ms;
+                if (ms > pause.longest.ms) {
+                  pause.longest = { call: `${name} ${kind.part}`, ms, work: kind.work };
+                }
+              }
+            }
+
             const to = memory.buffer.byteLength;
             if (name === "domainRebuildStep" && result === 1) {
               rebuilds.done++;
@@ -260,9 +335,44 @@ const mainSwf = oneFrame([
 ]);
 
 const wasm = await WebAssembly.compile(
-  readFileSync(`${checkout}/packages/codegen/dist/codegen.wasm`),
+  readFileSync(
+    `${checkout}/packages/codegen/${testing ? "dist-test/testing.wasm" : "dist/codegen.wasm"}`,
+  ),
 );
 const codegen = await createCodegen(wasm);
+// Each compaction timed, from the host's call to its return.
+const compact = codegen.compact.bind(codegen);
+codegen.compact = () => {
+  pause = { load, ms: 0, by: {}, longest: { call: "", ms: 0, work: "" } };
+  const started = performance.now();
+  try {
+    return compact();
+  } finally {
+    pause.ms = performance.now() - started;
+    if (Object.keys(pause.by).some((k) => k !== "start")) {
+      pauses.push(pause);
+    }
+
+    pause = null;
+  }
+};
+/** What the test build's report says a window of loads at a time, by its lines' first words. */
+const reports: { loads: number; lines: string[] }[] = [];
+const report = () => (raw?.domainMemoryReport ? text(raw, raw.domainMemoryReport()) : "");
+// How long the player's compactions block it: each call of compact or
+// compactStep (a checkout from before compactStep has only compact).
+const blocks: number[] = [];
+for (const name of ["compact", "compactStep"]) {
+  const method = codegen[name];
+  if (typeof method === "function") {
+    codegen[name] = (...a: unknown[]) => {
+      const t0 = performance.now();
+      const result = method(...a);
+      blocks.push(performance.now() - t0);
+      return result;
+    };
+  }
+}
 const store = new Map<string, unknown>();
 let lines = 0;
 const errors: string[] = [];
@@ -306,6 +416,7 @@ interface Row {
   memory: number;
   live: number;
   dead: number;
+  recovery: number;
   heap: number;
   ms: number;
   domains: string;
@@ -335,10 +446,14 @@ for (let frames = 0; lines < LOADS && frames < LOADS * 40 && !errors.length; fra
       memory: usage.memory,
       live: usage.live,
       dead: usage.dead,
+      recovery: usage.recovery,
       heap: process.memoryUsage().heapUsed,
       ms: performance.now() - started,
       domains: states(),
     });
+    if (testing) {
+      reports.push({ loads: lines, lines: report().split("\n") });
+    }
   }
 }
 
@@ -353,13 +468,54 @@ if (errors.length) {
 }
 
 console.log(
-  "  loads   memory MB   live MB   dead MB   JS heap MB   s   domains live/evicted/dropped",
+  "  loads   memory MB   live MB   dead MB   recovery MB   JS heap MB   s   domains live/evicted/dropped",
 );
 for (const r of rows) {
   console.log(
     `  ${String(r.loads).padStart(5)} ${mb(r.memory).padStart(11)} ${mb(r.live).padStart(9)} ` +
-      `${mb(r.dead).padStart(9)} ${mb(r.heap).padStart(12)} ${(r.ms / 1000).toFixed(1).padStart(5)}   ${r.domains}`,
+      `${mb(r.dead).padStart(9)} ${mb(r.recovery).padStart(13)} ${mb(r.heap).padStart(12)} ` +
+      `${(r.ms / 1000).toFixed(1).padStart(5)}   ${r.domains}`,
   );
+}
+
+const ms = (n: number) => `${n.toFixed(0)} ms`;
+console.log(`  pauses: ${pauses.length}, ${ms(pauses.reduce((sum, p) => sum + p.ms, 0))} in all`);
+for (const p of pauses) {
+  const by = Object.entries(p.by)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${k} ${ms(v)}`)
+    .join(", ");
+  console.log(
+    `    load ${p.load}: ${ms(p.ms)} (${by}); longest ${p.longest.call} ${ms(p.longest.ms)}` +
+      `${p.longest.work ? ` [phase abcs bytes verify-cost replays kept: ${p.longest.work}]` : ""}`,
+  );
+}
+
+if (testing) {
+  // A window's measures: what dead ABCs hold, the tables, the free runs and the arenas.
+  const pick = (lines: string[], word: string) =>
+    lines.find((l) => l.startsWith(`${word} `))?.slice(word.length + 1) ?? "";
+  console.log("  the domain's memory, a window at a time (testing/measure.zig):");
+  for (const r of reports) {
+    console.log(`    ${r.loads}: abcs ${pick(r.lines, "abcs")}`);
+    console.log(
+      `      tables ${pick(r.lines, "tables")}; arena ${pick(r.lines, "arena")}; ` +
+        `freeruns ${pick(r.lines, "freeruns")}`,
+    );
+  }
+
+  const last = reports.at(-1)?.lines ?? [];
+  console.log("  spaces at the end:");
+  for (const line of last.filter((l) => l.startsWith("space "))) {
+    console.log(`    ${line.slice(6)}`);
+  }
+
+  // raw is set inside the wrapped exports, which TypeScript does not follow.
+  const outside = (raw as Raw | null)?.domainOutsideFindings?.() ?? 0;
+  console.log(`  findings of an ABC outside the finder's chain: ${outside}`);
+  if (fullReport) {
+    console.log(report());
+  }
 }
 
 const byCall = new Map<string, { count: number; bytes: number }>();
@@ -371,6 +527,15 @@ for (const g of grows) {
 }
 
 console.log(`  rebuilds: ${rebuilds.done}, ${rebuilds.moved} of them in a new instance`);
+blocks.sort((a, b) => b - a);
+console.log(
+  `  compaction calls: ${blocks.length}, ${blocks.reduce((a, b) => a + b, 0).toFixed(0)} ms in all, ` +
+    `longest ${blocks
+      .slice(0, 3)
+      .map((ms) => ms.toFixed(1))
+      .join(", ")} ms` +
+    (codegen.usage().moves ? `; moves ${JSON.stringify(codegen.usage().moves)}` : ""),
+);
 console.log("  grown by:");
 for (const [call, { count, bytes }] of [...byCall].sort((a, b) => b[1].bytes - a[1].bytes)) {
   console.log(`    ${call}: ${count} times, ${mb(bytes)} MB`);
@@ -383,7 +548,10 @@ if (printGrows) {
 }
 
 if (json) {
-  writeFileSync(json, JSON.stringify({ checkout, seed: SEED, cached, rows, grows }));
+  writeFileSync(
+    json,
+    JSON.stringify({ checkout, seed: SEED, cached, rows, grows, pauses, reports }),
+  );
 }
 
 process.exit(errors.length || lines < LOADS ? 1 : 0);

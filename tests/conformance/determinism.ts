@@ -5,7 +5,7 @@
 //   - in an instance of its own (the reference);
 //   - in one instance, after all the chains before it;
 //   - in one instance, in the reverse order, each chain twice in a row;
-//   - in the build that checks every array access;
+//   - in the build that fills freed and rolled-back memory with 0xAA;
 //   - a part at a time, cut at every body, as the wrapper asks for a
 //     large module (ModuleEmitter.step);
 //   - in the release build, codegen.wasm, through the package's API, as the
@@ -127,7 +127,7 @@ function rejected(error: number, abc: Uint8Array, builtin: boolean): string {
  * Each module of a chain and its source map, as `testing` compiles them;
  * each module's methods' entries into `entries`, if given.
  */
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+// biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
 function compile(testing: any, abc: Uint8Array, entries?: Map<number, string>[]): string[] {
   const results: string[] = [];
   const hashes: string[] = [];
@@ -154,14 +154,13 @@ const utf8 = new TextDecoder();
  * and cut at every body (domainPartBudget), not kept and kept: what the
  * host is handed part by part, the first's text in place of the last.
  */
-// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+// biome-ignore lint/suspicious/noExplicitAny: the test build's exports are typed by their signatures alone
 function compileInParts(testing: any, abc: Uint8Array): string[] {
   const parts = (hashes: string, keep: boolean) => {
     const got = [utf8.decode(testing.domainModuleBytes(hashes, -1, keep, false))];
     while (!testing.domainModuleDone()) {
-      // Collected at every cut, as the wrapper collects: what a part keeps
-      // for the next must be reachable from the module being written.
-      testing.__collect();
+      // Each call gives the last one's arena back: what a part keeps for
+      // the next must be outside it.
       got.push(utf8.decode(testing.domainModuleMoreBytes()));
     }
 
@@ -240,7 +239,7 @@ async function checkAt(): Promise<void> {
   referenceEntries.clear();
   for (const chain of chains) {
     const entries: Map<number, string>[] = [];
-    reference.set(chain.name, compile(await loadTesting("dist-test"), chain.abc, entries));
+    reference.set(chain.name, compile(await loadTesting("testing"), chain.abc, entries));
     referenceEntries.set(chain.name, entries);
     if (reference.get(chain.name)?.at(-1)?.startsWith("rejected")) {
       rejections++;
@@ -257,11 +256,11 @@ async function checkAt(): Promise<void> {
     }
   }
 
-  await oneInstance("after the chains before it", "dist-test", chains, 1);
-  await oneInstance("in reverse, twice in a row", "dist-test", [...chains].reverse(), 2);
-  await oneInstance("in the checked build", "dist-test-checked", chains, 1);
+  await oneInstance("after the chains before it", "testing", chains, 1);
+  await oneInstance("in reverse, twice in a row", "testing", [...chains].reverse(), 2);
+  await oneInstance("in the poison build", "testing-poison", chains, 1);
   {
-    const testing = await loadTesting("dist-test");
+    const testing = await loadTesting("testing");
     for (const chain of chains) {
       const got = compileInParts(testing, chain.abc);
       compare("a part at a time", chain.name, got, reference.get(chain.name) ?? []);
@@ -298,7 +297,7 @@ async function checkAt(): Promise<void> {
   // reverse order, one emitter for all. The
   // builtins are the same in every chain, so checked in the first.
   {
-    const testing = await loadTesting("dist-test");
+    const testing = await loadTesting("testing");
     for (const [c, chain] of chains.entries()) {
       const abcs = [...builtins, chain.abc];
       const want = referenceEntries.get(chain.name) ?? [];

@@ -1,0 +1,249 @@
+// Where a body's control flow goes, as Verifier::checkTarget and mergeState
+// follow it: branch, fall-through and handler
+// targets, each the frame state it is entered with, every path into it of
+// the same depths and its values merged, and the targets whose entry state
+// changed walked again.
+//
+// A backward edge makes its target a loop header, whose handlers are
+// reached from it (throwsAt). A handler's target is past its range
+// (checkHandlers rejects one before its end), so after the instruction
+// that throws: never a backward edge, never a loop header. So the
+// recursion is at most target, throwsAt, target, whatever the input.
+const std = @import("std");
+const errors = @import("errors.zig");
+const Error = errors.Error;
+const Rejected = errors.Rejected;
+const TypeId = @import("../link/traits.zig").TypeId;
+const code_ = @import("code.zig");
+const BodyDecoder = code_.BodyDecoder;
+const Flags = code_.Flags;
+const C = @import("constants.zig");
+
+/// Save the current state as known target t's entry state.
+pub fn saveEntry(bd: *BodyDecoder, t: u32) Error!void {
+    const size = bd.frameSize;
+    if (bd.entryUsed + size > bd.entryType.len) {
+        const capacity = @max(bd.entryUsed + size, bd.entryType.len * 2);
+        const types = try bd.gpa.alloc(TypeId, capacity);
+        const flags = try bd.gpa.alloc(Flags, capacity);
+        @memcpy(types[0..bd.entryUsed], bd.entryType[0..bd.entryUsed]);
+        @memcpy(flags[0..bd.entryUsed], bd.entryFlags[0..bd.entryUsed]);
+        bd.entryType = types;
+        bd.entryFlags = flags;
+    }
+
+    const at = bd.entryUsed;
+    bd.entryAt[t] = at;
+    bd.entryUsed += size;
+    @memcpy(bd.entryType[at..][0..size], bd.valueType[0..size]);
+    @memcpy(bd.entryFlags[at..][0..size], bd.valueFlags[0..size]);
+}
+
+/// Make known target t's entry state the current one.
+pub fn loadEntry(bd: *BodyDecoder, t: u32) void {
+    if (!bd.typed) {
+        return;
+    }
+
+    bd.localsVersion += 1;
+    const at = bd.entryAt[t];
+    const size = bd.frameSize;
+    @memcpy(bd.valueType[0..size], bd.entryType[at..][0..size]);
+    @memcpy(bd.valueFlags[0..size], bd.entryFlags[at..][0..size]);
+}
+
+/// Put known target t on the work list unless it is there already.
+fn requeue(bd: *BodyDecoder, t: u32) void {
+    if (bd.pending[t] == 0) {
+        bd.pending[t] = 1;
+        bd.work[bd.workCount] = t;
+        bd.workCount += 1;
+    }
+}
+
+/// What the head of target decided: done, or a new loop header whose
+/// handlers are to be reached from it.
+const Head = union(enum) {
+    done,
+    header: u32,
+};
+
+/// As Verifier::checkTarget and mergeState: stay in the code, back edges need
+/// a label or known target, and every path into a block has the same stack
+/// and scope depths, whose values merge.
+pub fn target(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!void {
+    const t = switch (try head(bd, from, to, stack, scope)) {
+        .done => return,
+        .header => |t| t,
+    };
+
+    if (!bd.typed) {
+        return throwsAt(bd, t);
+    }
+
+    // Its handlers are reached with the state it is entered with.
+    try saveCurrent(bd);
+    loadEntry(bd, t);
+    const stackNow = bd.stack;
+    const scopeNow = bd.scope;
+    bd.stack = stack;
+    bd.scope = scope;
+    defer {
+        bd.stack = stackNow;
+        bd.scope = scopeNow;
+        restoreCurrent(bd);
+    }
+
+    try throwsAt(bd, t);
+}
+
+/// target up to where it reaches a new loop header's handlers.
+fn head(bd: *BodyDecoder, from: i64, to: i64, stack: u32, scope: u32) Error!Head {
+    // The second phase only visits what the first already checked.
+    if (bd.emitPass) {
+        return .done;
+    }
+
+    if (to < 0 or to >= bd.length) {
+        return bd.fail(.kInvalidBranchTargetError);
+    }
+
+    const t: u32 = @intCast(to);
+    const isNew = bd.known[t] == 0;
+    if (to <= from and isNew and bd.opAt(t) != .label) {
+        return bd.fail(.kInvalidBranchTargetError);
+    }
+
+    if (isNew) {
+        // Code decoded as part of another block must have been reached with the
+        // same state. avmplus walks the code in order: the walk's state at t is
+        // the one arriving, this edge's the target's it recorded.
+        const walked = bd.cover[t] == .start;
+        if (walked) {
+            try sameDepths(bd, stack, scope, bd.stackAt[t], bd.scopeAt[t]);
+        }
+
+        bd.known[t] = 1;
+        bd.entryStack[t] = stack;
+        bd.entryScope[t] = scope;
+        if (bd.typed) {
+            try saveEntry(bd, t);
+        }
+
+        requeue(bd, t);
+
+        // The block that walked through t must now end there and merge into it.
+        if (walked and bd.typed and bd.walkOf[t] != t) {
+            requeue(bd, bd.walkOf[t]);
+        }
+    } else {
+        try sameDepths(bd, bd.entryStack[t], bd.entryScope[t], stack, scope);
+        if (bd.typed and try bd.mergeEntry(t)) {
+            requeue(bd, t);
+        }
+    }
+
+    // A loop header's implicit interrupt check can throw, so it reaches the
+    // handlers covering it, even when the back edge is found after its block.
+    if (to <= from and bd.loopHeader[t] == 0) {
+        bd.loopHeader[t] = 1;
+        return .{ .header = t };
+    }
+
+    return .done;
+}
+
+/// An edge to a handler's target: never backward, as the target is past
+/// its range, so this edge makes no loop header (another edge may).
+fn handlerEdge(bd: *BodyDecoder, pc: u32, to: u32) Error!void {
+    switch (try head(bd, pc, to, 1, 0)) {
+        .done => {},
+        // checkHandlers rejects a target before its range's end, and head
+        // makes a loop header of a backward edge alone.
+        .header => @panic("a handler's target is past its range, so this edge is never backward"),
+    }
+}
+
+/// Edges from `pc` to every handler covering it. A handler starts with the
+/// locals as they are, no scopes, and just the exception on the stack.
+pub fn throwsAt(bd: *BodyDecoder, pc: u32) Error!void {
+    if (bd.emitPass or pc < bd.tryFrom or pc >= bd.tryTo) {
+        return;
+    }
+
+    const abc = bd.abc;
+    for (0..bd.handlerCount) |i_| {
+        const i: u32 = @intCast(i_);
+        const h = bd.handlerFirst + i;
+        if (pc < abc.exceptionFrom[h] or pc >= abc.exceptionTo[h]) {
+            continue;
+        }
+
+        if (bd.maxStack < 1) {
+            return bd.fail(.kStackOverflowError);
+        }
+
+        const to = abc.exceptionTarget[h];
+        if (!bd.typed) {
+            try handlerEdge(bd, pc, to);
+            continue;
+        }
+
+        // The same locals as when last merged into the handler change
+        // nothing there. (The target is past pc, which is in its range, so
+        // the edge is forward whether or not the target is a loop header.)
+        if (bd.handlerMerged[i] == bd.localsVersion) {
+            continue;
+        }
+
+        const stack = bd.stack;
+        const scope = bd.scope;
+        const base = bd.stackBase();
+        const firstType = bd.typeOf(base);
+        const firstFlags = bd.valueFlags[base];
+        const firstOrigin = bd.origin[base];
+        const ty = bd.handlerTypeAt(i);
+        bd.setValue(base, ty, .{ .not_null = bd.domain.typeNotNull(ty) });
+        bd.stack = 1;
+        bd.scope = 0;
+        {
+            defer {
+                bd.stack = stack;
+                bd.scope = scope;
+                bd.setValue(base, firstType, firstFlags);
+                bd.origin[base] = firstOrigin;
+            }
+
+            try handlerEdge(bd, pc, to);
+        }
+
+        bd.handlerMerged[i] = bd.localsVersion;
+    }
+}
+
+fn saveCurrent(bd: *BodyDecoder) Error!void {
+    if (bd.savedType.len < bd.frameSize) {
+        bd.savedType = try bd.gpa.alloc(TypeId, bd.frameSize);
+        bd.savedFlags = try bd.gpa.alloc(Flags, bd.frameSize);
+    }
+
+    @memcpy(bd.savedType[0..bd.frameSize], bd.valueType[0..bd.frameSize]);
+    @memcpy(bd.savedFlags[0..bd.frameSize], bd.valueFlags[0..bd.frameSize]);
+}
+
+fn restoreCurrent(bd: *BodyDecoder) void {
+    bd.localsVersion += 1;
+    @memcpy(bd.valueType[0..bd.frameSize], bd.savedType[0..bd.frameSize]);
+    @memcpy(bd.valueFlags[0..bd.frameSize], bd.savedFlags[0..bd.frameSize]);
+}
+
+/// Whether the depths arriving match the target's; avmplus' messages name the arriving first.
+fn sameDepths(bd: *BodyDecoder, targetStack: u32, targetScope: u32, stack: u32, scope: u32) Rejected!void {
+    if (stack != targetStack) {
+        return bd.failWith(.kStackDepthUnbalancedError, stack, targetStack);
+    }
+
+    if (scope != targetScope) {
+        return bd.failWith(.kScopeDepthUnbalancedError, scope, targetScope);
+    }
+}

@@ -492,7 +492,7 @@ line `\tat Name()` for each compiled method on that stack, named as Flash
 names it ("Test/get x", "Test$cinit", "global$init",
 "Function/<anonymous>"). Codegen spells that name into each function's
 identifier, "$_" and the name with `$` escapes
-(`assembly/avm2/emit/stack-names.ts`), and the runtime reads it back
+(`zig/src/avm2/emit/stack-names.zig`), and the runtime reads it back
 (`stackNames` in `errors.ts`), so release builds run and emit nothing more
 for it. A module minified after it was compiled ahead of time loses those
 names, and its stack traces with them. Flash also lists its native
@@ -681,7 +681,13 @@ it, with its evicted ancestors, when a SWF is loaded into it or under it;
 a domain revived stays, as one loaded into again, and the root's and the
 main SWF's are never evicted. After a drop or an eviction it asks the
 compiler to compact when the page is next idle (`requestIdleCallback`,
-else a timer), not in a load's frame. The compiler's memory then holds
+else a timer), not in a load's frame, a slice at a time
+(`Codegen.compactStep`): the compiler moves its domain into a new
+instance a part at a time while loads go on, and `Code` asks again while
+it is moving, each idle callback's time, or 6 ms when the callback comes
+on its timeout, the page busy, which is 100 ms while a move is under
+way, so that a busy page gives it a few percent of its time; with no
+idle callbacks, as in Safari and workers, a timer gives one as often. The compiler's memory then holds
 the live domains' ABCs, not every ABC loaded since the last collection.
 Over 8000 loads of a large application's small SWFs, none collected,
 its memory stayed at the 128 MB compiling the main SWF had grown it to,

@@ -74,7 +74,7 @@ that defines the element (CSP, isolation and self-hosting in
 [the guide](docs/guide.md#from-a-cdn)):
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.38"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.39"></script>
 ```
 
 Or turn an existing page's Flash tags into players:
@@ -111,7 +111,7 @@ desktop app, sockets and files.
 packages/
   native/        WebAssembly: fills, lines and bitmap kernels (Zig), zlib and LZMA, MP3
   format/        SWF container and tag parsers
-  codegen/       bytecode → ES modules, in AssemblyScript (codegen.wasm), for JIT and AOT
+  codegen/       bytecode → ES modules, in Zig (codegen.wasm), for JIT and AOT
   runtime/       the AS3 and AVM1 language runtimes
   render/        the renderer: scene list, planner and WebGL 2 backend
   player/        display list, timeline, playerglobal, and the view that drives render/

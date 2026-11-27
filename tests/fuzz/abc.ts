@@ -11,8 +11,11 @@
 //   - each method compiled alone is byte for byte its entry in the
 //     module (docs/architecture/overview.md's JIT/AOT invariant).
 //
-// The seeds are the unit tests' hand-built ABCs and the conformance cases,
-// compiled into this package's own out/. A case that fails is written to
+// The seeds are the unit tests' hand-built ABCs, structured method bodies
+// (bodies.ts) and the conformance cases, compiled into this package's own
+// out/; one case in eight is instead classes whose traits share a few
+// names in every mix of kinds, which mutated bytes rarely give. A case
+// that fails is written to
 // out/failures/ as an .abc to run again. The mutations come from a seeded
 // generator, so a run repeats exactly:
 //
@@ -23,8 +26,13 @@ import { fileURLToPath } from "node:url";
 import { containerEngine, libraries, runOracle } from "../../oracle/oracle.ts";
 import { floatLibrary } from "../../packages/runtime/dist/avm2/float-library.js";
 import { abc, tables } from "../unit/codegen/abc-builder.ts";
+import { linkAbcs } from "../unit/codegen/link-abc.ts";
+import { classes, GETTER, METHOD, mn, OVERRIDE, SETTER, SLOT } from "../unit/codegen/link-cases.ts";
 import type { Case } from "../unit/codegen/oracle-case.ts";
-import { loadTesting } from "../unit/codegen/testing-module.ts";
+import { richAbc } from "../unit/codegen/rich-abc.ts";
+import { loadTesting, TESTED } from "../unit/codegen/testing-module.ts";
+import { verifyErrorAbcs } from "../unit/codegen/verify-errors.ts";
+import { structuredAbcs } from "./bodies.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
@@ -59,6 +67,10 @@ const seeds: Uint8Array[] = [
 ];
 // Closures with debug names, in the pool, empty, none and past it, which name their functions.
 seeds.push(closuresSeed());
+// Something of every kind the parser reads; the VerifyErrors no other case
+// reaches; classes linked across ABCs; and structured bodies.
+seeds.push(richAbc(true), ...verifyErrorAbcs().map(([, bytes]) => bytes));
+seeds.push(...Object.values(linkAbcs()), ...structuredAbcs(40, 1));
 for (const [module, names] of [
   ["../unit/codegen/verify-cases.ts", ["verifyCases"]],
   ["../unit/codegen/link-cases.ts", ["linkCases", "resolveCases"]],
@@ -167,10 +179,7 @@ function parseEntries(text: string): Map<number, string> {
 
 const sha = (b: Uint8Array | string) => createHash("sha256").update(b).digest("hex");
 const builtinHashes = builtins.map(sha);
-// pnpm test:checked's build checks every array access: a read past a
-// table's end, which the release build does not catch, traps there.
-const build = process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test";
-let testing = await loadTesting(build);
+let testing = await loadTesting(TESTED);
 const failures: string[] = [];
 let accepted = 0;
 let slowest = { ms: 0, at: -1 };
@@ -188,7 +197,7 @@ const utf8 = new TextDecoder("utf-8", { fatal: true });
 const VERSIONS = [50, 50, 50, 12, 50, 50, 50, 0];
 const started = Date.now();
 for (let k = 0; k < caseCount; k++) {
-  const abc = mutate(seeds[below(seeds.length)]);
+  const abc = below(8) === 0 ? sharedNamesAbc() : mutate(seeds[below(seeds.length)]);
   const t0 = performance.now();
   try {
     apiVersion = VERSIONS[k % VERSIONS.length];
@@ -208,7 +217,6 @@ for (let k = 0; k < caseCount; k++) {
     // same string.
     const parts: Uint8Array[] = [testing.domainModuleBytes(hashes, -1, false)];
     while (!testing.domainModuleDone()) {
-      testing.__collect();
       parts.push(testing.domainModuleMoreBytes());
     }
 
@@ -248,7 +256,7 @@ for (let k = 0; k < caseCount; k++) {
   } catch (e) {
     // A trap leaves the instance unusable: start a new one.
     fail(abc, `the compiler trapped (${(e as Error).message})`);
-    testing = await loadTesting(build);
+    testing = await loadTesting(TESTED);
   } finally {
     const ms = performance.now() - t0;
     if (ms > slowest.ms) {
@@ -266,6 +274,39 @@ if (failures.length) {
 }
 
 console.log(`fuzz: ${summary}, all well (${seconds} s)`);
+
+/**
+ * One to three classes, each extending Object or one before it, with a few
+ * traits of any kind named from a short list, instance and static: two
+ * names alike in any order of kinds, and alike in a base, which the layout
+ * accepts or refuses as avmplus does.
+ */
+function sharedNamesAbc(): Uint8Array {
+  const CONST = 6;
+  const kinds = [SLOT, CONST, METHOD, GETTER, SETTER];
+  const names = [mn("m"), mn("x"), mn("prototype")];
+  const types = [0, mn("int"), mn("Number"), mn("String"), mn("A")];
+  const pick = <T>(list: T[]) => list[below(list.length)];
+  const members = () =>
+    Array.from({ length: below(5) }, () => {
+      const kind = pick(kinds);
+      const name = pick(names);
+      if (kind === SLOT || kind === CONST) {
+        return { name, kind, id: below(4) === 0 ? 1 + below(3) : 0, index: pick(types) };
+      }
+
+      return { name, kind, attr: below(4) === 0 ? OVERRIDE : 0 };
+    });
+  const classNames = [mn("A"), mn("B"), mn("F")];
+  const list = Array.from({ length: 1 + below(3) }, (_, i) => ({
+    name: classNames[i],
+    base: i > 0 && below(2) ? classNames[below(i)] : mn("Object"),
+    traits: members(),
+    statics: below(2) ? members() : [],
+  }));
+
+  return classes(list, below(2) === 0);
+}
 
 /** A script that makes closures named by a pool string, an empty one, none and one past the pool. */
 function closuresSeed(): Uint8Array {

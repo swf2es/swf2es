@@ -17,10 +17,10 @@ import {
   TryFlag,
 } from "../../avm1-assembler.ts";
 import { backwardActions, branch, sharedBackwardSwf, unitActions } from "../../avm1-backward.ts";
-import { loadTesting, testing } from "./testing-module.ts";
+import { loadTesting, TESTED, testing } from "./testing-module.ts";
 
 // AVM1 blocks assembled in the tests, compiled by codegen's emitter
-// (assembly/avm1/emit/) and run with a stub runtime that records what the
+// (zig/src/avm1/emit/) and run with a stub runtime that records what the
 // code calls: its traces, play and stop, and the "not yet" errors of the
 // actions the emitter leaves to later steps.
 
@@ -1298,7 +1298,7 @@ test("SWF context does not extend an action block's upper decoding bound", () =>
 });
 
 test("shared SWF prefixes reuse analysis storage across blocks without changing entries", async () => {
-  const fresh = await loadTesting(process.env.SWF2ES_CHECKED ? "dist-test-checked" : "dist-test");
+  const fresh = await loadTesting(TESTED);
   const swf = readSwf(sharedBackwardSwf(500));
   const blocks = readActions(swf).blocks;
   const offsets = Int32Array.from(blocks, (b) => b.offset);

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { testing } from "./testing-module.ts";
 
 // AVM1 action blocks assembled by hand, decoded by codegen's AVM1 decoder
-// and flow (assembly/avm1/), as Flash and Ruffle read them.
+// and flow (zig/src/avm1/), as Flash and Ruffle read them.
 
 /** An action: its opcode and, from 0x80, its operands' length and bytes. */
 function act(op: number, ...operands: number[]): number[] {

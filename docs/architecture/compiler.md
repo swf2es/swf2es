@@ -5,13 +5,13 @@
 avmplus checks an ABC in three places, and swf2es checks it in the same
 three, with the same VerifyError numbers:
 
-1. **Parsing** (`codegen/assembly/avm2/abc`): everything avmplus rejects while
+1. **Parsing** (`codegen/zig/src/avm2/abc`): everything avmplus rejects while
    parsing that one ABC can decide on its own: counts, pool indices, trait
    kinds and names, class order, a method bound to two owners.
 2. **Linking**, when classes are defined: anything that needs classes from
    other ABCs or playerglobal, such as base classes, interfaces, overrides
    and name clashes.
-   The ABCs loaded together form a domain (`codegen/assembly/avm2/link`), which
+   The ABCs loaded together form a domain (`codegen/zig/src/avm2/link`), which
    interns strings and namespaces across them and finds script definitions
    by qualified name. Builtin ABCs mark their namespace URIs with the API
    version that introduced a name; as in avmplus, user code sees the names
@@ -81,7 +81,22 @@ three, with the same VerifyError numbers:
    garbage of each collected before the next, as a module's parts are:
    verifying every ABC again in one call took more memory than the
    tables. A rebuild of a large application's domain takes seconds, its
-   verifications most of them. An evicted domain is
+   verifications most of them, so a host that goes on meanwhile, as the
+   player does, calls `compactStep` rather than `compact`: the move then
+   goes a part at a time in the spare instance, given a few milliseconds
+   a call, from a snapshot of the domain (`domainSaveBytes`), while the
+   host goes on compiling in the old one, whose calls that change the
+   domain are journaled as for recovery from a panic (`createCodegen`'s
+   journal) and replayed into the spare once it has rebuilt; caught up, the
+   spare takes the old instance's place, and the snapshot and the calls
+   since are the checkpoint and journal recovery starts from. A revival
+   meanwhile of a domain evicted before the snapshot is journaled with its
+   ABCs' bytes, which the spare's rebuild let go of. The move is given up,
+   the old instance going on as it was, if the spare panics, runs out of
+   memory or refuses a part, or a call cannot be journaled, or the domain
+   is reset, recovered or rebuilt in place meanwhile; `usage` counts the
+   moves and why each was given up. Only a small domain is rebuilt in
+   place by `compactStep`, in one call. An evicted domain is
    revived (`reviveDomain`) with its evicted ancestors, the first a child
    of a live domain, given their ABCs again if a rebuild let go of them:
    one rebuild links them in their places, their log done again with

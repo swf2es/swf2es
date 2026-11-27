@@ -389,8 +389,8 @@ application domain the runtime loads it into, so that an ABC
 `Domain.loadBytes` loads compiles against what its domain sees, with the
 findings the runtime reports (`RuntimeOptions.compileAbc`). The
 conformance runner and the Tamarin runner give it the test build of
-codegen (`tests/conformance/abc-compiler.ts`), which `pnpm test:checked`
-checks every array access of, a loader that keeps source maps, and for
+codegen (`tests/conformance/abc-compiler.ts`), its 0xAA build under `pnpm
+test:checked`, a loader that keeps source maps, and for
 Tamarin the builtins' modules compiled once for every test. Their
 background workers' threads compile with the release build, and post
 what they print back to the runner's lines.

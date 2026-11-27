@@ -1,8 +1,0 @@
-{
-  "extends": "./asconfig.base.json",
-  "entries": ["assembly/index.ts"],
-  "targets": {
-    "release": { "outFile": "dist/codegen.wasm" },
-    "debug": { "outFile": "dist/codegen.wasm" }
-  }
-}
