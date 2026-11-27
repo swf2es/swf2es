@@ -1192,8 +1192,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           }
 
           m.replayed++;
+          // A revival that rebuilds the spare: catch-up starts over after it.
           if (replayOne(into, entry, true)) {
             m.phase = "rebuild";
+            m.catchUp = 0;
           }
 
           return "moving";
