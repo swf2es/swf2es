@@ -21,7 +21,6 @@ const Error = errors.Error;
 const memory = @import("../../memory.zig");
 const ir_ = @import("../ir/ir.zig");
 const Ir = ir_.Ir;
-const typeOperand = ir_.typeOperand;
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const traits_ = @import("../link/traits.zig");
@@ -39,6 +38,8 @@ const targets = @import("targets.zig");
 const verify = @import("verify.zig");
 const Op = @import("opcodes.zig").Op;
 const IrOp = @import("../ir/ir.zig").Op;
+const code_frame = @import("code/frame.zig");
+const verifier = @import("code/verifier.zig");
 
 /// The reachable instructions of one body, ordered by offset; entries past
 /// `count` are stale. Operands: a is the first u30, the signed branch offset,
@@ -672,169 +673,31 @@ pub const BodyDecoder = struct {
         }
     }
 
-    // Frame values: locals from 0, scope entries from localCount, the stack from
-    // localCount + maxScope.
-
-    pub inline fn setValue(self: *BodyDecoder, i: u32, ty: TypeId, flags: Flags) void {
-        self.valueType[i] = ty;
-        self.valueFlags[i] = flags;
-        if (i < self.localCount) {
-            self.localsVersion += 1;
-            self.localWrites[i] +%= 1;
-        } else {
-            self.origin[i] = .none;
-        }
-    }
-
-    /// What stack value i tells of a local, if its local is unchanged since.
-    fn originOf(self: *BodyDecoder, i: u32) Origin {
-        const o = self.origin[i];
-        if (!o.isLocal() or self.originWrite[i] != self.localWrites[o.local()]) {
-            return .none;
-        }
-
-        self.testWrite = self.originWrite[i];
-        return o;
-    }
-
-    /// As originOf, a copy as what its truth tells: no local is null or undefined and true.
-    fn truthOf(self: *BodyDecoder, i: u32) Origin {
-        const o = self.originOf(i);
-        return if (o.isLocal() and o.kind() == .copy) o.asTest(.if_true) else o;
-    }
-
-    /// What `==` of the top two values tells, one of them a null or undefined pushed, the other a local's copy.
-    fn equalsNull(self: *BodyDecoder) Origin {
-        const lhs = self.peek(2);
-        const rhs = self.peek(1);
-        var o: Origin = .none;
-        if (self.origin[rhs] == .nullish) {
-            o = self.originOf(lhs);
-        } else if (self.origin[lhs] == .nullish) {
-            o = self.originOf(rhs);
-        }
-
-        return if (o.isLocal() and o.kind() == .copy) o.asTest(.if_false) else .none;
-    }
-
-    /// What instruction `opcode` tells of a local's being neither null nor
-    /// undefined, from its operands: for a test its result's, for a
-    /// conditional branch its condition's.
-    fn nullTest(self: *BodyDecoder, opcode: Op) Origin {
-        // Too few values fail the instruction's verification after this.
-        const one = self.stack >= 1;
-        const two = self.stack >= 2;
-        var o: Origin = .none;
-        switch (opcode) {
-            .iftrue => return if (one) self.truthOf(self.peek(1)) else .none,
-            .iffalse, .not => o = if (one) self.truthOf(self.peek(1)) else .none,
-            .equals, .ifeq => return if (two) self.equalsNull() else .none,
-            .ifne => o = if (two) self.equalsNull() else .none,
-            else => return .none,
-        }
-
-        return if (!o.isLocal()) o else o.negated();
-    }
-
-    /// Mark local `local` checked, returning its flags before.
-    fn markChecked(self: *BodyDecoder, local: u32) Flags {
-        const flags = self.valueFlags[local];
-        var checked = flags;
-        checked.checked = true;
-        self.valueFlags[local] = checked;
-        self.localsVersion += 1;
-        return flags;
-    }
-
-    /// Push null or undefined, of `type`, as what equalsNull compares with.
-    pub fn pushNullish(self: *BodyDecoder, ty: TypeId) void {
-        const i = self.stackBase() + self.stack;
-        self.setValue(i, ty, .none);
-        self.origin[i] = .nullish;
-    }
-
-    /// Push local `a`, as a copy of it.
-    pub fn pushLocal(self: *BodyDecoder, a: u32) void {
-        const i = self.stackBase() + self.stack;
-        self.setValue(i, self.typeOf(a), self.valueFlags[a].known());
-        self.origin[i] = .of(a, .copy);
-        self.originWrite[i] = self.localWrites[a];
-    }
-
-    pub inline fn stackBase(self: *const BodyDecoder) u32 {
-        return self.localCount + self.maxScope;
-    }
-
-    /// The index of the value `n` from the top of the stack, 1 being the top.
-    pub inline fn peek(self: *const BodyDecoder, n: u32) u32 {
-        return self.stackBase() + self.stack -% n;
-    }
-
-    pub inline fn typeOf(self: *const BodyDecoder, i: u32) TypeId {
-        return self.valueType[i];
-    }
-
-    /// Handler i's exception type and catch scope type, as checkHandlers
-    /// wrote them for this body: in a typed walk (an untyped decoder has
-    /// handlers but no types), i below handlerCount, which the callers'
-    /// loops and verify's newcatch check keep it. The poison build's fill
-    /// in checkHandlers is what catches an entry this body did not write.
-    pub inline fn handlerTypeAt(self: *const BodyDecoder, i: u32) TypeId {
-        std.debug.assert(self.typed and i < self.handlerCount);
-        return self.handlerType[i];
-    }
-
-    pub inline fn handlerScopeAt(self: *const BodyDecoder, i: u32) TypeId {
-        std.debug.assert(self.typed and i < self.handlerCount);
-        return self.handlerScope[i];
-    }
-
-    pub inline fn isNotNull(self: *const BodyDecoder, i: u32) bool {
-        return self.valueFlags[i].not_null;
-    }
-
-    /// As Verifier::mergeState: merge the current values into known target t's
-    /// entry state, whose depths are the same: types to their common base, not
-    /// null only if both are. Whether the entry changed; rejected with 1068
-    /// for a with scope meeting another scope.
-    pub fn mergeEntry(self: *BodyDecoder, t: u32) Rejected!bool {
-        const at = self.entryAt[t];
-        const base = self.stackBase();
-        // The locals and scopes, then the stack, not what lies between.
-        const low = try self.mergeRange(at, 0, self.localCount + self.scope);
-        const high = try self.mergeRange(at, base, base + self.stack);
-        return low or high;
-    }
-
-    /// mergeEntry for values [from, to) of the entry state at `at`.
-    inline fn mergeRange(self: *BodyDecoder, at: u32, from: u32, to: u32) Rejected!bool {
-        var changed = false;
-        var i = from;
-        while (i < to) : (i += 1) {
-            const flags = self.valueFlags[i];
-            const entryFlags = self.entryFlags[at + i];
-            if (flags.with != entryFlags.with) {
-                return self.fail(.kCannotMergeTypesError);
-            }
-
-            const entryType = self.entryType[at + i];
-            const valueType = self.valueType[i];
-            const mergedFlags = entryFlags.merge(flags);
-            // Most merges meet the same type, which stays.
-            if (valueType == entryType and mergedFlags == entryFlags) {
-                continue;
-            }
-
-            const merged = types.commonBase(self.domain, entryType, valueType);
-            if (merged != entryType or mergedFlags != entryFlags) {
-                self.entryType[at + i] = merged;
-                self.entryFlags[at + i] = mergedFlags;
-                changed = true;
-            }
-        }
-
-        return changed;
-    }
+    // Its frame's values and the typed helpers on them (code/frame.zig).
+    pub const setValue = code_frame.setValue;
+    pub const originOf = code_frame.originOf;
+    pub const truthOf = code_frame.truthOf;
+    pub const equalsNull = code_frame.equalsNull;
+    const nullTest = code_frame.nullTest;
+    pub const markChecked = code_frame.markChecked;
+    pub const pushNullish = code_frame.pushNullish;
+    pub const pushLocal = code_frame.pushLocal;
+    pub const stackBase = code_frame.stackBase;
+    pub const peek = code_frame.peek;
+    pub const typeOf = code_frame.typeOf;
+    pub const handlerTypeAt = code_frame.handlerTypeAt;
+    pub const handlerScopeAt = code_frame.handlerScopeAt;
+    pub const isNotNull = code_frame.isNotNull;
+    pub const mergeEntry = code_frame.mergeEntry;
+    pub const mergeRange = code_frame.mergeRange;
+    pub const push = code_frame.push;
+    pub const popPush = code_frame.popPush;
+    pub const coerce = code_frame.coerce;
+    pub const retype = code_frame.retype;
+    pub const checkNull = code_frame.checkNull;
+    pub const peekType = code_frame.peekType;
+    pub const emitOn = code_frame.emitOn;
+    pub const checkString = code_frame.checkString;
 
     /// Decode and check one block from `start` until it ends or runs into another block.
     pub fn block(self: *BodyDecoder, start: u32, stack: u32, scope: u32) Error!void {
@@ -1016,73 +879,6 @@ pub const BodyDecoder = struct {
         self.instructions += 1;
     }
 
-    // Typed helpers, working on the stack before the instruction's depth change.
-
-    /// Push a value; the instruction's stack effect sets the depth afterwards.
-    pub fn push(self: *BodyDecoder, ty: TypeId, flags: Flags) void {
-        self.setValue(self.stackBase() + self.stack, ty, flags);
-    }
-
-    /// Replace the top `n` values with one.
-    pub fn popPush(self: *BodyDecoder, n: u32, ty: TypeId, flags: Flags) void {
-        self.setValue(self.stackBase() + self.stack -% n, ty, flags);
-    }
-
-    /// As Verifier::emitCoerce: value i becomes `type`, still null or not.
-    pub fn coerce(self: *BodyDecoder, i: u32, ty: TypeId) Error!void {
-        const changes = self.typeOf(i) != ty;
-        // A coercion of a value neither null nor undefined is not either.
-        self.setValue(i, ty, self.valueFlags[i].known());
-        if (self.emitPass and changes and ty != .any) {
-            try self.emit(.ir_coerce, @intCast(i), @intCast(i), 1, 0, 0, typeOperand(ty), self.pc);
-        }
-    }
-
-    /// As FrameState::setType from a conversion instruction: value i becomes `type`, without IR of its own.
-    pub fn retype(self: *BodyDecoder, i: u32, ty: TypeId) void {
-        self.setValue(i, ty, self.valueFlags[i].known());
-    }
-
-    /// As Verifier::emitCheckNull: value i is known not null from here on. The
-    /// local it copies, unchanged since, is checked too.
-    pub fn checkNull(self: *BodyDecoder, i: u32) Error!void {
-        if (self.emitPass and !self.valueFlags[i].isKnown()) {
-            try self.emit(.ir_check_null, ir_.no_register, @intCast(i), 1, 0, 0, 0, self.pc);
-        }
-
-        self.valueFlags[i].not_null = true;
-        if (i < self.localCount) {
-            self.localsVersion += 1;
-            return;
-        }
-
-        const o = self.originOf(i);
-        if (o.isLocal() and o.kind() == .copy) {
-            _ = self.markChecked(o.local());
-        }
-    }
-
-    /// As Verifier::peekType: the value `n` from the top must be exactly `type`.
-    pub fn peekType(self: *BodyDecoder, n: u32, ty: TypeId) Rejected!void {
-        if (self.typeOf(self.peek(n)) != ty) {
-            return self.fail(.kIllegalOperandTypeError);
-        }
-    }
-
-    /// Write the instruction's own IR row, instead of the generic one.
-    pub fn emitOn(self: *BodyDecoder, op: IrOp, dst: i32, src: i32, count: u32, a: u32, b: u32, c: i32) Error!void {
-        if (self.emitPass) {
-            try self.emit(op, dst, src, count, a, b, c, self.pc);
-            self.emitted = true;
-        }
-    }
-
-    pub fn checkString(self: *BodyDecoder, index: u32) Rejected!void {
-        if (index == 0 or index >= self.abc.pool.stringCount()) {
-            return self.fail(.kCpoolIndexRangeError);
-        }
-    }
-
     /// Reject the body with VerifyError `err`.
     pub fn fail(self: *BodyDecoder, err: C.VerifyError) Rejected {
         self.code.fail(err);
@@ -1151,196 +947,10 @@ pub fn nameParts(pool: *const ConstantPool, index: u32) NameParts {
     return parts;
 }
 
-/// Verify, with types, every method of ABC `index` that its scripts can
-/// run: each script's initializer and methods, then each class's and
-/// function's methods once creating them captured their scope chain, as
-/// avmplus verifies each before it first runs. The result is each body's VerifyError, 0
-/// if it verified, or -1 if nothing could run it.
-pub fn verifyMethods(domain: *Domain, index: u32) Allocator.Error![]i32 {
-    var verifier = try Verifier.init(domain, domain.scratch, index);
-    _ = try verifier.run(std.math.maxInt(u64));
-    return verifier.results;
-}
-
-/// verifyMethods a part at a time, so that the host gets control back
-/// between parts of a large ABC: run until it returns true, with nothing
-/// else decoding in between. The parts verify what verifyMethods does, in
-/// its order, however they are cut. init counts the ABC as verified and
-/// logs .verify at once, as verifyMethods does, so one left before it
-/// is done leaves both, and what it resolved, in the domain
-/// (compile/modules.zig's abandon).
-pub const Verifier = struct {
-    domain: *Domain,
-    /// Where its results and queue are, which a module written a part at a
-    /// time keeps from one call to the next, past the call's arena.
-    gpa: Allocator,
-    index: u32,
-    /// Each body's VerifyError, 0 if it verified, -1 if nothing runs it; complete once run returns true.
-    results: []i32 = &.{},
-    first: bool,
-    entry: u32,
-    captures: u32,
-    queue: std.ArrayList(u32) = .empty,
-    at: usize = 0,
-    pass: i32 = 0,
-    done: bool = false,
-    /// The bytes of code the last run verified, as its budget counts them.
-    spent: u64 = 0,
-
-    pub fn init(domain: *Domain, gpa: Allocator, index: u32) Allocator.Error!Verifier {
-        // Logged before what it resolves, as what it captures is a function's
-        // scope before its signature; kept if it is the ABC's first, or finds
-        // a scope the first did not.
-        var self: Verifier = .{
-            .domain = domain,
-            .gpa = gpa,
-            .index = index,
-            .first = domain.abcVerified.get(index) == 0,
-            .entry = domain.logKind.len,
-            .captures = domain.captures,
-        };
-        try domain.put(domain.abcVerified.at(index), 1);
-        try domain.logged(.verify, index, 0, 0);
-        try self.start();
-        return self;
-    }
-
-    /// Verify until done, or until the bodies verified by this call hold
-    /// `budget` bytes of code, counting at least BODY_COST a body: whether done.
-    pub fn run(self: *Verifier, budget: u64) Allocator.Error!bool {
-        if (self.done) {
-            return true;
-        }
-
-        const domain = self.domain;
-        const index = self.index;
-        const abc = domain.abcs.get(index);
-        const traits = &domain.traits;
-        const methods = domain.methodStart.get(index);
-        const decoder = try bodyDecoder(domain, index);
-        self.spent = 0;
-        while (true) {
-            while (self.at < self.queue.items.len) {
-                if (self.spent >= budget) {
-                    return false;
-                }
-
-                const m = self.queue.items[self.at];
-                self.at += 1;
-                const body = abc.methodBody[m - methods];
-                const scope = traits.scopeOf(m);
-                if (body < 0 or scope == null or self.results[@intCast(body)] != -1) {
-                    continue;
-                }
-
-                const b: u32 = @intCast(body);
-                self.results[b] = (try decoder.decode(b, scope)).@"error".number();
-                self.spent += @max(@as(u64, abc.bodyCode[b].len), BODY_COST);
-                try self.queue.appendSlice(self.gpa, decoder.captured.items);
-            }
-
-            if (self.pass >= SETTLE_PASSES or !try settleContests(domain, index)) {
-                break;
-            }
-
-            self.pass += 1;
-            try self.start();
-        }
-
-        if (!self.first and domain.captures == self.captures) {
-            const entry = self.entry;
-            if (domain.logKind.len == entry + 1) {
-                // The entry this verifier added, maybe in an earlier call,
-                // when it runs a part at a time: kept for a rollback, which
-                // puts the log's length back but not a row written over.
-                domain.keepTruncated(entry);
-                domain.logKind.truncate(entry);
-                domain.logAt.truncate(entry);
-                domain.logAbc.truncate(entry);
-                domain.logA.truncate(entry);
-                domain.logB.truncate(entry);
-            } else {
-                try domain.put(domain.logKind.at(entry), .none);
-            }
-        }
-
-        self.done = true;
-        return true;
-    }
-
-    /// A pass over the ABC from its scripts, as each settling of its contested functions starts again.
-    fn start(self: *Verifier) Allocator.Error!void {
-        const domain = self.domain;
-        const index = self.index;
-        const abc = domain.abcs.get(index);
-        const results = try self.gpa.alloc(i32, abc.bodyCount());
-        @memset(results, -1);
-        var queue: std.ArrayList(u32) = .empty;
-        const scripts = domain.scriptTraits.get(index);
-        for (0..abc.scriptCount()) |s| {
-            try domain.methodsOf(self.gpa, scripts[s], &queue);
-        }
-
-        self.results = results;
-        self.queue = queue;
-        self.at = 0;
-    }
-};
-
-/// What verifying a byte of a body's code weighs against the budget of a
-/// module written a part at a time: about the garbage, in bytes, it once
-/// made, measured on large ABCs. Kept, so that the parts fall where they
-/// always did.
-pub const VERIFY_COST: u64 = 5;
-
-/// What a body counts for in Verifier.run's budget at least.
-const BODY_COST: u64 = 64;
-
-/// Verifications of an ABC again as its contested functions' merged scope chains settle, at most.
-const SETTLE_PASSES = 8;
-
-/// After verifying ABC `index`: each contested function's scope chain merged
-/// from those it was created in (Scope.merged). Where one changed, the ABC's
-/// functions' chains are let go of, for verifying it again: true.
-fn settleContests(domain: *Domain, index: u32) Allocator.Error!bool {
-    const traits = &domain.traits;
-    const start = domain.methodStart.get(index);
-    const end = start + domain.abcs.get(index).methodCount();
-    var changed = false;
-    var g = start;
-    while (g < end) : (g += 1) {
-        const scopes = traits.functionScopes.get(g);
-        if (traits.functionContested.get(g) == 0 or scopes == null) {
-            continue;
-        }
-
-        // Made in the call's arena, and kept in the domain's only where it changed.
-        const merged = try Scope.merged(domain.scratch, scopes.?.items);
-        const before = traits.functionMerged.get(g);
-        if (before == null or !before.?.equals(merged)) {
-            const keep = try domain.gpa.create(Scope);
-            keep.* = merged.*;
-            keep.types = try domain.gpa.dupe(TypeId, merged.types);
-            keep.withs = try domain.gpa.dupe(u8, merged.withs);
-            try domain.put(traits.functionMerged.at(g), keep);
-            changed = true;
-        }
-    }
-
-    if (!changed) {
-        return false;
-    }
-
-    g = start;
-    while (g < end) : (g += 1) {
-        if (traits.methodFunction.get(g) != 0) {
-            try domain.put(traits.functionScope.at(g), null);
-            try domain.put(traits.functionScopes.at(g), null);
-        }
-    }
-
-    return true;
-}
+/// Verifying an ABC's methods (code/verifier.zig).
+pub const verifyMethods = verifier.verifyMethods;
+pub const Verifier = verifier.Verifier;
+pub const VERIFY_COST = verifier.VERIFY_COST;
 
 /// The one decoder of a call, made for ABC `index`: its scratch kept from
 /// one use to the next within the call, and given back with the call's
