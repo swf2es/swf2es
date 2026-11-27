@@ -3,9 +3,9 @@
 // candidate and its poison build like any other suite (run.ts). The
 // standard sizes run the reviews' random counts, about three and a half
 // minutes; --deep adds their exhaustive parts (every shape of reject, every
-// small seed of parse, owners' pairs, more saves), about six, for changes
-// to arenas, saving and loading, and compaction; --seed and --cases
-// change the numbers.
+// small seed of parse, owners' pairs, more saves), about five and a half,
+// for changes to arenas, saving and loading, and compaction; --seed and
+// --cases change the numbers.
 import { noOracle } from "../local.ts";
 import type { Results, Suite } from "../suite.ts";
 import { avm1 } from "./avm1.ts";

@@ -224,8 +224,12 @@ node tests/parity/run.ts [--reference <ref>] [--deep] [--seed N] [--cases N] [su
                               # links, bodies, handlers, floats, traits' names, links, the oracle's IR,
                               # parsing, owners, saved domains and AVM1; their standard size adds about
                               # three and a half minutes; --deep adds the reviews' exhaustive parts, for
-                              # changes to arenas, saving and loading, and compaction (about six);
-                              # --seed N (1) and --cases N (each suite's random cases) change them
+                              # changes to arenas, saving and loading, and compaction (about five and a
+                              # half); --seed N (1) and --cases N (each suite's random cases) change them.
+                              # Cases seeded from the oracle's cache follow what it holds, so their counts
+                              # differ between hosts; a suite with none of its cache's or corpus's seeds
+                              # says PARTIAL. A throw from this tree's builds fails the run, even one all
+                              # three share, unless it is running out of memory
 node tests/bench/codegen-compile.ts [--reference <ref>] [--runs N]   # compile time of a build of
                               # <ref> against this tree's, interleaved, a warm-up pass each, N even
                               # (8): the libraries, the conformance cases, AVM1 blocks,
