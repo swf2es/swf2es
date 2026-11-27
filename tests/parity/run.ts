@@ -2568,20 +2568,35 @@ const has = {
   testing: exported(modules.candidateTesting),
 };
 
+// The test builds' rebuild policy pinned to a memory of this size, so that
+// whether a compaction is due follows the weights alone and not memory's
+// layout, which a change to the allocator may change; only where the
+// reference can pin it too. Near what the suites' instances reach, so
+// that the policy answers as it would for them.
+const PINNED_MEGABYTES = 8;
+const pinned = [modules.referenceTesting, modules.candidateTesting].every((m) =>
+  exported(m).has("domainPinPolicy"),
+);
+
 /** A fresh instance of one of the three builds. */
 async function instance(build: Suite["build"], compiler: string): Promise<Compiler> {
-  switch (compiler) {
-    case "candidate":
-      return build === "release"
-        ? instantiate(modules.candidate)
-        : bindTesting(modules.candidateTesting);
-    case "poison":
-      return bindTesting(modules.poison);
-    default:
-      return build === "release"
-        ? instantiate(modules.reference)
-        : bindTesting(modules.referenceTesting);
+  // The poison build is a test build, for the release suites too.
+  if (build === "release" && compiler !== "poison") {
+    return instantiate(compiler === "reference" ? modules.reference : modules.candidate);
   }
+
+  const c = await bindTesting(
+    compiler === "candidate"
+      ? modules.candidateTesting
+      : compiler === "poison"
+        ? modules.poison
+        : modules.referenceTesting,
+  );
+  if (pinned && build === "testing") {
+    c.domainPinPolicy(PINNED_MEGABYTES);
+  }
+
+  return c;
 }
 
 /** Fresh instances of the three, as a host makes one, for each suite. */

@@ -2,6 +2,7 @@
 // again from its live ABCs and its log, into a new Domain, a part at a
 // time; what lifetime.zig finds worth it, and what saved.zig loads.
 const std = @import("std");
+const options = @import("options");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
 const domain_ = @import("domain.zig");
@@ -11,6 +12,36 @@ const traits_ = @import("traits.zig");
 const TraitsKind = traits_.TraitsKind;
 const code = @import("../abc/code.zig");
 const lifetime = @import("lifetime.zig");
+
+/// What a rebuild's step did, for the test builds to time each kind of work
+/// (testing/measure.zig): with `phase_steps` set, a step stops before work
+/// of another kind than its first, so that each step is one kind.
+pub const Phase = enum(u8) { none = 0, link = 1, verify = 2, replay = 3 };
+pub var phase_steps = false;
+pub const StepWork = struct {
+    phase: Phase = .none,
+    abcs: u32 = 0,
+    bytes: u64 = 0,
+    verify_cost: u64 = 0,
+    replays: u32 = 0,
+    kept: u32 = 0,
+};
+/// The last step's work.
+pub var last_step: StepWork = .{};
+
+/// Whether work of `phase` ends the step under way, which counts it if not.
+fn stops(work: *StepWork, phase: Phase) bool {
+    if (!options.checks) {
+        return false;
+    }
+
+    if (work.phase == .none) {
+        work.phase = phase;
+        return false;
+    }
+
+    return phase_steps and work.phase != phase;
+}
 
 /// What keeping a log entry of a domain not live weighs, in bytes.
 const KEPT_Weight: u64 = 36;
@@ -88,6 +119,10 @@ pub const Rebuild = struct {
     /// Go on until this call has made about `budget` bytes of garbage, as
     /// AssemblyScript's counts it, and at least one step: whether done.
     pub fn step(self: *Rebuild, budget: u64) Allocator.Error!bool {
+        var work: StepWork = .{};
+        defer if (options.checks) {
+            last_step = work;
+        };
         const dom = self.dom;
         const fresh = self.fresh;
         if (self.done) {
@@ -100,7 +135,7 @@ pub const Rebuild = struct {
             const e = self.entry;
             const at = if (e < dom.logKind.len) dom.logAt.get(e) else count;
             while (self.next < at) : (self.next += 1) {
-                if (spent >= budget) {
+                if (spent >= budget or stops(&work, .link)) {
                     return false;
                 }
 
@@ -109,6 +144,10 @@ pub const Rebuild = struct {
                 }
 
                 spent += dom.abcs.get(self.next).length;
+                if (options.checks) {
+                    work.abcs += 1;
+                    work.bytes += dom.abcs.get(self.next).length;
+                }
             }
 
             if (e == dom.logKind.len) {
@@ -117,7 +156,16 @@ pub const Rebuild = struct {
 
             if (self.verifier) |*verifier| {
                 // A verification under way, from the step before.
-                if (!try verifier.run(@max((budget - @min(spent, budget)) / code.VERIFY_COST, 1))) {
+                if (stops(&work, .verify)) {
+                    return false;
+                }
+
+                const done = try verifier.run(@max((budget - @min(spent, budget)) / code.VERIFY_COST, 1));
+                if (options.checks) {
+                    work.verify_cost += verifier.spent * code.VERIFY_COST;
+                }
+
+                if (!done) {
                     return false;
                 }
 
@@ -142,13 +190,30 @@ pub const Rebuild = struct {
             }
 
             if (state == .evicted or dom.abcs.get(abc) == &lifetime.no_abc) {
+                if (stops(&work, .replay)) {
+                    return false;
+                }
+
                 try keepEntry(fresh, dom, e);
+                if (options.checks) {
+                    work.kept += 1;
+                }
+
                 continue;
             }
 
             if (kind == .verify) {
+                if (stops(&work, .verify)) {
+                    return false;
+                }
+
                 self.verifier = try code.Verifier.init(fresh, self.verifier_arena.allocator(), abc);
-                if (!try self.verifier.?.run(@max((budget - spent) / code.VERIFY_COST, 1))) {
+                const done = try self.verifier.?.run(@max((budget - spent) / code.VERIFY_COST, 1));
+                if (options.checks) {
+                    work.verify_cost += self.verifier.?.spent * code.VERIFY_COST;
+                }
+
+                if (!done) {
                     return false;
                 }
 
@@ -158,8 +223,16 @@ pub const Rebuild = struct {
                 continue;
             }
 
+            if (stops(&work, .replay)) {
+                return false;
+            }
+
             if (!try replay(fresh, dom, e)) {
                 return self.fail();
+            }
+
+            if (options.checks) {
+                work.replays += 1;
             }
         }
 

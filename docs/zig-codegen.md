@@ -263,6 +263,37 @@ Then:
   size before its read fails: the fixed tables are allocated from the
   count, bounded only by the bytes left, and wasm memory never shrinks.
 
+**Measuring for M2.** The test builds measure what M2 is to change
+(`testing/measure.zig`, the test build's own exports):
+
+- `domainMemoryReport`: each table's bytes, and the directories it
+  outgrew; for the tables whose rows have an owner, how many rows are of
+  ABCs not live and how often the owner changes from one row to the
+  next; what live and dead ABCs hold, dead ones split into their parse
+  block, link arrays, rows and the strings only they spell; the domain's
+  arena against what the tables account for; and the page allocator's
+  free runs by length.
+- `domainRebuildPhases` and `domainRebuildStepWork`: a rebuild one kind of
+  work a step (linking, verifying, replaying the log), and what the last
+  step did, for a pause to be split by kind and its longest step found.
+- `domainPinPolicy`: the rebuild policy's memory size pinned, so that its
+  answers follow the weights alone; the parity harness pins it where the
+  reference can, as a change to the allocator changes memory's layout.
+- `domainOutsideFindings`: how many findings were of an ABC outside the
+  finder's chain, which an arena per domain could not keep, and a panic
+  at the next where asked.
+- `domainGapProbe`: each ABC's rows start at the next multiple of a page in
+  every table of ids, past rows no id names (`Rows.skip`), as owner-pure
+  pages would leave them: the probe of what reads ids by their numbers.
+- `zig build oracle` (`build.ts --oracle`): `testing-nofree.wasm`, which
+  never gives back what domains and the global arena free. A build that
+  reuses freed memory must give its output, or it reads what it freed.
+
+`tests/bench/codegen-session.ts --testing` prints all of it a window of
+loads at a time, with each compaction's pause split by kind and its
+longest call, and what the recovery from a panic holds
+(`Codegen.usage().recovery`).
+
 **How an ABC's tables are laid out** (since the idiomatic pass, P1). The
 parse reads what follows the constant pool twice. The first pass counts
 the rows of the tables that grow across entries (each method's

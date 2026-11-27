@@ -303,6 +303,53 @@ pub const Truncated = struct {
     b: u32,
 };
 
+/// The test builds' probe of ids that skip (domainGapProbe): each ABC's rows
+/// start at the next multiple of this in every table of ids, past rows no
+/// id is given, as owner-pure pages of ids would leave; 0 or 1 for none.
+/// A gap's rows are aliases, copies of the row before them, which nothing
+/// names by id; a code path that walks a table's rows in order meets them.
+pub var gap_probe: u32 = 0;
+
+/// The tables a page of ids leaves as they are: those indexed by ABC or by
+/// application domain, and the log, whose entries a rebuild replays in
+/// order, so that an alias would be replayed again, as would the findings
+/// its entries name.
+const not_paged = [_][]const u8{
+    "abcs",          "abcBase",      "abcBuffer",    "abcString",   "abcNs",
+    "abcNsVersion",  "abcDomain",    "abcOwner",     "abcVerified", "abcWeight",
+    "methodStart",   "classStart",   "scriptTraits", "bodyTraits",  "domainParent",
+    "domainDepth",   "domainState",  "domainEvicted", "logKind",    "logAt",
+    "logAbc",        "logA",         "logB",         "foundDomain", "foundKind",
+    "foundUri",      "foundName",    "foundAbc",     "foundAsType", "foundEntry",
+};
+
+/// Whether field type `T` is a Rows table.
+pub fn isRows(comptime T: type) bool {
+    if (@typeInfo(T) != .@"struct") {
+        return false;
+    }
+
+    return @hasDecl(T, "State") and @hasField(T, "shelves");
+}
+
+/// Every table of `tables`, a Domain or its TraitsTable, but those named in
+/// not_paged, grown with rows no id names to the next multiple of `page`.
+fn skipTablesToPage(gpa: Allocator, tables: anytype, page: u32) Allocator.Error!void {
+    const info = @typeInfo(@TypeOf(tables.*)).@"struct";
+    inline for (info.field_names, info.field_types) |name, T| {
+        if (comptime isRows(T)) {
+            @setEvalBranchQuota(100_000);
+            const paged = comptime for (not_paged) |unpaged| {
+                if (std.mem.eql(u8, unpaged, name)) break false;
+            } else true;
+            if (paged) {
+                const rows = &@field(tables, name);
+                try rows.skip(gpa, (page - rows.len % page) % page);
+            }
+        }
+    }
+}
+
 /// The fields the first builtin ABC's link sets (classes.zig), which a
 /// link that fails gives back.
 const builtin_fields = [_][]const u8{
@@ -609,6 +656,10 @@ pub const Domain = struct {
     /// AssemblyScript's are: the strings it interned stay, with its bytes.
     pub fn attach(self: *Domain, abc: *Abc, buffer: []const u8, domain: u32) Allocator.Error!bool {
         const gpa = self.gpa;
+        if (options.checks and gap_probe > 1) {
+            try self.skipToPage(gap_probe);
+        }
+
         const index = self.abcs.len;
         const before = self.rows();
         try self.abcs.push(gpa, abc);
@@ -729,6 +780,12 @@ pub const Domain = struct {
             @as(u64, self.nsType.len) * 24 +
             (@as(u64, self.bindingNs.len) + self.typeNs.len + self.classAbc.len) * 48 +
             @as(u64, self.logKind.len) * 36;
+    }
+
+    /// The probe's skip (gap_probe): every table of ids to the next multiple of `page`.
+    fn skipToPage(self: *Domain, page: u32) Allocator.Error!void {
+        try skipTablesToPage(self.gpa, self, page);
+        try skipTablesToPage(self.gpa, &self.traits, page);
     }
 
     /// Whether ABC `index` is of a live application domain, one neither evicted nor dropped.

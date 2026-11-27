@@ -38,6 +38,10 @@ const max_chunks: u32 = 1 << 18;
 
 /// Whether this is the poison build, and the byte it fills freed memory with.
 pub const poison = options.poison;
+/// Whether this is the oracle build that never gives back what domains and
+/// the global arena free (`zig build oracle`): a build that reuses freed
+/// memory must give its output, or reads what it freed.
+const free_noop = options.free_noop;
 pub const poison_byte: u8 = 0xAA;
 
 const wasm = builtin.cpu.arch.isWasm();
@@ -285,7 +289,10 @@ pub const Pages = struct {
         return .{ .ptr = self, .vtable = &top_vtable };
     }
 
-    const low_vtable: Allocator.VTable = .{ .alloc = allocLow, .resize = resize, .remap = remap, .free = freeRun };
+    const low_vtable: Allocator.VTable = if (free_noop)
+        .{ .alloc = allocLow, .resize = resizeKept, .remap = remapKept, .free = keepRun }
+    else
+        .{ .alloc = allocLow, .resize = resize, .remap = remap, .free = freeRun };
     const top_vtable: Allocator.VTable = .{ .alloc = allocTop, .resize = resize, .remap = remap, .free = freeRun };
 
     fn chunksFor(len: usize) ?u32 {
@@ -331,6 +338,39 @@ pub const Pages = struct {
     fn freeRun(ctx: *anyopaque, memory: []u8, _: Alignment, _: usize) void {
         const self: *Pages = @ptrCast(@alignCast(ctx));
         self.release(self.chunkOf(memory.ptr), chunksFor(memory.len).?);
+    }
+
+    // The oracle build's: a run shrunk or freed keeps its chunks, in use for good.
+    fn resizeKept(ctx: *anyopaque, memory: []u8, _: Alignment, new_len: usize, _: usize) bool {
+        const self: *Pages = @ptrCast(@alignCast(ctx));
+        const count = chunksFor(memory.len).?;
+        const wanted = chunksFor(new_len) orelse return false;
+        return wanted <= count or self.extend(self.chunkOf(memory.ptr), count, wanted);
+    }
+
+    fn remapKept(ctx: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ra: usize) ?[*]u8 {
+        return if (resizeKept(ctx, memory, alignment, new_len, ra)) memory.ptr else null;
+    }
+
+    fn keepRun(_: *anyopaque, _: []u8, _: Alignment, _: usize) void {}
+
+    /// How many runs of free chunks there are below the end of memory, by
+    /// length: `counts[k]` those of 2^k to 2^(k+1) - 1 chunks, the last
+    /// bucket those longer; and how many chunks are free at the end.
+    pub fn freeRuns(self: *const Pages, counts: []u32) u32 {
+        @memset(counts, 0);
+        const at_end = self.freeAtEnd();
+        var run: u32 = 0;
+        for (0..self.chunks - at_end + 1) |i| {
+            if (i < self.chunks - at_end and self.isFree(@intCast(i))) {
+                run += 1;
+            } else if (run > 0) {
+                counts[@min(std.math.log2_int(u32, run), counts.len - 1)] += 1;
+                run = 0;
+            }
+        }
+
+        return at_end;
     }
 };
 
@@ -451,6 +491,17 @@ pub const Arena = struct {
 
     pub fn allocator(self: *Arena) Allocator {
         return .{ .ptr = self, .vtable = &vtable };
+    }
+
+    /// The bytes of the runs the arena holds, their headers and unused ends included.
+    pub fn runBytes(self: *const Arena) u64 {
+        var bytes: u64 = 0;
+        var run = self.newest;
+        while (run) |r| : (run = r.older) {
+            bytes += r.len;
+        }
+
+        return bytes;
     }
 
     const vtable: Allocator.VTable = .{ .alloc = alloc, .resize = resize, .remap = remap, .free = free };

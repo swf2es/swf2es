@@ -9,6 +9,7 @@
 // changes the domain does so all or nothing (Domain.Change): one that runs
 // out of memory leaves it as it was.
 const std = @import("std");
+const options = @import("options");
 const Allocator = std.mem.Allocator;
 const memory = @import("memory.zig");
 const domain_ = @import("avm2/link/domain.zig");
@@ -147,6 +148,9 @@ pub fn domainReset(apiVersion: i32) Allocator.Error!void {
     api_version = version;
     forgetVerified();
     forgetModules();
+    if (options.checks) {
+        outside_findings = 0;
+    }
 }
 
 /// The domain changed by `change`, given its arguments, all or nothing.
@@ -284,10 +288,38 @@ pub fn domainRevive(appDomain: i32, stepped: bool) Allocator.Error!i32 {
 /// it is not the first definition from the root down: the definition ABC
 /// `abc` gives the name, its script's binding by name, or its class as a
 /// type (`asType`). What the domain's later ABCs compile against.
+/// The test builds' count of findings of an ABC outside the finder's chain
+/// since the last reset, which the player never reports and an arena per
+/// domain could not keep (testing/measure.zig), and whether one panics instead.
+pub var outside_findings: u32 = 0;
+pub var strict_findings = false;
+
 pub fn domainFound(appDomain: i32, nsKind: i32, uri: []const u8, name: []const u8, abc: i32, asType: bool) Allocator.Error!void {
+    if (options.checks) {
+        try checkFinding(appDomain, abc);
+    }
+
     abandon();
     forgetVerified();
     try changed(Domain.addFound, .{ @as(u32, @bitCast(appDomain)), domain_.NsType.fromWord(@bitCast(nsKind)), uri, name, @as(u32, @bitCast(abc)), asType });
+}
+
+fn checkFinding(appDomain: i32, abc: i32) Allocator.Error!void {
+    const dom = try domain();
+    const finder = indexIn(appDomain, dom.domainParent.len) orelse return;
+    const index = indexIn(abc, dom.abcs.len) orelse return;
+    const of = dom.abcDomain.get(index);
+    var it = dom.ancestors(finder);
+    while (it.next()) |d| {
+        if (d == of) {
+            return;
+        }
+    }
+
+    outside_findings += 1;
+    if (strict_findings) {
+        @panic("a finding of an ABC outside the finder's chain");
+    }
 }
 
 /// ABC `index` of the domain, or the last added for one below 0; none

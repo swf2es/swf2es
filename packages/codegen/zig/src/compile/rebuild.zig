@@ -188,10 +188,13 @@ pub fn domainCompact(stepped: bool) Allocator.Error!bool {
 
     // Replacing a pending compaction restores its outer limit before we save ours.
     leaveRebuild();
-    // A compaction offered in place must fit inside memory already committed.
+    // A compaction offered in place must fit inside memory already committed,
+    // unless the policy is pinned, when the answer follows the weights alone.
     const pages = memory.pages();
     const limit = pages.limit;
-    pages.limit = pages.chunks;
+    if (!lifetime.pinned()) {
+        pages.limit = pages.chunks;
+    }
     if (domainRebuild(true) catch false) {
         rebuilding.?.previous_limit = limit;
     } else {

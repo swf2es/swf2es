@@ -307,7 +307,9 @@ export interface Codegen {
    * the size of codegen's memory, which grows and never shrinks but when
    * compact moves the domain to a new instance; how many such moves
    * failed, each leaving the domain as it was, rebuilt in place if at all;
-   * and compactStep's moves.
+   * compactStep's moves; and what the recovery from a panic holds outside
+   * codegen's memory: its checkpoint and the inputs journaled since, in
+   * bytes.
    */
   usage(): {
     live: number;
@@ -315,6 +317,7 @@ export interface Codegen {
     memory: number;
     failedMoves: number;
     moves: MoveCounts;
+    recovery: number;
   };
   /** The size of codegen's memory in bytes, as usage gives it: cheap, for a host that shows it often. */
   memoryBytes(): number;
@@ -755,10 +758,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     entries?: Entry[];
   }
   // A move compactStep makes a part at a time: the spare it rebuilds in,
-  // the snapshot it rebuilds, the calls journaled since, and how many of
-  // those the spare has replayed, and where in one; the ABCs whose bytes a revival restored
-  // in it since; the saved ABCs not yet given to it; where it is; and the
-  // slices it has spent catching up.
+  // the snapshot it rebuilds, the calls journaled since, how many of those
+  // the spare has replayed and where in one it is; the ABCs whose bytes a
+  // revival restored in it since; the saved ABCs not yet given to it; its
+  // phase; and the slices it has spent catching up.
   interface Move {
     into: Bound;
     saved: Checkpoint;
@@ -773,6 +776,35 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   }
   const journalDomains = new Map<number, JournalDomain>();
   const journal = new Set<Entry>();
+  // What the checkpoint and the journal hold, their bytes and strings' units twice.
+  const recoveryBytes = () => {
+    let bytes = 0;
+    if (checkpoint) {
+      bytes += checkpoint.state.byteLength;
+      for (const abc of checkpoint.abcs.values()) {
+        bytes += abc.byteLength;
+      }
+    }
+
+    for (const entry of journal) {
+      switch (entry.kind) {
+        case "add":
+          bytes += entry.abc.byteLength;
+          break;
+        case "restore":
+          bytes += entry.bytes.byteLength;
+          break;
+        case "log":
+          bytes += entry.words.byteLength;
+          break;
+        case "found":
+          bytes += (entry.definition.uri.length + entry.definition.name.length) * 2;
+          break;
+      }
+    }
+
+    return bytes;
+  };
   const restores = new Map<number, Entry>();
   const abcDomains: number[] = [];
   // Each ABC's length, by its index, which a replay of its verification takes time in proportion to.
@@ -1310,6 +1342,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         memory,
         failedMoves,
         moves: { ...moves, aborted: { ...moves.aborted } },
+        recovery: recoveryBytes(),
       };
     },
     memoryBytes() {
