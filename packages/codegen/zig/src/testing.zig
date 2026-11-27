@@ -15,6 +15,9 @@ const avm2 = @import("compile.zig");
 const domain = @import("testing/domain.zig");
 const abcs = @import("testing/domain/abcs.zig");
 const link = @import("avm2/link/domain.zig");
+const lifetime = @import("avm2/link/lifetime.zig");
+const rebuild = @import("avm2/link/rebuild.zig");
+const measure = @import("testing/measure.zig");
 
 pub const panic = root.panic;
 
@@ -42,6 +45,42 @@ export fn memoryReserve(chunks: u32) void {
 /// How far memory reaches past the static data, in bytes: only grows.
 export fn memoryReached() u32 {
     return memory.pages().reached();
+}
+
+// What the design of arenas per domain measures (testing/measure.zig).
+
+/// The domain's memory, a line a table and a measure.
+export fn domainMemoryReport() usize {
+    return root.handOut(measure.domainMemoryReport(root.gpa()) catch |err| return root.fail(err));
+}
+
+/// The rebuild policy's memory size pinned to `megabytes`, so that its
+/// answers follow the weights alone, whatever memory's layout; 0 unpins it.
+export fn domainPinPolicy(megabytes: u32) void {
+    lifetime.pinned_size = @as(u64, megabytes) << 20;
+}
+
+/// Whether each step of a rebuild does one kind of work, to time each kind.
+export fn domainRebuildPhases(on: bool) void {
+    rebuild.phase_steps = on;
+}
+
+/// What the last step of a rebuild did (measure.domainRebuildStepWork).
+export fn domainRebuildStepWork() usize {
+    return root.handOut(measure.domainRebuildStepWork(root.gpa()) catch |err| return root.fail(err));
+}
+
+/// How many findings were of an ABC outside the finder's chain; `strict`
+/// makes the next one panic.
+export fn domainOutsideFindings(strict: bool) u32 {
+    avm2.strict_findings = strict;
+    return avm2.outside_findings;
+}
+
+/// Each ABC's rows started at the next multiple of `page` in every table
+/// of ids (link.gap_probe); 0 for none.
+export fn domainGapProbe(page: u32) void {
+    link.gap_probe = page;
 }
 
 /// A panic, as a failed safety check would be, for the wrapper's tests.

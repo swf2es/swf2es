@@ -108,6 +108,36 @@ pub fn Rows(comptime T: type) type {
             return self.len - 1;
         }
 
+        /// `count` rows at the end that no row's id names, each a copy of
+        /// the last (zero where there is none), as a table whose ids skip
+        /// would leave: for the probe of what reads ids by their numbers
+        /// (testing/measure.zig).
+        pub fn skip(self: *Self, gpa: Allocator, count: u32) Allocator.Error!void {
+            for (0..count) |_| {
+                if (self.len == 0) {
+                    _ = try self.addOneZeroed(gpa);
+                } else {
+                    const last = self.get(self.len - 1);
+                    try self.push(gpa, last);
+                }
+            }
+        }
+
+        /// What the table's shelves and its directory take, and what the
+        /// directories it outgrew still take in its arena.
+        pub fn bytes(self: *const Self) u64 {
+            var total: u64 = @as(u64, self.capacity) * @sizeOf([*]T);
+            for (0..self.shelves) |shelf| {
+                total += @as(u64, shelfSize(@intCast(shelf))) * @sizeOf(T);
+            }
+
+            return total;
+        }
+
+        pub fn outgrownBytes(self: *const Self) u64 {
+            return if (self.capacity > 8) @as(u64, self.capacity - 8) * @sizeOf([*]T) else 0;
+        }
+
         /// No rows, the shelves kept for the rows that come next.
         pub fn clearRetainingCapacity(self: *Self) void {
             self.len = 0;
@@ -166,6 +196,31 @@ test "rows never move as the table grows, and each lands where at() finds it" {
             }
         }
     }
+}
+
+test "a skip adds copies of the last row, and bytes counts every shelf and the directory" {
+    const t = try TestPages.init(4 << 20);
+    defer t.deinit();
+    var arena: Arena = .init(t.pages.allocator());
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var rows: Rows(u32) = .{};
+    try rows.skip(gpa, 2);
+    try testing.expectEqual(@as(u32, 2), rows.len);
+    try testing.expectEqual(@as(u32, 0), rows.get(1));
+    try rows.push(gpa, 7);
+    try rows.skip(gpa, 3);
+    try testing.expectEqual(@as(u32, 6), rows.len);
+    try testing.expectEqual(@as(u32, 7), rows.get(5));
+
+    // Shelves of 8 and 16 rows, and a directory of 8.
+    for (0..10) |_| {
+        try rows.push(gpa, 1);
+    }
+
+    try testing.expectEqual(@as(u64, (8 + 16) * 4 + 8 * @sizeOf([*]u32)), rows.bytes());
+    try testing.expectEqual(@as(u64, 0), rows.outgrownBytes());
 }
 
 /// Tables as a domain's will be: rows added to several by one entry, all
