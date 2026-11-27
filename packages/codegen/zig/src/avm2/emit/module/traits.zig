@@ -7,10 +7,12 @@ const Error = Allocator.Error;
 const Diagnostics = @import("../../abc/errors.zig").Diagnostics;
 const SlotIds = @import("../../link/bindings.zig").SlotIds;
 const refs = @import("../refs.zig");
+const C = @import("../../abc/constants.zig");
 const module_ = @import("../module.zig");
 const ModuleEmitter = module_.ModuleEmitter;
-const FILL_SLOTS = module_.FILL_SLOTS;
-const literal = module_.literal;
+
+/// The most slots a traits' fill sets (module.ts tells why).
+const FILL_SLOTS: u32 = 1 << 16;
 
 /// Traits t as { slots, defaults, types, bindings, methods }, resolved
 /// here; or the VerifyError resolving them gives (module.ts tells why).
@@ -357,4 +359,12 @@ pub fn poolIndexOf(self: *ModuleEmitter, id: u32) u32 {
     }
 
     return 0;
+}
+
+/// Whether constant() writes a value of `kind` as a literal, not a namespace the runtime makes.
+fn literal(kind: C.Constant) bool {
+    return switch (kind) {
+        .utf8, .int, .uint, .double, .false, .true, .null => true,
+        else => false,
+    };
 }

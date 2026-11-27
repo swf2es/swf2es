@@ -7,9 +7,12 @@ const Error = Allocator.Error;
 const structure = @import("../structure.zig");
 const method_ = @import("../method.zig");
 const MethodEmitter = method_.MethodEmitter;
-const RESET_END = method_.RESET_END;
-const MAX_HELD = method_.MAX_HELD;
-const MAX_HELD_TEXT = method_.MAX_HELD_TEXT;
+
+/// The length of the end of a reset, ` = void 0;\n`.
+const RESET_END: u32 = 11;
+/// The longest text a register holds, and all of them together, in bytes.
+const MAX_HELD: u32 = 1024;
+const MAX_HELD_TEXT: u32 = 1 << 20;
 
 /// A space, but at the start of a line, as after a block written in place.
 pub fn space(self: *MethodEmitter) Error!void {

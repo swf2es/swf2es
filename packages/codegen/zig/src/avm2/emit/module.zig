@@ -15,7 +15,6 @@ const output = @import("../../output.zig");
 const Output = output.Output;
 const code = @import("../abc/code.zig");
 const Verifier = code.Verifier;
-const C = @import("../abc/constants.zig");
 const domain_ = @import("../link/domain.zig");
 const Domain = domain_.Domain;
 const method_ = @import("method.zig");
@@ -24,9 +23,6 @@ const refs = @import("refs.zig");
 const module_functions = @import("module/functions.zig");
 const module_traits = @import("module/traits.zig");
 const module_classes = @import("module/classes.zig");
-
-/// The most slots a traits' fill sets (module.ts tells why).
-pub const FILL_SLOTS: u32 = 1 << 16;
 
 /// Where step is in a module: verifying its methods, writing F, writing A, or done.
 const PHASE_Verify: u8 = 0;
@@ -348,18 +344,10 @@ pub const ModuleEmitter = struct {
         try o.text(")");
     }
 
-    /// The text `units` and then `tail`, a string of AssemblyScript's, as
-    /// a JavaScript string literal, encoded as its String.UTF8 encodes one:
-    /// WTF-8, a lone surrogate as three bytes of its own.
-    pub fn units(self: *ModuleEmitter, text: []const u16, tail: []const u8) Error!void {
-        const gpa = self.methods.gpa;
-        const bytes = try std.unicode.wtf16LeToWtf8Alloc(gpa, text);
-        try self.out().string(try std.mem.concat(gpa, u8, &.{ bytes, tail }));
-    }
-
     // A factory a method, and the names and errors in it (module/functions.zig).
     const functions = module_functions.functions;
     pub const factory = module_functions.factory;
+    pub const units = module_functions.units;
     pub const nativeArity = module_functions.nativeArity;
     pub const verifyError = module_functions.verifyError;
     pub const errorNumbers = module_functions.errorNumbers;
@@ -385,11 +373,3 @@ pub const ModuleEmitter = struct {
     const scripts = module_classes.scripts;
     const activations = module_classes.activations;
 };
-
-/// Whether constant() writes a value of `kind` as a literal, not a namespace the runtime makes.
-pub fn literal(kind: C.Constant) bool {
-    return switch (kind) {
-        .utf8, .int, .uint, .double, .false, .true, .null => true,
-        else => false,
-    };
-}

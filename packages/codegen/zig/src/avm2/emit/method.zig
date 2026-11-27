@@ -64,11 +64,6 @@ pub fn isConstructor(em: *MethodEmitter, m: u32) bool {
 
 /// The deepest structured code a method is given; one deeper keeps the dispatcher.
 pub const MAX_NESTING: u32 = 500;
-/// The length of the end of a reset, ` = void 0;\n`.
-pub const RESET_END: u32 = 11;
-/// The longest text a register holds, and all of them together, in bytes.
-pub const MAX_HELD: u32 = 1024;
-pub const MAX_HELD_TEXT: u32 = 1 << 20;
 
 /// An entry of a method's T: a class or Vector type, a method of a
 /// primitive's class (filled at run time, `null` in the table), or the

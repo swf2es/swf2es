@@ -251,3 +251,12 @@ pub fn methodName(self: *ModuleEmitter, m: u32) Error![]const u16 {
 
     return &.{};
 }
+
+/// The text `units` and then `tail`, a string of AssemblyScript's, as
+/// a JavaScript string literal, encoded as its String.UTF8 encodes one:
+/// WTF-8, a lone surrogate as three bytes of its own.
+pub fn units(self: *ModuleEmitter, text: []const u16, tail: []const u8) Error!void {
+    const gpa = self.methods.gpa;
+    const bytes = try std.unicode.wtf16LeToWtf8Alloc(gpa, text);
+    try self.out().string(try std.mem.concat(gpa, u8, &.{ bytes, tail }));
+}
