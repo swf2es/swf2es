@@ -756,7 +756,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   }
   // A move compactStep makes a part at a time: the spare it rebuilds in,
   // the snapshot it rebuilds, the calls journaled since, and how many of
-  // those the spare has replayed; the ABCs whose bytes a revival restored
+  // those the spare has replayed, and where in one; the ABCs whose bytes a revival restored
   // in it since; the saved ABCs not yet given to it; where it is; and the
   // slices it has spent catching up.
   interface Move {
@@ -764,6 +764,8 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     saved: Checkpoint;
     entries: Entry[];
     replayed: number;
+    /** Where in the log entry being replayed, a compile's, the spare is. */
+    word: number;
     restored: Set<number>;
     abcs: IterableIterator<[number, Uint8Array]> | null;
     phase: "load" | "abcs" | "rebuild" | "catch up";
@@ -1014,6 +1016,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       saved,
       entries: [],
       replayed: 0,
+      word: 0,
       restored: new Set(),
       abcs: null,
       phase: "load",
@@ -1112,8 +1115,13 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           return "moving";
         }
         case "catch up": {
-          // Entries of domains dropped since are out of the journal (see forgetDropped).
-          while (m.replayed < m.entries.length && !journal.has(m.entries[m.replayed])) {
+          // Entries of domains dropped since are out of the journal (see
+          // forgetDropped), but one half replayed is finished.
+          while (
+            m.word === 0 &&
+            m.replayed < m.entries.length &&
+            !journal.has(m.entries[m.replayed])
+          ) {
             m.replayed++;
           }
 
@@ -1122,7 +1130,26 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
             return "done";
           }
 
-          if (replayOne(into, m.entries[m.replayed++], true)) {
+          // A compile's log a log entry a part, a run of them taking long.
+          const entry = m.entries[m.replayed];
+          if (entry.kind === "log") {
+            const w = entry.words;
+            const i = m.word;
+            if (!into.replayEntry(w[i], w[i + 1], w[i + 2], w[i + 3])) {
+              abortMove("refused");
+              return "none";
+            }
+
+            m.word = i + 4 < w.length ? i + 4 : 0;
+            if (m.word === 0) {
+              m.replayed++;
+            }
+
+            return "moving";
+          }
+
+          m.replayed++;
+          if (replayOne(into, entry, true)) {
             m.phase = "rebuild";
           }
 
@@ -1135,6 +1162,12 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       );
       return "none";
     }
+  };
+  // Whether the move's next part replays a compile's verification of an
+  // ABC, one call of as long as the compile verified it for.
+  const verifiesNext = (m: Move) => {
+    const entry = m.phase === "catch up" ? m.entries[m.replayed] : undefined;
+    return entry?.kind === "log" && entry.words[m.word] === LOG_Verify;
   };
   // What compactStep starts, as compact decides, but that a large domain
   // moves rather than rebuild in place, which would take one call.
@@ -1331,7 +1364,13 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           return progress;
         }
 
-        if (!(finishing && m.phase === "catch up") && deadline.timeRemaining() <= 0) {
+        if (finishing && m.phase === "catch up") {
+          continue;
+        }
+
+        // A compile's verification, replayed whole, starts a slice of its
+        // own, so that it adds to no other part's time.
+        if (verifiesNext(m) || deadline.timeRemaining() <= 0) {
           return "moving";
         }
       }
@@ -1657,6 +1696,8 @@ const WANT_Spare = 3;
  * rebuilds in place, in one call, rather than move a part at a time.
  */
 const IN_PLACE_Live = 4 << 20;
+/** A compile's log entry that verified an ABC: LogKind.verify (avm2/link/domain.zig). */
+const LOG_Verify = 4;
 /** The garbage a part of a move's rebuild makes at most (domainRebuildBudget). */
 const MOVE_PartBudget = 256 << 10;
 /** The slices compactStep catches a move up in before it finishes catching up in one. */
