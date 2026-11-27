@@ -272,10 +272,8 @@ async function run(seed: number): Promise<Counts> {
   const check = (what: string) => {
     for (let i = 0; i < abcs.length; i++) {
       both(`${what}: context ${i}`, (g) => g.context(i));
-      // Not after a rebuild: it leaves out the log entries of the domains let
-      // go of, so its keys part from those of B, which never rebuilds, as a
-      // module cache's keys must (the revision moves too).
-      both(`${what}: keyContext ${i}`, (g) => g.keyContext(i, 0), !COMPACT && !MOVE);
+      // Under MOVE too: a swap keeps the keys of a domain's live ABCs.
+      both(`${what}: keyContext ${i}`, (g) => g.keyContext(i, 0), !COMPACT);
     }
 
     for (let d = 0; d < domains.length; d++) {
@@ -581,7 +579,7 @@ async function run(seed: number): Promise<Counts> {
     } else if (x < 0.95) {
       const i = Math.floor(r() * abcs.length);
       both(`context ${i}`, (g) => g.context(i));
-      both(`keyContext ${i}`, (g) => g.keyContext(i, 0), !COMPACT && !MOVE);
+      both(`keyContext ${i}`, (g) => g.keyContext(i, 0), !COMPACT);
     } else if (COMPACT && process.env.TRANSIENT === "1" && r() < 0.6) {
       ops.push({ op: "child", parent: 0 });
       const made = both("transient child", (g) => g.childDomain(0));
