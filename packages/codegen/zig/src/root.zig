@@ -471,6 +471,8 @@ test {
         @import("avm2/emit/blocks.zig"),
         @import("avm2/emit/instructions.zig"),
         @import("avm2/emit/objects.zig"),
+        @import("avm2/emit/objects/properties.zig"),
+        @import("avm2/emit/objects/calls.zig"),
         @import("avm2/emit/memory.zig"),
         @import("avm2/emit/module.zig"),
     }) |file| {
