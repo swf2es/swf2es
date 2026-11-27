@@ -206,19 +206,30 @@ node tests/golden/run.ts [--abcs] [--update]   # the generated code's digests (l
                               # tests' ABCs, conformance cases with and without line maps, as3pb, AVM1
                               # blocks) against tests/golden/digests.json; --abcs builds the ABCs ASC
                               # makes (kept in tests/golden/abcs/) again, as after a new case
-node tests/parity/run.ts [--reference <ref>] [suite...]   # old against new: a build of <ref>
-                              # (zig-parity-2 by default: the idiomatic pass's baseline since #1227's
-                              # deliberate fix; zig-last-parity is the last AssemblyScript-checked build).
+node tests/parity/run.ts [--reference <ref>] [--deep] [--seed N] [--cases N] [suite...]   # old against new: a build of <ref>
+                              # (zig-parity-3 by default: the end of the idiomatic pass; zig-parity-2 is
+                              # after #1227's deliberate fix, zig-last-parity the last binary checked
+                              # against AssemblyScript's).
                               # The reference is built once by this tree's pinned Zig into
                               # ~/.cache/swf2es/parity/; it and this tree's (built first where its sources
-                              # moved) fed the same calls on 45 suites (libraries, tests' ABCs, Ruffle's
+                              # moved) fed the same calls on 56 suites (libraries, tests' ABCs, Ruffle's
                               # corpus, the oracle's ABCs, mutated and fuzzed inputs, keys, lifetimes,
                               # random exports), byte for byte, and the 0xAA build against this tree's;
                               # every change to the compiler meant to keep its output runs it (not in CI).
-                              # pnpm build first; all 45 run only with the corpus fetched (fetch-ruffle.ts)
+                              # pnpm build first; all 56 run only with the corpus fetched (fetch-ruffle.ts)
                               # and the oracle's cache filled (by pnpm tamarin and pnpm test's conformance
                               # runs); SWF2ES_LOCAL_SWFS adds
-                              # local SWFs, paths separated by ":" (";" on Windows), reported by number
+                              # local SWFs, paths separated by ":" (";" on Windows), reported by number.
+                              # The 11 fuzz-* suites (tests/parity/fuzz/) generate their cases: rejected
+                              # links, bodies, handlers, floats, traits' names, links, the oracle's IR,
+                              # parsing, owners, saved domains and AVM1; their standard size adds about
+                              # three and a half minutes; --deep adds the reviews' exhaustive parts, for
+                              # changes to arenas, saving and loading, and compaction (about five and a
+                              # half); --seed N (1) and --cases N (each suite's random cases) change them.
+                              # Cases seeded from the oracle's cache follow what it holds, so their counts
+                              # differ between hosts; a suite with none of its cache's or corpus's seeds
+                              # says PARTIAL. A throw from this tree's builds fails the run, even one all
+                              # three share, unless it is running out of memory
 node tests/bench/codegen-compile.ts [--reference <ref>] [--runs N]   # compile time of a build of
                               # <ref> against this tree's, interleaved, a warm-up pass each, N even
                               # (8): the libraries, the conformance cases, AVM1 blocks,

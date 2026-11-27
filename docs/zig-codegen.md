@@ -4,9 +4,15 @@ Status: ported. Stage 7 (`zig/stage-7`) swapped the compilers and deleted
 the AssemblyScript one, with no release that kept both; the tag
 `zig-last-parity` is the last commit that has both, where the whole parity
 harness ran, and comments that name `assembly/...` mean its files there.
-`zig-parity-2` (#1227, which fixed a crash on a class with a slot and a
-method of one name, and so changed output on those inputs on purpose) is
-the baseline the idiomatic pass's parity runs against since.
+Three tags mark the baselines: `zig-last-parity`, the last binary held
+to AssemblyScript's byte for byte; `zig-parity-2`, after #1227 fixed a
+crash on a class with a slot and a method of one name, and so changed
+output on those inputs on purpose; and `zig-parity-3`, at the end of the
+idiomatic pass, whose changes on purpose since `zig-parity-2` are in
+reading a saved domain: bytes past its last finding are refused (#1234),
+and a malformed save that would also run out of memory reads as refused
+rather than out of memory (#1233).
+Parity runs against `zig-parity-3` since.
 The port was done on stacked pull requests from stage 0 (`zig/stage-0`,
 on `dev` at 52aac10d, the merge of #1185). The plan was read against
 `dev` at fcecef29 and #1185; the earlier spikes are on local branches,
@@ -566,7 +572,7 @@ behaviour is still tested (Tamarin, the corpus job, determinism, the
 keys and domains tests), but not their bytes. For a refactor of the
 compiler, the tool is the old-against-new harness, `node
 tests/parity/run.ts [--reference <ref>]`: a build of the ref
-(`zig-parity-2` by default) against the tree's, every suite byte for
+(`zig-parity-3` by default) against the tree's, every suite byte for
 byte, as the harness held Zig's to AssemblyScript's; and
 `tests/bench/codegen-compile.ts` for compile time, against the same
 reference.

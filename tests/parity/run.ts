@@ -1,44 +1,47 @@
 // The old-against-new parity harness: a reference build of the compiler,
-// made from a git ref (the tag zig-parity-2 by default, the baseline of the
-// idiomatic pass since #1227 fixed a crash on purpose; zig-last-parity is
-// the last commit that held the Zig compiler to AssemblyScript's byte for
-// byte; reference.ts),
+// made from a git ref (the tag zig-parity-3 by default, at the end of the
+// idiomatic pass; zig-parity-2 is after #1227 fixed a crash on purpose,
+// and zig-last-parity the last commit that held the Zig compiler to
+// AssemblyScript's byte for byte; reference.ts),
 // and the candidate, this tree's build, fed the same calls, their results
 // compared byte for byte; and the candidate's poison build, which fills
 // freed memory with 0xAA, against the candidate, which differ only where
 // output reads memory nothing wrote. A suite runs on the release builds, or
 // on the test builds for the dumps. A case that throws is recorded as its
-// result, so one failure stops nothing. Not a CI job: the golden digests
-// (tests/golden) are CI's; this is the tool for a refactor of the compiler,
-// which must leave every suite the same.
+// result, so one failure stops nothing, and counted: a throw from the
+// candidate or its poison build fails the run even where every build threw
+// the same, as a trap or the harness's own mistake, unless it is the
+// compiler running out of memory, which hostile inputs may make it do. Not
+// a CI job: the golden digests (tests/golden) are CI's; this is the tool
+// for a refactor of the compiler, which must leave every suite the same.
 //
 // The candidate is built first where this tree's sources moved since its
 // modules were built (build.ts). Any suite that differs fails the run; one
 // with nothing to run (no corpus fetched, no ABCs in the oracle's cache, no
-// cases) is reported as skipped, so "all 45 suites the same" means all 45
-// ran. Each build's results go to out/, and where a case's large result (a
-// module) differs, both, with the first line they differ at. Ruffle's corpus
-// is used where it was fetched (tests/player/corpus/fetch-ruffle.ts), the
-// oracle's ABCs where its cache holds them, and SWF2ES_LOCAL_SWFS adds
+// cases) is reported as skipped, so "all 56 suites the same" means all 56
+// ran, and one that ran on fewer of its inputs than it can (a fuzz suite
+// without the oracle's seeds or the corpus) as partial. Each build's
+// results go to out/, and where a case's large result (a module) differs,
+// both, with the first line they differ at. Ruffle's corpus is used where
+// it was fetched (tests/player/corpus/fetch-ruffle.ts), the oracle's ABCs
+// where its cache holds them, and SWF2ES_LOCAL_SWFS adds
 // local SWFs (local.ts), reported by number only.
 //
-//   node tests/parity/run.ts [--reference <ref>] [suite...]
+// The fuzz-* suites (fuzz/) generate their cases: a standard size that adds
+// about three and a half minutes to a run, or with --deep the exhaustive
+// parts of the reviews that wrote them too, for changes to arenas, saving
+// and loading, and compaction; --seed and --cases set their numbers.
+//
+//   node tests/parity/run.ts [--reference <ref>] [--deep] [--seed <n>] [--cases <n>] [suite...]
 import "./guard.ts";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shellToplevelLibrary } from "../../packages/cli/dist/shell-toplevel-library.js";
 import { AIR_API_VERSION, API_VERSION } from "../../packages/codegen/dist/index.js";
-import { type CodegenExports, instantiate } from "../../packages/codegen/dist/zig.js";
-import {
-  isAs3,
-  readActions,
-  readDoAbc,
-  readSwf,
-  type Swf,
-} from "../../packages/format/dist/index.js";
+import { instantiate } from "../../packages/codegen/dist/zig.js";
+import { readDoAbc, readSwf, type Swf } from "../../packages/format/dist/index.js";
 import {
   airLibrary,
   builtinLibrary,
@@ -52,69 +55,13 @@ import { linkCases, resolveCases } from "../unit/codegen/link-cases.ts";
 import { richAbc } from "../unit/codegen/rich-abc.ts";
 import { bindTesting, testingModule } from "../unit/codegen/testing-module.ts";
 import { verifyErrorAbcs } from "../unit/codegen/verify-errors.ts";
-import { localSwfs } from "./local.ts";
+import { fuzzSuites } from "./fuzz/index.ts";
+import { localAvm1, localSwfs, noOracle, oracleDir } from "./local.ts";
 import { candidateBuild, referenceBuild } from "./reference.ts";
+import { type Compiler, outOfMemory, Results, type Suite } from "./suite.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const out = fileURLToPath(new URL("out/", import.meta.url));
-
-/**
- * A suite's results: a line a case, large results by their digests. The
- * bytes of a large result are kept only for the cases named in `capture`,
- * which a second run asks for where the digests differ, so that a suite
- * of a corpus does not hold every module of three compilers.
- */
-class Results {
-  readonly lines: string[] = [];
-  /** Each line's case name, which a large result's bytes are kept by. */
-  readonly names: string[] = [];
-  readonly blobs = new Map<string, Uint8Array>();
-
-  readonly capture: ReadonlySet<string>;
-  /** Which build's: reference, candidate or poison. */
-  readonly compiler: string;
-
-  constructor(compiler: string, capture: ReadonlySet<string> = new Set()) {
-    this.compiler = compiler;
-    this.capture = capture;
-  }
-
-  /** Case `name`'s result, or what it threw. */
-  case(name: string, run: () => string | number | boolean): void {
-    this.names.push(name);
-    try {
-      this.lines.push(`${name}: ${run()}`);
-    } catch (error) {
-      const e = error as Error;
-      this.lines.push(`${name}: threw ${e?.name}: ${e?.message}`);
-    }
-  }
-
-  /** A large result, as its length and digest; its bytes too where they are asked for. */
-  blob(name: string, bytes: Uint8Array): string {
-    if (this.capture.has(name)) {
-      this.blobs.set(name, bytes.slice());
-    }
-
-    return `${bytes.length} ${createHash("sha256").update(bytes).digest("hex")}`;
-  }
-}
-
-/** Either build, bound; the test builds' exports beyond are reached by name. */
-// biome-ignore lint/suspicious/noExplicitAny: the test builds' exports are typed by their signatures alone
-type Compiler = CodegenExports & Record<string, any>;
-
-interface Suite {
-  name: string;
-  /** Why the suite cannot run here, if it cannot: one of what only some hosts have, which the ratchet leaves out. */
-  unavailable?: () => string | null;
-  /** The release builds, or the test builds with their dumps. */
-  build: "release" | "testing";
-  /** The exports it calls. */
-  needs: string[];
-  /** Its cases on `compiler`; `fresh` makes another instance of the same compiler, for a case that may kill one. */
-  run(compiler: Compiler, results: Results, fresh: () => Promise<Compiler>): void | Promise<void>;
-}
 
 /** The ABCs there are without the oracle: the libraries the player ships, and the tests' own. */
 function abcs(): [string, Uint8Array][] {
@@ -292,27 +239,6 @@ function avm1(c: Compiler, r: Results, swf: Avm1Swf): void {
   r.case(`${name}: released`, () => {
     c.actionsRelease(7);
     return `${c.actionsHeldCount()} ${c.actionsHeldUnitBytes(7, version, 0, 0, 0, false)}`;
-  });
-}
-
-/** The local SWFs (local.ts), read once, up front. */
-const locals = localSwfs();
-
-/** The local SWFs' AVM1 action blocks. */
-function localAvm1(): Avm1Swf[] {
-  return locals.flatMap((swf, i) => {
-    const { version, blocks } = readActions(swf);
-    return isAs3(swf) || blocks.length === 0
-      ? []
-      : [
-          {
-            name: `local ${i}`,
-            bytes: swf.bytes,
-            version,
-            offsets: Int32Array.from(blocks, (b) => b.offset),
-            lengths: Int32Array.from(blocks, (b) => b.length),
-          },
-        ];
   });
 }
 
@@ -725,7 +651,7 @@ const corpus = new URL("../player/corpus/ruffle/tests/tests/swfs/", import.meta.
 
 /** Why the SWF suites have nothing to run, if they have not: neither the corpus nor a local SWF. */
 const noSwfs = () =>
-  existsSync(corpus) || locals.length > 0
+  existsSync(corpus) || localSwfs().length > 0
     ? null
     : "no corpus fetched (tests/player/corpus/fetch-ruffle.ts) and no SWF2ES_LOCAL_SWFS";
 
@@ -744,7 +670,7 @@ function swfAbcs(): [string, Uint8Array][] {
     }
   }
 
-  for (const [i, swf] of locals.entries()) {
+  for (const [i, swf] of localSwfs().entries()) {
     swfs.push([`local ${i}`, swf]);
   }
 
@@ -1006,29 +932,6 @@ function mutatedLinks(count: number): [string, Uint8Array][] {
 
   return found;
 }
-
-/** The ABCs ASC compiled for the oracle (Tamarin's tests, the conformance cases), where this host keeps them. */
-function oracleDir(): string {
-  const cache = process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache");
-  return process.env.SWF2ES_ORACLE_CACHE ?? join(cache, "swf2es", "oracle");
-}
-
-/** Why the oracle suites have nothing to run, if they have not. */
-const noOracle = () => {
-  const dir = oracleDir();
-  const any =
-    existsSync(dir) &&
-    readdirSync(dir).some((sub) => {
-      try {
-        return readdirSync(join(dir, sub)).some((f) => f.endsWith(".abc"));
-      } catch {
-        return false;
-      }
-    });
-  return any
-    ? null
-    : `no ABCs in the oracle's cache (${dir === oracleDir() ? "~/.cache/swf2es/oracle or SWF2ES_ORACLE_CACHE" : ""})`;
-};
 
 function oracleAbcs(): [string, [string, Uint8Array][]][] {
   const found: [string, [string, Uint8Array][]][] = [];
@@ -1951,6 +1854,49 @@ const LINK_EXPORTS = [
   "domainTraitsCount",
 ];
 
+/** The options that take a value, and those that do not. */
+const VALUED = ["--reference", "--seed", "--cases"];
+const args = process.argv.slice(2);
+/** Refuses the command line, saying why, without a stack trace. */
+const refuse = (why: string): never => {
+  console.log(
+    `parity: ${why}\n  node tests/parity/run.ts [--reference <ref>] [--deep] [--seed <n>] [--cases <n>] [suite...]`,
+  );
+  process.exit(1);
+};
+const option = (name: string): string | undefined => {
+  const at = args.indexOf(name);
+  if (at < 0) {
+    return undefined;
+  }
+
+  const value = args[at + 1];
+  if (value === undefined || value.startsWith("--")) {
+    refuse(`${name} needs a value`);
+  }
+
+  return value;
+};
+const number = (name: string): number | undefined => {
+  const value = option(name);
+  if (value !== undefined && !/^\d+$/.test(value)) {
+    refuse(`${name} needs a number`);
+  }
+
+  return value === undefined ? undefined : Number(value);
+};
+const fuzz = {
+  deep: args.includes("--deep"),
+  seed: number("--seed") ?? 1,
+  cases: number("--cases"),
+};
+const strange = args.filter(
+  (arg) => arg.startsWith("--") && arg !== "--deep" && !VALUED.includes(arg),
+);
+if (strange.length > 0) {
+  refuse(`no option ${strange.join(", ")}`);
+}
+
 const SUITES: Suite[] = [
   {
     name: "version",
@@ -2591,16 +2537,11 @@ const SUITES: Suite[] = [
       libraries(c, r, AIR_API_VERSION, [...fp, ["air", airLibrary]]);
     },
   },
+  ...fuzzSuites(fuzz),
 ];
 
-const args = process.argv.slice(2);
-const at = args.indexOf("--reference");
-const ref = at >= 0 ? args[at + 1] : "zig-parity-2";
-if (!ref) {
-  throw new Error("--reference needs a git ref");
-}
-
-const wanted = args.filter((arg, i) => arg !== "--reference" && args[i - 1] !== "--reference");
+const ref = option("--reference") ?? "zig-parity-3";
+const wanted = args.filter((arg, i) => !arg.startsWith("--") && !VALUED.includes(args[i - 1]));
 const unknown = wanted.filter((name) => !SUITES.some((suite) => suite.name === name));
 if (unknown.length > 0) {
   console.log(
@@ -2721,6 +2662,7 @@ mkdirSync(out, { recursive: true });
 const report: Record<string, string> = {};
 const selected = SUITES.filter((s) => wanted.length === 0 || wanted.includes(s.name));
 const skipped: string[] = [];
+const partials: string[] = [];
 let ran = 0;
 let cases = 0;
 for (const suite of selected) {
@@ -2740,6 +2682,7 @@ for (const suite of selected) {
     continue;
   }
 
+  const started = performance.now();
   const results: Record<string, Results> = {};
   for (const [compiler, made] of Object.entries(await instances(suite.build))) {
     results[compiler] = new Results(compiler);
@@ -2769,18 +2712,47 @@ for (const suite of selected) {
     }
   }
 
+  // A throw is a case's result, but only running out of memory is one the candidate may give.
+  const traps = (["candidate", "poison"] as const).flatMap((compiler) =>
+    results[compiler].throws
+      .filter(([, thrown]) => !outOfMemory(thrown))
+      .map(([name, thrown]) => `${compiler}, ${name}: ${thrown}`),
+  );
+  const problems = [...new Set(Object.values(results).flatMap((r) => r.problems))];
+  const thrown = ["reference", "candidate", "poison"].map(
+    (compiler) => new Set(results[compiler].throws.map(([name]) => name)).size,
+  );
+  const throwing = thrown.some(Boolean)
+    ? thrown[0] === thrown[1] && thrown[1] === thrown[2]
+      ? `, ${thrown[0]} cases threw`
+      : `, cases threw: reference ${thrown[0]}, candidate ${thrown[1]}, poison ${thrown[2]}`
+    : "";
+  const { inputs, partial } = results.reference;
+  const about = `${inputs.length ? `; ${inputs.join("; ")}` : ""}${partial.length ? `; PARTIAL (${partial.join("; ")})` : ""}`;
   const count = results.reference.lines.length;
-  if (mismatches.length > 0) {
-    report[suite.name] = "differs";
-    console.log(`  ${suite.name}: ${mismatches.join("\n  ")}`);
+  if (mismatches.length > 0 || traps.length > 0 || problems.length > 0) {
+    report[suite.name] =
+      mismatches.length > 0 ? "differs" : traps.length > 0 ? "threw" : "too few inputs";
+    const shown = traps.slice(0, 5).map((t) => `threw, not out of memory: ${t}`);
+    if (traps.length > shown.length) {
+      shown.push(`and ${traps.length - shown.length} more throws`);
+    }
+
+    console.log(`  ${suite.name}: ${[...mismatches, ...shown, ...problems].join("\n  ")}`);
     failed++;
   } else if (count === 0) {
     report[suite.name] = "skipped: no cases";
     console.log(`  ${suite.name}: SKIPPED (no cases)`);
     skipped.push(suite.name);
   } else {
-    report[suite.name] = `same, ${count} cases`;
-    console.log(`  ${suite.name}: ${report[suite.name]}`);
+    report[suite.name] = `same, ${count} cases${throwing}${about}`;
+    console.log(
+      `  ${suite.name}: ${report[suite.name]} (${((performance.now() - started) / 1000).toFixed(0)} s)`,
+    );
+    if (partial.length > 0) {
+      partials.push(suite.name);
+    }
+
     ran++;
     cases += count;
   }
@@ -2791,7 +2763,7 @@ const all = ran === SUITES.length ? `all ${ran} suites` : `${ran} of ${SUITES.le
 console.log(
   failed > 0
     ? `parity: ${failed} failed; ${ran} the same, ${skipped.length} skipped`
-    : `parity: ${all} the same, ${cases} cases${skipped.length ? `; skipped: ${skipped.join(", ")}` : ""}`,
+    : `parity: ${all} the same, ${cases} cases${skipped.length ? `; skipped: ${skipped.join(", ")}` : ""}${partials.length ? `; partial: ${partials.join(", ")}` : ""}`,
 );
 if (failed > 0) {
   process.exitCode = 1;
