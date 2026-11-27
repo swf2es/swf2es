@@ -147,6 +147,9 @@ pub fn domainReset(apiVersion: i32) Allocator.Error!void {
     api_version = version;
     forgetVerified();
     forgetModules();
+    if (options.checks) {
+        outside_findings = 0;
+    }
 }
 
 /// The domain changed by `change`, given its arguments, all or nothing.
@@ -284,9 +287,9 @@ pub fn domainRevive(appDomain: i32, stepped: bool) Allocator.Error!i32 {
 /// it is not the first definition from the root down: the definition ABC
 /// `abc` gives the name, its script's binding by name, or its class as a
 /// type (`asType`). What the domain's later ABCs compile against.
-/// The test builds' count of findings of an ABC outside the finder's chain,
-/// which the player never reports and an arena per domain could not keep
-/// (testing/measure.zig), and whether one panics instead.
+/// The test builds' count of findings of an ABC outside the finder's chain
+/// since the last reset, which the player never reports and an arena per
+/// domain could not keep (testing/measure.zig), and whether one panics instead.
 pub var outside_findings: u32 = 0;
 pub var strict_findings = false;
 

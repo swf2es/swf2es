@@ -88,6 +88,7 @@ const testing_exports = exports ++ [_][]const u8{
     "domainRebuildPhases",
     "domainRebuildStepWork",
     "domainOutsideFindings",
+    "domainStrictFindings",
     "domainGapProbe",
     "testingPanic",
     "testingOverflow",

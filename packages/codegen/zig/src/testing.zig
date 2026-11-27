@@ -70,11 +70,14 @@ export fn domainRebuildStepWork() usize {
     return root.handOut(measure.domainRebuildStepWork(root.gpa()) catch |err| return root.fail(err));
 }
 
-/// How many findings were of an ABC outside the finder's chain; `strict`
-/// makes the next one panic.
-export fn domainOutsideFindings(strict: bool) u32 {
-    avm2.strict_findings = strict;
+/// How many findings since the last reset were of an ABC outside the finder's chain.
+export fn domainOutsideFindings() u32 {
     return avm2.outside_findings;
+}
+
+/// Whether the next finding of an ABC outside the finder's chain panics.
+export fn domainStrictFindings(strict: bool) void {
+    avm2.strict_findings = strict;
 }
 
 /// Each ABC's rows started at the next multiple of `page` in every table

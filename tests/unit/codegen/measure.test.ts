@@ -111,19 +111,36 @@ test("a finding of an ABC outside the finder's chain is counted, and panics when
   assert.equal(t.domainOutsideFindings(), 0);
   t.domainFound(0, 0, "", "A", 1, true);
   assert.equal(t.domainOutsideFindings(), 1);
-  t.domainOutsideFindings(true);
+  t.domainStrictFindings(true);
   assert.throws(() => t.domainFound(0, 0, "", "A", 1, true), /outside the finder's chain/);
+
+  // A reset counts afresh.
+  const fresh = await loadTesting(TESTED);
+  fresh.domainReset(SWF_31);
+  fresh.domainAdd(builtinLibrary, true);
+  fresh.domainAdd(layered, false, fresh.domainChild(0));
+  fresh.domainFound(0, 0, "", "A", 1, true);
+  assert.equal(fresh.domainOutsideFindings(), 1);
+  fresh.domainReset(SWF_31);
+  assert.equal(fresh.domainOutsideFindings(), 0);
 });
 
-test("with ids that skip, every ABC still links and compiles", async () => {
+test("with ids that skip, every ABC still links and compiles, and a rebuild keeps the log", async () => {
   const t = await loadTesting(TESTED);
   t.domainGapProbe(64);
   t.domainReset(SWF_31);
   assert.equal(t.domainAdd(builtinLibrary, true), 0);
   assert.equal(t.domainAdd(layered, false, t.domainChild(0)), 0);
-  assert.notEqual(t.domainModule("", -1, false), "");
+  const module = t.domainModule("", -1, false);
+  assert.notEqual(module, "");
   // The second ABC's one class after the first's, from the next multiple of 64.
-  const classAbc = t.domainMemoryReport().match(/^rows classAbc len=(\d+)/m);
-  assert.ok(classAbc);
-  assert.equal(Number(classAbc[1]) % 64, 1);
+  const length = (table: string) =>
+    Number(new RegExp(`^rows ${table} len=(\\d+)`, "m").exec(t.domainMemoryReport())?.[1]);
+  assert.equal(length("classAbc") % 64, 1);
+
+  // The log is not paged, so that a rebuild replays no entry twice.
+  const log = length("logKind");
+  assert.ok(t.domainRebuild(false));
+  assert.equal(length("logKind"), log);
+  assert.equal(t.domainModule("", -1, false), module);
 });

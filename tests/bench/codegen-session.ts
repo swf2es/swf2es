@@ -73,7 +73,7 @@ interface Raw {
   domainMemoryReport?(): number;
   domainRebuildPhases?(on: boolean): void;
   domainRebuildStepWork?(): number;
-  domainOutsideFindings?(strict: boolean): number;
+  domainOutsideFindings?(): number;
 }
 /** What a call into `exports` handed out, as text. */
 const text = (exports: Raw, address: number) =>
@@ -497,7 +497,7 @@ if (testing) {
   }
 
   // raw is set inside the wrapped exports, which TypeScript does not follow.
-  const outside = (raw as Raw | null)?.domainOutsideFindings?.(false) ?? 0;
+  const outside = (raw as Raw | null)?.domainOutsideFindings?.() ?? 0;
   console.log(`  findings of an ABC outside the finder's chain: ${outside}`);
   if (fullReport) {
     console.log(report());

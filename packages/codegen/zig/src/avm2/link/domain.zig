@@ -306,15 +306,21 @@ pub const Truncated = struct {
 /// The test builds' probe of ids that skip (domainGapProbe): each ABC's rows
 /// start at the next multiple of this in every table of ids, past rows no
 /// id is given, as owner-pure pages of ids would leave; 0 or 1 for none.
+/// A gap's rows are aliases, copies of the row before them, which nothing
+/// names by id; a code path that walks a table's rows in order meets them.
 pub var gap_probe: u32 = 0;
 
-/// The tables indexed by ABC or by application domain, whose numbers a
-/// page of ids leaves as they are.
+/// The tables a page of ids leaves as they are: those indexed by ABC or by
+/// application domain, and the log, whose entries a rebuild replays in
+/// order, so that an alias would be replayed again, as would the findings
+/// its entries name.
 const not_paged = [_][]const u8{
-    "abcs",          "abcBase",      "abcBuffer",   "abcString",    "abcNs",
-    "abcNsVersion",  "abcDomain",    "abcOwner",    "abcVerified",  "abcWeight",
+    "abcs",          "abcBase",      "abcBuffer",    "abcString",   "abcNs",
+    "abcNsVersion",  "abcDomain",    "abcOwner",     "abcVerified", "abcWeight",
     "methodStart",   "classStart",   "scriptTraits", "bodyTraits",  "domainParent",
-    "domainDepth",   "domainState",  "domainEvicted",
+    "domainDepth",   "domainState",  "domainEvicted", "logKind",    "logAt",
+    "logAbc",        "logA",         "logB",         "foundDomain", "foundKind",
+    "foundUri",      "foundName",    "foundAbc",     "foundAsType", "foundEntry",
 };
 
 /// Whether field type `T` is a Rows table.

@@ -185,8 +185,6 @@ fn inChain(dom: *const Domain, d: u32, top: u32, bottom: u32) bool {
     return false;
 }
 
-/// The size of wasm memory, as AssemblyScript's memory.size() << 16 gives it;
-/// natively, for the tests, of the chunks reached.
 /// The test builds' memory size for the policy, pinned (domainPinPolicy)
 /// so that its answers follow the weights alone, the same whatever the
 /// layout of memory: 0 where the real one counts.
@@ -197,6 +195,8 @@ pub fn pinned() bool {
     return options.checks and pinned_size != 0;
 }
 
+/// The size of wasm memory, as AssemblyScript's memory.size() << 16 gives it;
+/// natively, for the tests, of the chunks reached; or the size pinned.
 pub fn memorySize() u64 {
     if (pinned()) {
         return pinned_size;

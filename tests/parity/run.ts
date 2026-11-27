@@ -2571,8 +2571,9 @@ const has = {
 // The test builds' rebuild policy pinned to a memory of this size, so that
 // whether a compaction is due follows the weights alone and not memory's
 // layout, which a change to the allocator may change; only where the
-// reference can pin it too.
-const PINNED_MEGABYTES = 64;
+// reference can pin it too. Near what the suites' instances reach, so
+// that the policy answers as it would for them.
+const PINNED_MEGABYTES = 8;
 const pinned = [modules.referenceTesting, modules.candidateTesting].every((m) =>
   exported(m).has("domainPinPolicy"),
 );
