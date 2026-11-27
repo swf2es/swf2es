@@ -96,7 +96,7 @@ export class Code {
    * (Codegen.compactStep) while loads go on, and this asks again while it
    * is moving. An idle callback that comes on its timeout, the page busy,
    * gets one short slice, at most one a timeout; without
-   * requestIdleCallback (node, workers) each slice is a short timer's.
+   * requestIdleCallback (Safari, workers, node) a timer gives one as often.
    */
   private compactSoon(moving = false): void {
     if (this.compacting) {
@@ -123,7 +123,7 @@ export class Code {
     if (idle) {
       idle(compact, { timeout: moving ? COMPACT_MovingTimeout : 1000 });
     } else {
-      setTimeout(compact, moving ? COMPACT_Frame : 0);
+      setTimeout(compact, moving ? COMPACT_MovingTimeout : 0);
     }
   }
   /**
@@ -1018,12 +1018,11 @@ interface IdleDeadlineLike {
 /** The milliseconds a compaction's slice takes when the page is not idle, or has no idle callbacks. */
 const COMPACT_Slice = 6;
 /**
- * The idle callback's timeout while the compiler moves its domain: a busy
- * page gives a move one slice this often, a few percent of its time.
+ * The idle callback's timeout while the compiler moves its domain, and
+ * without idle callbacks the timer's: a busy page gives a move one slice
+ * this often, a few percent of its time.
  */
 const COMPACT_MovingTimeout = 100;
-/** Without idle callbacks, the milliseconds between a move's slices: one slice a frame at most. */
-const COMPACT_Frame = 16;
 
 /**
  * Whether `entry` is a module and a log of the lengths stored with them: a

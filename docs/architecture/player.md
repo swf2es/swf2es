@@ -687,7 +687,7 @@ instance a part at a time while loads go on, and `Code` asks again while
 it is moving, each idle callback's time, or 6 ms when the callback comes
 on its timeout, the page busy, which is 100 ms while a move is under
 way, so that a busy page gives it a few percent of its time; with no
-idle callbacks, a 6 ms slice a timer of 16. The compiler's memory then holds
+idle callbacks, as in Safari and workers, a timer gives one as often. The compiler's memory then holds
 the live domains' ABCs, not every ABC loaded since the last collection.
 Over 8000 loads of a large application's small SWFs, none collected,
 its memory stayed at the 128 MB compiling the main SWF had grown it to,

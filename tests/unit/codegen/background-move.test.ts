@@ -201,6 +201,19 @@ async function twin(calls: number) {
   return outcome(c, d.added);
 }
 
+/** What usage().moves.aborted is with no move given up. */
+const NO_ABORTS = { spare: 0, refused: 0, unjournaled: 0, superseded: 0 };
+
+/** compactStep with no time until the move under way is done or given up: what it ended with. */
+function finish(c: Codegen): string {
+  let progress = "moving";
+  while (progress === "moving") {
+    progress = c.compactStep(NO_TIME);
+  }
+
+  return progress;
+}
+
 /** A spare made: instantiating is asynchronous. */
 const spareMade = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -340,8 +353,10 @@ for (const [name, kind, skip] of [
     assert.equal(usage.moves.aborted[kind === "refuse" ? "refused" : "spare"], 1);
     assert.equal(usage.failedMoves, 1);
     assert.equal(state.fault, null, "the fault was injected");
+    // Backed off: no move starts again on the next drop or eviction.
+    assert.equal(c.compactStep(NO_TIME), "none");
     // The old instance goes on as it was, and a later move completes.
-    for (; calls < 20; calls++) {
+    for (; calls < 60; calls++) {
       call(c, d, calls);
     }
 
@@ -351,6 +366,104 @@ for (const [name, kind, skip] of [
     assert.deepEqual(outcome(c, d.added), await twin(calls));
   });
 }
+
+// The review's sequences: evictions and revivals during a move, before and
+// after its snapshot, of domains dropped before or after its swap.
+test("a domain live at the snapshot, evicted and revived around another's revival, moves", async (t) => {
+  instrument(t);
+  const c = await createCodegen(module);
+  const twinned = await createCodegen(module);
+  const runs = [c, twinned].map((g) => {
+    const d = setUp(g);
+    const live = g.childDomain(0);
+    assert.equal(g.add(script([0x24, 9, 0x48]), false, live), 0);
+    g.compileModule([], d.added);
+    return { ...d, live, index: d.added++ };
+  });
+  await startMove(c);
+  c.compactStep(NO_TIME);
+  for (const [g, d] of [c, twinned].map((g, i) => [g, runs[i]] as const)) {
+    g.evictDomain(d.live);
+    g.reviveDomain(d.evicted, new Map([[3, script([0x24, 7, 0x48])]]));
+    g.reviveDomain(d.live, new Map([[d.index, script([0x24, 9, 0x48])]]));
+  }
+
+  assert.equal(finish(c), "done");
+  assert.deepEqual(c.usage().moves.aborted, NO_ABORTS);
+  assert.deepEqual(outcome(c, runs[0].added), outcome(twinned, runs[1].added));
+});
+
+test("a domain made, evicted and revived during the move, around another's revival, moves", async (t) => {
+  instrument(t);
+  const c = await createCodegen(module);
+  const d = setUp(c);
+  await startMove(c);
+  c.compactStep(NO_TIME);
+  const made = c.childDomain(0);
+  assert.equal(c.add(script([0x24, 9, 0x48]), false, made), 0);
+  const index = d.added++;
+  c.compileModule([], index);
+  c.evictDomain(made);
+  c.reviveDomain(d.evicted, new Map([[3, script([0x24, 7, 0x48])]]));
+  c.reviveDomain(made, new Map([[index, script([0x24, 9, 0x48])]]));
+  assert.equal(finish(c), "done");
+  assert.deepEqual(c.usage().moves.aborted, NO_ABORTS);
+});
+
+for (const when of ["before catch-up", "after the swap"]) {
+  test(`a domain revived during the move and dropped ${when} moves and recovers`, async (t) => {
+    instrument(t);
+    const c = await createCodegen(module);
+    const twinned = await createCodegen(module);
+    const d = setUp(c);
+    const e = setUp(twinned);
+    await startMove(c);
+    c.compactStep(NO_TIME);
+    for (const [g, x] of [
+      [c, d],
+      [twinned, e],
+    ] as const) {
+      g.reviveDomain(x.evicted, new Map([[3, script([0x24, 7, 0x48])]]));
+      if (when === "before catch-up") {
+        g.dropDomain(x.evicted);
+      }
+    }
+
+    assert.equal(finish(c), "done");
+    if (when === "after the swap") {
+      c.dropDomain(d.evicted);
+      twinned.dropDomain(e.evicted);
+    }
+
+    // Recovery from the move's checkpoint and the calls since.
+    assert.equal(c.add(PANIC), 1107);
+    assert.deepEqual(c.usage().moves.aborted, NO_ABORTS);
+    assert.deepEqual(outcome(c, d.added), outcome(twinned, e.added));
+  });
+}
+
+test("a revival the host gets wrong during a move leaves the move to complete", async (t) => {
+  instrument(t);
+  const c = await createCodegen(module);
+  const twinned = await createCodegen(module);
+  const d = setUp(c);
+  const e = setUp(twinned);
+  await startMove(c);
+  c.compactStep(NO_TIME);
+  for (const [g, x] of [
+    [c, d],
+    [twinned, e],
+  ] as const) {
+    // Not evicted: refused, and nothing journaled.
+    assert.throws(() => g.reviveDomain(x.kept, new Map()));
+    // Evicted, its ABC not given though the move's spare let go of it: given later.
+    g.reviveDomain(x.evicted, new Map([[3, script([0x24, 7, 0x48])]]));
+  }
+
+  assert.equal(finish(c), "done");
+  assert.deepEqual(c.usage().moves.aborted, NO_ABORTS);
+  assert.deepEqual(outcome(c, d.added), outcome(twinned, e.added));
+});
 
 test("a large domain wanted in place moves, and is rebuilt in place once a move is refused", async (t) => {
   const state = instrument(t);
@@ -374,7 +487,7 @@ test("a large domain wanted in place moves, and is rebuilt in place once a move 
 test("a call that cannot be journaled gives the move up", async (t) => {
   const state = instrument(t);
   const c = await createCodegen(module);
-  const d = { ...setUp(c), made: [] as number[] };
+  setUp(c);
   await startMove(c);
   c.compactStep(NO_TIME);
   // A compile whose log could not be read: the spare could not replay it.
@@ -383,10 +496,14 @@ test("a call that cannot be journaled gives the move up", async (t) => {
   assert.equal(c.compactStep(NO_TIME), "none");
   assert.equal(c.usage().moves.aborted.unjournaled, 1);
   assert.equal(c.usage().failedMoves, 0);
+  // Backed off: no move starts again on the next drop or eviction.
+  assert.equal(c.compactStep(NO_TIME), "none");
   // A finding outside the finder's chain, which is not journaled.
-  await startMove(c);
-  c.found({ domain: d.kept, nsKind: 0, uri: "", name: "x", abc: 3, asType: false });
-  assert.equal(c.usage().moves.aborted.unjournaled, 2);
+  const other = await createCodegen(module);
+  const e = setUp(other);
+  await startMove(other);
+  other.found({ domain: e.kept, nsKind: 0, uri: "", name: "x", abc: 3, asType: false });
+  assert.equal(other.usage().moves.aborted.unjournaled, 1);
 });
 
 test("a reset meanwhile supersedes the move", async (t) => {

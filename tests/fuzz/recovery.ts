@@ -281,7 +281,35 @@ async function run(seed: number): Promise<Counts> {
   };
 
   start();
+  // Under MOVE, a move given up only where a fault was injected: a panic of
+  // the spare, or of the old instance (or a reset after one), or a
+  // revival that rebuilt the old instance in place; never refused, and
+  // never for a call not journaled but with ANY_FOUND.
+  let seenAborts = { ...a.usage().moves.aborted };
+  let opsBefore = ops.length;
+  const audit = (what: string, spareFaulted: boolean) => {
+    const now = a.usage().moves.aborted;
+    for (const why of ["spare", "refused", "unjournaled", "superseded"] as const) {
+      if (now[why] > seenAborts[why]) {
+        const faulted =
+          why === "superseded"
+            ? /^(panic|revive)/.test(what)
+            : why === "spare"
+              ? spareFaulted
+              : why === "unjournaled" && process.env.ANY_FOUND === "1";
+        assert.ok(faulted, `seed ${seed}: a move given up (${why}) at ${what}, with no fault`);
+      }
+    }
+
+    seenAborts = { ...now };
+  };
   for (let step = 0; step < steps; step++) {
+    if (MOVE) {
+      const last = ops.length > opsBefore ? (ops.at(-1) as { op: string }).op : "nothing";
+      audit(last, false);
+      opsBefore = ops.length;
+    }
+
     // A few parts of A's move between B's and A's calls, a spare's panic
     // now and then among them.
     if (MOVE && r() < 0.35) {
@@ -304,6 +332,7 @@ async function run(seed: number): Promise<Counts> {
       }
 
       compacting = "no";
+      audit("move", injected !== null && spareInject === null);
       if (injected !== null && spareInject === null) {
         counts.spareFaults++;
         assert.equal(
