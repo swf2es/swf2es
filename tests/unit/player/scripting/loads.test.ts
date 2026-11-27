@@ -1119,11 +1119,12 @@ function compileWith(sources: [string, string, string[]?][]): Map<string, Uint8A
 
 /**
  * A filler SWF whose code is tens of kilobytes, so that enough of them
- * let go of make the compiler's rebuild worth it.
+ * let go of make the compiler's rebuild worth it: FILLERS of them weigh
+ * some 20 MB dead, past the 16 MB a move waits for (lifetime.zig).
  */
 function heavyFiller(compile: ReturnType<typeof compiler>): Uint8Array {
   const methods = Array.from(
-    { length: 150 },
+    { length: 500 },
     (_, i) => `public function m${i}(x:Number):Number { return x > ${i} ? x - ${i} : x + ${i}; }`,
   ).join("\n    ");
   return bare(

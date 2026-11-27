@@ -55,9 +55,10 @@ three, with the same VerifyError numbers:
    estimate from the tables' rows, so that it holds the live tables and a
    reserve, and the old instance's memory goes with it. It is due when
    the tables come near memory's size, which a load would then grow, and
-   the dead ABCs weigh 4 MB, a sixteenth of memory and a quarter of the
-   live ones, so that a rebuild of seconds is not done for a few
-   megabytes; or when memory is four times what the live ones need, as a
+   the dead ABCs weigh 16 MB, a sixteenth of memory and half the live
+   ones, so that a rebuild of seconds is not done for a few megabytes
+   (on real content of some 100 MB of live tables, a quarter made a
+   pause of about 4 s every 30 loads, half every 75); or when memory is four times what the live ones need, as a
    large compile leaves it; and only where the new instance would take an
    eighth less memory at least, or a rebuild in place would not fit.
    Otherwise, and while there is no new instance, as one that could not

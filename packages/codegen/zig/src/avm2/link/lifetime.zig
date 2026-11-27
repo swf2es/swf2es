@@ -25,6 +25,11 @@ const SHRINK_Floor: u64 = 32 << 20;
 /// The weight of dead ABCs below which a rebuild is not worth it.
 const DEAD_Floor: u64 = 4 << 20;
 
+/// The weight of dead ABCs below which a move is not worth it. A move
+/// stalls the host for seconds on large content, so it waits for more
+/// garbage, at the cost of some memory.
+const MOVE_Floor: u64 = 16 << 20;
+
 /// Whether tables of `weight`, with what its estimate misses, come within `reserve` of `size`.
 fn full(weight: u64, reserve: u64, size: u64) bool {
     return weight + (weight >> 2) + (weight >> 3) + reserve >= size;
@@ -262,7 +267,7 @@ pub fn wantsRebuild(dom: *Domain, part: u64, movedPart: u64, want: Want) bool {
         .move, .spare => {
             // A spare is made once a move is half way due, to be there when it is.
             const half: u6 = if (want == .spare) 1 else 0;
-            const worth = dead >= @max(@max(DEAD_Floor, size >> 4), live >> 2) >> half;
+            const worth = dead >= @max(@max(MOVE_Floor, size >> 4), live >> 1) >> half;
             return ((worth and full(live + dead, reserve << half, size)) or
                 size >= @max(SHRINK_Floor, rebuilt << (2 - half))) and
                 (smaller or !fits) and
