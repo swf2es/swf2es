@@ -775,6 +775,8 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   const journal = new Set<Entry>();
   const restores = new Map<number, Entry>();
   const abcDomains: number[] = [];
+  // Each ABC's length, by its index, which a replay of its verification takes time in proportion to.
+  const abcLengths: number[] = [];
   let replayable = true;
   const journaled = (entry: Entry, owner = 0) => {
     const id = owner | 0;
@@ -1163,11 +1165,15 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       return "none";
     }
   };
-  // Whether the move's next part replays a compile's verification of an
-  // ABC, one call of as long as the compile verified it for.
+  // Whether the move's next part replays a compile's verification of a
+  // large ABC, one call of as long as the compile verified it for.
   const verifiesNext = (m: Move) => {
     const entry = m.phase === "catch up" ? m.entries[m.replayed] : undefined;
-    return entry?.kind === "log" && entry.words[m.word] === LOG_Verify;
+    return (
+      entry?.kind === "log" &&
+      entry.words[m.word] === LOG_Verify &&
+      (abcLengths[entry.words[m.word + 1]] ?? 0) > LARGE_Verify
+    );
   };
   // What compactStep starts, as compact decides, but that a large domain
   // moves rather than rebuild in place, which would take one call.
@@ -1228,6 +1234,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       journal.clear();
       restores.clear();
       abcDomains.length = 0;
+      abcLengths.length = 0;
       replayable = true;
       checkpoint = null;
     },
@@ -1244,6 +1251,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       if (error === 0 || wasm.lastAddLinked()) {
         if (error === 0) {
           abcDomains.push(appDomain);
+          abcLengths.push(bytes.length);
         }
         journaled(
           {
@@ -1375,8 +1383,8 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           continue;
         }
 
-        // A compile's verification, replayed whole, starts a slice of its
-        // own, so that it adds to no other part's time.
+        // A large ABC's verification, replayed whole, starts a slice of
+        // its own, so that it adds to no other part's time.
         if (verifiesNext(m)) {
           return "moving";
         }
@@ -1709,6 +1717,11 @@ const WANT_Spare = 3;
 const IN_PLACE_Live = 4 << 20;
 /** A compile's log entry that verified an ABC: LogKind.verify (avm2/link/domain.zig). */
 const LOG_Verify = 4;
+/**
+ * The length of an ABC whose verification, replayed, starts a slice of its
+ * own: some 20 ms of it on real content, 750 ms for 2.3 MB.
+ */
+const LARGE_Verify = 64 << 10;
 /** The garbage a part of a move's rebuild makes at most (domainRebuildBudget). */
 const MOVE_PartBudget = 256 << 10;
 /** The slices compactStep catches a move up in before it goes on past their deadlines (see compactStep). */
