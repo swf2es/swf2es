@@ -1353,24 +1353,35 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         m = move;
       }
 
-      // Catch-up chases what the host goes on doing: past CATCH_UP_Slices
-      // slices, it finishes in this one, which has only what came in
-      // since the last left to replay (a revival's rebuild still a part at
-      // a time).
-      const finishing = m.phase === "catch up" && ++m.catchUp > CATCH_UP_Slices;
+      // Catch-up chases what the host goes on doing. Past CATCH_UP_Slices
+      // slices it goes on past the deadline but for a replayed
+      // verification, which still starts a slice of its own; past twice
+      // as many, it finishes in this slice, which has only what came in
+      // since the last to replay (a revival's rebuild still a part at a
+      // time).
+      let slices = 0;
+      if (m.phase === "catch up") {
+        slices = ++m.catchUp;
+      }
+
       for (;;) {
         const progress = moveUnit(m);
         if (progress !== "moving") {
           return progress;
         }
 
-        if (finishing && m.phase === "catch up") {
+        const catchingUp = m.phase === "catch up";
+        if (catchingUp && slices > CATCH_UP_Slices * 2) {
           continue;
         }
 
         // A compile's verification, replayed whole, starts a slice of its
         // own, so that it adds to no other part's time.
-        if (verifiesNext(m) || deadline.timeRemaining() <= 0) {
+        if (verifiesNext(m)) {
+          return "moving";
+        }
+
+        if (!(catchingUp && slices > CATCH_UP_Slices) && deadline.timeRemaining() <= 0) {
           return "moving";
         }
       }
@@ -1700,7 +1711,7 @@ const IN_PLACE_Live = 4 << 20;
 const LOG_Verify = 4;
 /** The garbage a part of a move's rebuild makes at most (domainRebuildBudget). */
 const MOVE_PartBudget = 256 << 10;
-/** The slices compactStep catches a move up in before it finishes catching up in one. */
+/** The slices compactStep catches a move up in before it goes on past their deadlines (see compactStep). */
 const CATCH_UP_Slices = 32;
 /** How many SWFs whose blocks or units are compiled codegen holds a copy of at most. */
 const HELD_SWFS = 4;
