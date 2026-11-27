@@ -18,7 +18,7 @@
 // The candidate is built first where this tree's sources moved since its
 // modules were built (build.ts). Any suite that differs fails the run; one
 // with nothing to run (no corpus fetched, no ABCs in the oracle's cache, no
-// cases) is reported as skipped, so "all 56 suites the same" means all 56
+// cases) is reported as skipped, so "all 57 suites the same" means all 57
 // ran, and one that ran on fewer of its inputs than it can (a fuzz suite
 // without the oracle's seeds or the corpus) as partial. Each build's
 // results go to out/, and where a case's large result (a module) differs,
@@ -28,7 +28,7 @@
 // local SWFs (local.ts), reported by number only.
 //
 // The fuzz-* suites (fuzz/) generate their cases: a standard size that adds
-// about three and a half minutes to a run, or with --deep the exhaustive
+// about four minutes to a run, or with --deep the exhaustive
 // parts of the reviews that wrote them too, for changes to arenas, saving
 // and loading, and compaction; --seed and --cases set their numbers.
 //

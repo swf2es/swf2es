@@ -215,20 +215,21 @@ node tests/parity/run.ts [--reference <ref>] [--deep] [--seed N] [--cases N] [su
                               # against AssemblyScript's).
                               # The reference is built once by this tree's pinned Zig into
                               # ~/.cache/swf2es/parity/; it and this tree's (built first where its sources
-                              # moved) fed the same calls on 56 suites (libraries, tests' ABCs, Ruffle's
+                              # moved) fed the same calls on 57 suites (libraries, tests' ABCs, Ruffle's
                               # corpus, the oracle's ABCs, mutated and fuzzed inputs, keys, lifetimes,
                               # random exports), byte for byte, and the 0xAA build against this tree's;
                               # every change to the compiler meant to keep its output runs it (not in CI).
-                              # pnpm build first; all 56 run only with the corpus fetched (fetch-ruffle.ts)
+                              # pnpm build first; all 57 run only with the corpus fetched (fetch-ruffle.ts)
                               # and the oracle's cache filled (by pnpm tamarin and pnpm test's conformance
                               # runs); SWF2ES_LOCAL_SWFS adds
                               # local SWFs, paths separated by ":" (";" on Windows), reported by number.
-                              # The 11 fuzz-* suites (tests/parity/fuzz/) generate their cases: rejected
+                              # The 12 fuzz-* suites (tests/parity/fuzz/) generate their cases: rejected
                               # links, bodies, handlers, floats, traits' names, links, the oracle's IR,
-                              # parsing, owners, saved domains and AVM1; their standard size adds about
-                              # three and a half minutes; --deep adds the reviews' exhaustive parts, for
-                              # changes to arenas, saving and loading, and compaction (about five and a
-                              # half); --seed N (1) and --cases N (each suite's random cases) change them.
+                              # parsing, owners, saved domains, compactions the policy finds due (in place
+                              # and moves, with revivals after) and AVM1; their standard size adds about
+                              # four minutes; --deep adds the reviews' exhaustive parts, for changes to
+                              # arenas, saving and loading, and compaction (about seven); --seed N (1)
+                              # and --cases N (each suite's random cases) change them.
                               # Cases seeded from the oracle's cache follow what it holds, so their counts
                               # differ between hosts; a suite with none of its cache's or corpus's seeds
                               # says PARTIAL. A throw from this tree's builds fails the run, even one all
