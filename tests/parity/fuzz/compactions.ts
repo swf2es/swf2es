@@ -1,13 +1,25 @@
 // Compactions that happen: a domain whose children each take the builtin
 // library, compiled and then dropped or evicted until enough dead weight
-// builds up for the rebuild policy (pinned where the reference can pin
-// it, run.ts) to answer yes, as the host asks it (Codegen.compact in
-// packages/codegen/src/index.ts): a move to a fresh instance where one is
-// due, else a compaction in place, a part at a time. After each, every
-// live ABC's module and context, the usage and the summary; evicted
-// domains revived, with their ABCs restored where a rebuild let them go.
-// Other suites compact rarely or never: their domains never hold enough
-// dead weight for the policy to say yes.
+// builds up for a compaction, done as the host does it
+// (packages/codegen/src/index.ts): a move to a fresh instance (saved,
+// loaded, rebuilt a part at a time, and taken only if all of that
+// succeeded, as moved() takes it), or a compaction in place a part at a
+// time, the domain saved first as rebuild()'s checkpoint saves it. After
+// each, every live ABC's module and context, the usage and the summary;
+// evicted domains revived, mostly ones a compaction let go of, with their
+// ABCs restored and the rebuild that links them. Other suites compact
+// rarely or never: their domains never hold enough dead weight.
+//
+// Two halves. In the first, the rebuild policy decides, as the host asks
+// it: a move where one is due, else in place, beside a spare in every
+// other sequence; it is pinned (run.ts) where the reference can pin it, so
+// that its answers follow the weights, not memory's layout, and is the
+// real one against a reference that cannot. A change to the policy on
+// purpose diverges here at the first `wants` line whose answer it changes,
+// and from there on. In the second half a schedule decides, moves and
+// compactions in place in turn whatever the policy answers, which is still
+// recorded: a policy change diverges only on those lines, and the rebuild
+// stays held to the reference past them.
 import { builtinLibrary } from "../../../packages/player/dist/playerglobal/libraries.js";
 import { structuredAbcs } from "../../fuzz/bodies.ts";
 import type { Compiler, Results } from "../suite.ts";
@@ -17,6 +29,7 @@ import { count, type FuzzOptions, generator, type Live, sha } from "./common.ts"
 const WANT_InPlace = 0;
 const WANT_InPlaceBesideSpare = 1;
 const WANT_Move = 2;
+const WANT_Spare = 3;
 
 /** The bytes call `address` handed out, copied. */
 const handed = (c: Compiler, address: number) =>
@@ -32,6 +45,20 @@ function stepped(c: Compiler): string {
   } while (step === 0 && steps < 100_000);
 
   return `${step} after ${steps}`;
+}
+
+/** The checkpoint the host saves before a rebuild's first step: the domain's save and its live ABCs' bytes, as digests. */
+function checkpoint(c: Compiler, added: number): string {
+  const save = sha(handed(c, c.domainSaveBytes()));
+  const abcs: string[] = [];
+  for (let i = 0; i < added; i++) {
+    const at = c.domainSavedAbcBytes(i);
+    if (at !== 0) {
+      abcs.push(`${i}:${sha(handed(c, at)).slice(0, 16)}`);
+    }
+  }
+
+  return `save ${save.slice(0, 16)} abcs ${abcs.join(",")}`;
 }
 
 /** An ABC added, by index, and its application domain. */
@@ -58,10 +85,13 @@ export async function compactions(live: Live, r: Results, o: FuzzOptions): Promi
   const { below } = generator(o.seed);
   // ABCs that link after the builtin library alone, and that a revival can restore.
   const seeds = structuredAbcs(60, o.seed);
-  const totals = { inPlace: 0, moves: 0, revivals: 0, restored: 0 };
+  // By the policy's half and the schedule's.
+  const totals = { inPlace: [0, 0], moves: [0, 0], failedMoves: 0, revivals: 0, restored: 0 };
   // --cases sets the steps of a sequence, not how many sequences there are.
-  const sequences = o.deep ? 8 : 4;
+  const sequences = o.deep ? 12 : 6;
   for (let s = 0; s < sequences; s++) {
+    // The first two thirds of the sequences the policy's, the last third the schedule's.
+    const scheduled = s >= (sequences * 2) / 3 ? 1 : 0;
     const added: Added[] = [];
     const add = (name: string, bytes: Uint8Array, builtin: boolean, domain: number) => {
       r.case(name, () => {
@@ -149,12 +179,14 @@ export async function compactions(live: Live, r: Results, o: FuzzOptions): Promi
             revived = t.domainRevive(d, true);
           }
 
+          // The host saves its checkpoint before the rebuild's first step.
+          const saved = revived > 0 ? checkpoint(t, added.length) : "";
           const rebuilt = revived > 0 ? stepped(t) : "none";
-          if (revived > 0) {
+          if (rebuilt.startsWith("1 ")) {
             totals.revivals++;
           }
 
-          return `revived ${revived} restores ${restores} rebuild ${rebuilt}\n${state(t, added)}`;
+          return `revived ${revived} restores ${restores} ${saved} rebuild ${rebuilt}\n${state(t, added)}`;
         });
       }
 
@@ -162,42 +194,71 @@ export async function compactions(live: Live, r: Results, o: FuzzOptions): Promi
         continue;
       }
 
-      // The host's compaction: a move where one is due, else in place; beside
-      // a spare in every other sequence, where a move that would take less
-      // memory waits for one rather than compacting in place.
-      const move = live.c.domainWantsCompact(WANT_Move);
-      const inPlace =
-        !move && live.c.domainWantsCompact(s % 2 === 1 ? WANT_InPlaceBesideSpare : WANT_InPlace);
-      r.case(`${name}: wants`, () => `move ${move} in place ${inPlace}`);
+      // The policy's answers, recorded in both halves. In the first, the
+      // host's compaction: a move where one is due, else in place; beside a
+      // spare in every other sequence, where a move that would take less
+      // memory waits for one rather than compacting in place. In the
+      // second, moves and compactions in place in turn.
+      const asked = live.c;
+      const wantsMove = asked.domainWantsCompact(WANT_Move);
+      const wantsInPlace = asked.domainWantsCompact(
+        s % 2 === 1 ? WANT_InPlaceBesideSpare : WANT_InPlace,
+      );
+      const wantsSpare = asked.domainWantsCompact(WANT_Spare);
+      r.case(
+        `${name}: wants`,
+        () => `move ${wantsMove} in place ${wantsInPlace} spare ${wantsSpare}`,
+      );
+      const turn = Math.floor(step / gap) % 2 === 0;
+      const move = scheduled ? turn : wantsMove;
+      let inPlace = scheduled ? !turn : !wantsMove && wantsInPlace;
       if (move) {
         const from = live.c;
         const into = await live.fresh();
+        let taken = false;
         await live.case(r, `${name}: move`, () => {
           const words = handed(from, from.domainSaveBytes());
-          let text = `load ${into.domainLoad(words)}`;
+          let loaded = into.domainLoad(words);
+          let text = `save ${sha(words).slice(0, 16)} load ${loaded}`;
           for (let i = 0; i < added.length; i++) {
             const at = from.domainSavedAbcBytes(i);
             if (at !== 0) {
-              text += ` ${i}:${into.domainLoadAbc(i, handed(from, at))}`;
+              const bytes = handed(from, at);
+              const error = loaded ? into.domainLoadAbc(i, bytes) : -1;
+              loaded = loaded && error === 0;
+              text += ` ${i}:${sha(bytes).slice(0, 16)}:${error}`;
             }
           }
 
-          text += ` rebuild ${into.domainLoadRebuild()} ${stepped(into)}`;
-          return `${text}\n${state(into, added)}`;
+          const started = loaded && into.domainLoadRebuild();
+          const rebuilt = started ? stepped(into) : "none";
+          // Taken only if all of it succeeded, as moved() takes a move; else
+          // the domain stays where it was, and compacts in place if it can.
+          taken = rebuilt.startsWith("1 ");
+          return `${text} rebuild ${started} ${rebuilt} taken ${taken}\n${state(taken ? into : from, added)}`;
         });
-        live.c = into;
-        totals.moves++;
-        compacted = step;
-      } else if (inPlace) {
+        if (taken) {
+          live.c = into;
+          totals.moves[scheduled]++;
+          compacted = step;
+        } else {
+          totals.failedMoves++;
+          inPlace = scheduled ? true : live.c.domainWantsCompact(WANT_InPlace);
+        }
+      }
+
+      if (inPlace) {
         let done = false;
         await live.case(r, `${name}: compact in place`, (t) => {
-          const started = t.domainCompact(true);
+          const started = scheduled ? t.domainRebuild(true) : t.domainCompact(true);
+          // The host saves its checkpoint before the rebuild's first step.
+          const saved = started ? checkpoint(t, added.length) : "";
           const rebuilt = started ? stepped(t) : "none";
           done = rebuilt.startsWith("1 ");
-          return `compact ${started} ${rebuilt}\n${state(t, added)}`;
+          return `compact ${started} ${saved} ${rebuilt}\n${state(t, added)}`;
         });
         if (done) {
-          totals.inPlace++;
+          totals.inPlace[scheduled]++;
           compacted = step;
         }
       }
@@ -205,11 +266,11 @@ export async function compactions(live: Live, r: Results, o: FuzzOptions): Promi
   }
 
   r.input(
-    `${totals.inPlace} compactions in place, ${totals.moves} moves, ${totals.revivals} revivals with a rebuild, ${totals.restored} ABCs restored`,
+    `by the policy ${totals.inPlace[0]} compactions in place and ${totals.moves[0]} moves, by the schedule ${totals.inPlace[1]} and ${totals.moves[1]}, ${totals.failedMoves} moves not taken, ${totals.revivals} revivals with a rebuild, ${totals.restored} ABCs restored`,
   );
-  if (totals.inPlace === 0 || totals.moves === 0) {
+  if (totals.inPlace[0] === 0 || totals.moves[0] === 0) {
     r.problems.push(
-      `${totals.inPlace} compactions in place and ${totals.moves} moves: the suite needs both to hold the rebuild to its reference`,
+      `the policy made ${totals.inPlace[0]} compactions in place and ${totals.moves[0]} moves: the suite needs both to hold its rebuilds to the reference`,
     );
   }
 }

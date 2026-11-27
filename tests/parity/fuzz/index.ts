@@ -104,6 +104,7 @@ export function fuzzSuites(o: FuzzOptions): Suite[] {
         "domainUsage",
         "domainWantsCompact",
         "domainCompact",
+        "domainRebuild",
         "domainRebuildStep",
         "domainSaveBytes",
         "domainSavedAbcBytes",
