@@ -315,8 +315,12 @@ async function run(seed: number): Promise<Counts> {
 
       spareInject = null;
       say(`move ${progress.join(" ")}`);
+      // Each swap compiles and resolves as B, which never compacts.
       if (progress.includes("done")) {
         check(`after a move (step ${step})`);
+        for (let i = 1; i < abcs.length; i++) {
+          both(`after a move (step ${step}): compile ${i}`, (g) => g.compileModule(hashes(), i));
+        }
       }
 
       // A spare, which compactStep asks for, made between steps.

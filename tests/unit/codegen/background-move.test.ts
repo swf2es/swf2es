@@ -252,6 +252,40 @@ for (const every of [1, 5, 25]) {
   });
 }
 
+test("many moves in turn, each swap compiling as a compiler that never compacted", async (t) => {
+  instrument(t);
+  const c = await createCodegen(module);
+  const twinned = await createCodegen(module);
+  const d = { ...setUp(c), made: [] as number[] };
+  const e = { ...setUp(twinned), made: [] as number[] };
+  let calls = 0;
+  for (let moved = 1; moved <= 6; moved++) {
+    let progress = await startMove(c);
+    let parts = 0;
+    while (progress === "moving") {
+      progress = c.compactStep(NO_TIME);
+      // Calls every few parts, in every phase, and some between moves.
+      if (++parts % (moved + 1) === 0) {
+        call(c, d, calls);
+        call(twinned, e, calls++);
+      }
+    }
+
+    assert.equal(progress, "done", `move ${moved}`);
+    assert.equal(c.usage().moves.completed, moved);
+    assert.deepEqual(outcome(c, d.added), outcome(twinned, e.added), `after move ${moved}`);
+    for (let k = 0; k < 3; k++) {
+      call(c, d, calls);
+      call(twinned, e, calls++);
+    }
+  }
+
+  // The last move's checkpoint and journal recover the domain.
+  assert.equal(c.add(PANIC), 1107);
+  assert.equal(twinned.add(PANIC), 1107);
+  assert.deepEqual(outcome(c, d.added), outcome(twinned, e.added));
+});
+
 test("a move whose catch-up keeps being outrun finishes catching up in one slice", async (t) => {
   instrument(t);
   const c = await createCodegen(module);
