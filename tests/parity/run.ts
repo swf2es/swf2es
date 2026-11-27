@@ -23,9 +23,9 @@
 // local SWFs (local.ts), reported by number only.
 //
 // The fuzz-* suites (fuzz/) generate their cases: a standard size that adds
-// about five minutes to a run, or with --deep the counts of the review that
-// wrote them, for changes to arenas, saving and loading, and compaction;
-// --seed and --cases set their numbers.
+// about three and a half minutes to a run, or with --deep the exhaustive
+// parts of the reviews that wrote them too, for changes to arenas, saving
+// and loading, and compaction; --seed and --cases set their numbers.
 //
 //   node tests/parity/run.ts [--reference <ref>] [--deep] [--seed <n>] [--cases <n>] [suite...]
 import "./guard.ts";

@@ -1,9 +1,11 @@
 // The differential fuzz suites, from a review of the idiomatic pass: each a
 // generator of ABCs, saves or AVM1 blocks run on the reference, the
 // candidate and its poison build like any other suite (run.ts). The
-// standard sizes add about five minutes to a run; --deep runs the counts
-// the review ran, for changes to arenas, saving and loading, and
-// compaction; --seed and --cases change the numbers.
+// standard sizes run the reviews' random counts, about three and a half
+// minutes; --deep adds their exhaustive parts (every shape of reject, every
+// small seed of parse, owners' pairs, more saves), about six, for changes
+// to arenas, saving and loading, and compaction; --seed and --cases
+// change the numbers.
 import type { Results, Suite } from "../suite.ts";
 import { avm1 } from "./avm1.ts";
 import { bodies } from "./bodies.ts";

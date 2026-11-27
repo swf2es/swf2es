@@ -10,7 +10,7 @@ import { builtinLibrary } from "../../../packages/player/dist/playerglobal/libra
 import { floatLibrary } from "../../../packages/runtime/dist/avm2/float-library.js";
 import type { Compiler, Results } from "../suite.ts";
 
-/** How large the suites are: the standard run, or --deep's, the counts the review that wrote them ran. */
+/** How large the suites are: the standard run, or --deep's, with the reviews' exhaustive parts. */
 export interface FuzzOptions {
   deep: boolean;
   seed: number;

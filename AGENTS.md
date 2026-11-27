@@ -223,8 +223,8 @@ node tests/parity/run.ts [--reference <ref>] [--deep] [--seed N] [--cases N] [su
                               # The 11 fuzz-* suites (tests/parity/fuzz/) generate their cases: rejected
                               # links, bodies, handlers, floats, traits' names, links, the oracle's IR,
                               # parsing, owners, saved domains and AVM1; their standard size adds about
-                              # five minutes; --deep runs the counts of the review that wrote them, for
-                              # changes to arenas, saving and loading, and compaction (about an hour);
+                              # three and a half minutes; --deep adds the reviews' exhaustive parts, for
+                              # changes to arenas, saving and loading, and compaction (about six);
                               # --seed N (1) and --cases N (each suite's random cases) change them
 node tests/bench/codegen-compile.ts [--reference <ref>] [--runs N]   # compile time of a build of
                               # <ref> against this tree's, interleaved, a warm-up pass each, N even
