@@ -28,7 +28,7 @@
 // local SWFs (local.ts), reported by number only.
 //
 // The fuzz-* suites (fuzz/) generate their cases: a standard size that adds
-// about four minutes to a run, or with --deep the exhaustive
+// about four and a half minutes to a run, or with --deep the exhaustive
 // parts of the reviews that wrote them too, for changes to arenas, saving
 // and loading, and compaction; --seed and --cases set their numbers.
 //

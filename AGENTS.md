@@ -227,8 +227,8 @@ node tests/parity/run.ts [--reference <ref>] [--deep] [--seed N] [--cases N] [su
                               # links, bodies, handlers, floats, traits' names, links, the oracle's IR,
                               # parsing, owners, saved domains, compactions the policy finds due (in place
                               # and moves, with revivals after) and AVM1; their standard size adds about
-                              # four minutes; --deep adds the reviews' exhaustive parts, for changes to
-                              # arenas, saving and loading, and compaction (about seven); --seed N (1)
+                              # four and a half minutes; --deep adds the reviews' exhaustive parts, for
+                              # changes to arenas, saving and loading, and compaction (about eight); --seed N (1)
                               # and --cases N (each suite's random cases) change them.
                               # Cases seeded from the oracle's cache follow what it holds, so their counts
                               # differ between hosts; a suite with none of its cache's or corpus's seeds

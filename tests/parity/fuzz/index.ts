@@ -2,10 +2,10 @@
 // compactions: each a generator of ABCs, saves, domain lifetimes or AVM1
 // blocks run on the reference, the candidate and its poison build like any
 // other suite (run.ts). The standard sizes run the reviews' random counts,
-// about four minutes; --deep adds their exhaustive parts (every shape of
-// reject, every small seed of parse, owners' pairs, more saves, more
-// sequences of compactions), about seven, for changes to arenas, saving
-// and loading, and compaction; --seed and --cases change the numbers.
+// about four and a half minutes; --deep adds their exhaustive parts (every
+// shape of reject, every small seed of parse, owners' pairs, more saves,
+// more sequences of compactions), about eight, for changes to arenas,
+// saving and loading, and compaction; --seed and --cases change the numbers.
 import { noOracle } from "../local.ts";
 import type { Results, Suite } from "../suite.ts";
 import { avm1 } from "./avm1.ts";
