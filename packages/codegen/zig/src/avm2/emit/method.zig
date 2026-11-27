@@ -27,6 +27,8 @@ const refs = @import("refs.zig");
 const SourceMap = @import("sourcemap.zig").SourceMap;
 const structure = @import("structure.zig");
 const values = @import("values.zig");
+const method_copies = @import("method/copies.zig");
+const method_registers = @import("method/registers.zig");
 
 /// Whether method m (domain-wide) has an entry for bound calls besides its
 /// checked one (method.ts tells which do; see MethodEmitter.boundEntry).
@@ -63,10 +65,10 @@ pub fn isConstructor(em: *MethodEmitter, m: u32) bool {
 /// The deepest structured code a method is given; one deeper keeps the dispatcher.
 pub const MAX_NESTING: u32 = 500;
 /// The length of the end of a reset, ` = void 0;\n`.
-const RESET_END: u32 = 11;
+pub const RESET_END: u32 = 11;
 /// The longest text a register holds, and all of them together, in bytes.
-const MAX_HELD: u32 = 1024;
-const MAX_HELD_TEXT: u32 = 1 << 20;
+pub const MAX_HELD: u32 = 1024;
+pub const MAX_HELD_TEXT: u32 = 1 << 20;
 
 /// An entry of a method's T: a class or Vector type, a method of a
 /// primitive's class (filled at run time, `null` in the table), or the
@@ -640,157 +642,14 @@ pub const MethodEmitter = struct {
         }
     }
 
-    /// Whether instruction i, reading register `r`, only makes its
-    /// destination a copy, as flowCopies knows it.
-    pub fn copies_(self: *MethodEmitter, i: u32, r: i32) bool {
-        const ir = self.ir;
-        const stack: i32 = @intCast(ir.localCount + ir.maxScope);
-        const dst = ir.dst[i];
-        if (dst < @as(i32, @intCast(ir.localCount))) {
-            return false;
-        }
-
-        const copy: Fact = if (r < @as(i32, @intCast(ir.localCount))) .none else self.copyOf[@intCast(r)];
-        const from = copy.orRegister(r);
-        if (dst < stack and (!from.isRegister() or from.register() >= stack)) {
-            return false;
-        }
-
-        // Its own value again, as a nip of a dup: as it was.
-        self.setCopy(dst, if (from == Fact.of(dst)) .none else from);
-        self.kept = true;
-        return true;
-    }
-
-    /// Whether instruction i makes an int or uint a Number, as LIR's i2d and ui2d (see wraps).
-    pub fn promotes(self: *MethodEmitter, i: u32) bool {
-        const ir = self.ir;
-        const dst = ir.dst[i];
-        if (ir.op[i] != .ir_coerce or dst != ir.src[i]) {
-            return false;
-        }
-
-        const bt = self.builtinOf(dst);
-        return self.domain.builtin(ir.cType(i)) == .number and (bt == .int or bt == .uint);
-    }
-
-    /// What a copy reads: a register, or the constant an instruction pushed.
-    pub fn copied(self: *MethodEmitter, copy: Fact, boxed: bool) Error!void {
-        if (copy.isRegister()) {
-            const r = copy.register();
-            const c: u32 = @intCast(r);
-            if (self.held[c] != 0) {
-                try self.inline_(r);
-                return;
-            }
-
-            self.readsAt(r, r);
-            const wrap = boxed and (self.unboxedLocal(r) or self.rawFloat[c] != 0);
-            if (wrap) {
-                try self.out.text("rt.float(");
-            }
-
-            try self.regName(r);
-            if (wrap) {
-                try self.out.text(")");
-            }
-
-            return;
-        }
-
-        const out = &self.out;
-        const pool = &self.abc.pool;
-        const i = copy.instruction();
-        const a = self.ir.a[i];
-        switch (self.ir.op[i]) {
-            .pushbyte, .pushshort => try self.literal(@floatFromInt(@as(i32, @bitCast(a))), false),
-            .pushint => try self.literal(@floatFromInt(pool.ints[a]), false),
-            .pushuint => try out.uint(pool.uints[a]),
-            .pushdouble => try self.literal(pool.doubles[a], true),
-            .pushfloat => {
-                try out.text("rt.float(");
-                try self.literal(pool.floats[a], true);
-                try out.text(")");
-            },
-            .pushnan => try out.text("NaN"),
-            .pushstring => try refs.poolString(self, a),
-            .pushtrue => try out.text("true"),
-            .pushfalse => try out.text("false"),
-            .pushnull => try out.text("null"),
-            else => try out.text("void 0"),
-        }
-    }
-
-    /// A number read as an operand, a negative one in parentheses, so that `-` before it is no decrement.
-    pub fn literal(self: *MethodEmitter, d: f64, double: bool) Error!void {
-        const out = &self.out;
-        const negative = d < 0 or (d == 0 and std.math.signbit(d));
-        if (negative) {
-            try out.byte('(');
-        }
-
-        if (double) {
-            try out.double(d);
-        } else {
-            try out.int(@intFromFloat(d));
-        }
-
-        if (negative) {
-            try out.byte(')');
-        }
-    }
-
-    /// Forget every copy from register `from` up: none is needed.
-    pub fn uncopy(self: *MethodEmitter, from: i32) void {
-        self.drop(from);
-        self.clearRaw(from);
-        const top = @min(self.copyTop, @as(i32, @intCast(self.ir.frameSize)));
-        var r = from;
-        while (r < top) : (r += 1) {
-            self.setCopy(r, .none);
-        }
-
-        if (from < self.copyTop) {
-            self.copyTop = @max(from, 0);
-        }
-    }
-
-    /// Register r now a copy of `copy`, or of nothing for none: copyTop and copiedBy kept.
-    pub fn setCopy(self: *MethodEmitter, r: i32, copy: Fact) void {
-        const ru: u32 = @intCast(r);
-        const old = self.copyOf[ru];
-        if (old.isRegister()) {
-            self.copiedBy[@intCast(old.register())] -%= 1;
-        }
-
-        self.copyOf[ru] = copy;
-        if (copy.isRegister()) {
-            self.copiedBy[@intCast(copy.register())] +%= 1;
-        }
-
-        if (copy != .none and r >= self.copyTop) {
-            self.copyTop = r + 1;
-        }
-    }
-
-    /// copyTop and copiedBy made again from copyOf, as a block's entry or a restore sets it whole.
-    pub fn recount(self: *MethodEmitter) void {
-        const frame = self.ir.frameSize;
-        var top: i32 = 0;
-        @memset(self.copiedBy[0..frame], 0);
-        for (0..frame) |r| {
-            const copy = self.copyOf[r];
-            if (copy.isRegister()) {
-                self.copiedBy[@intCast(copy.register())] +%= 1;
-            }
-
-            if (copy != .none) {
-                top = @intCast(r + 1);
-            }
-        }
-
-        self.copyTop = top;
-    }
+    // Copies: what a register stands for, written only where needed (method/copies.zig).
+    pub const copies_ = method_copies.copies_;
+    pub const promotes = method_copies.promotes;
+    pub const copied = method_copies.copied;
+    pub const literal = method_copies.literal;
+    pub const uncopy = method_copies.uncopy;
+    pub const setCopy = method_copies.setCopy;
+    pub const recount = method_copies.recount;
 
     /// The builtin type of register r's value now.
     pub fn builtinOf(self: *const MethodEmitter, r: i32) traits_.Builtin {
@@ -888,331 +747,29 @@ pub const MethodEmitter = struct {
         return slot;
     }
 
-    /// A space, but at the start of a line, as after a block written in place.
-    pub fn space(self: *MethodEmitter) Error!void {
-        const written = self.out.written();
-        if (written.len == 0 or written[written.len - 1] != '\n') {
-            try self.out.byte(' ');
-        }
-    }
-
-    /// Register r as read: what it copies, if it is a copy; null checked, if the check is pending.
-    pub fn reg(self: *MethodEmitter, r: i32) Error!void {
-        if (r == self.pendingNull) {
-            self.pendingNull = -1;
-            try self.checkedRead(r);
-            return;
-        }
-
-        try self.read(r);
-    }
-
-    /// Register r as read before a `.`; a constant in parentheses, as `void 0.x` does not parse.
-    pub fn member(self: *MethodEmitter, r: i32) Error!void {
-        if (r == self.pendingNull or self.copyOf[@intCast(r)].isConstant()) {
-            try self.out.byte('(');
-            try self.reg(r);
-            try self.out.byte(')');
-            return;
-        }
-
-        try self.read(r);
-    }
-
-    /// Register r read, null checked: `r ?? nn(r)`.
-    pub fn checkedRead(self: *MethodEmitter, r: i32) Error!void {
-        try self.read(r);
-        try self.out.text(" ?? nn(");
-        try self.read(r);
-        try self.out.text(")");
-    }
-
-    /// The null check pending for an instruction that did not read the
-    /// register, as a statement before it.
-    pub fn unpend(self: *MethodEmitter) Error!void {
-        const name = try self.nameOf(self.pendingRead);
-        self.pendingNull = -1;
-        const check = try std.fmt.allocPrint(self.gpa, "{s} ?? nn({s});\n", .{ name, name });
-        try self.out.insert(self.pendingAt, check);
-        self.map.shift(self.pendingMarks, @intCast(check.len));
-    }
-
-    /// Register `at`'s name, as text.
-    pub fn nameOf(self: *MethodEmitter, at: i32) Error![]const u8 {
-        const ir = self.ir;
-        const local: i32 = @intCast(ir.localCount);
-        if (at < local) {
-            return std.fmt.allocPrint(self.gpa, "l{d}", .{at});
-        }
-
-        const scopes: i32 = @intCast(ir.maxScope);
-        if (at < local + scopes) {
-            return std.fmt.allocPrint(self.gpa, "sc{d}", .{at - local});
-        }
-
-        return std.fmt.allocPrint(self.gpa, "s{d}", .{at - local - scopes});
-    }
-
-    /// Register r as read: what it copies, if it is a copy.
-    pub fn read(self: *MethodEmitter, r: i32) Error!void {
-        try self.copied(self.copyOf[@intCast(r)].orRegister(r), true);
-    }
-
-    pub fn unboxedLocal(self: *const MethodEmitter, r: i32) bool {
-        return r >= 0 and r < @as(i32, @intCast(self.ir.localCount)) and self.unboxed[@intCast(r)] != 0;
-    }
-
-    pub fn unboxedTarget(self: *const MethodEmitter, i: u32) bool {
-        const r = if (self.target >= 0) self.target else self.ir.dst[i];
-        return self.unboxedLocal(r) or
-            (r >= @as(i32, @intCast(self.ir.localCount + self.ir.maxScope)) and
-                self.ir.type[i].isBuiltin(self.domain.floatType));
-    }
-
-    pub fn clearRaw(self: *MethodEmitter, from: i32) void {
-        var r: i32 = @max(from, 0);
-        while (r < self.rawTop) : (r += 1) {
-            self.rawFloat[@intCast(r)] = 0;
-        }
-
-        self.rawTop = @min(self.rawTop, @max(from, 0));
-    }
-
-    /// A known float's payload, avoiding a wrapper when it is a local or its copy.
-    pub fn numberReg(self: *MethodEmitter, r: i32) Error!void {
-        const copy = self.copyOf[@intCast(r)];
-        const which = copy.orRegister(r);
-        if (copy.isConstant() and self.ir.op[copy.instruction()] == .pushfloat) {
-            try self.literal(self.abc.pool.floats[self.ir.a[copy.instruction()]], true);
-        } else if (which.isRegister() and
-            (self.unboxedLocal(which.register()) or self.rawFloat[@intCast(which.register())] != 0))
-        {
-            try self.copied(which, false);
-        } else if (self.builtinOf(r) == .float) {
-            try self.out.text("rt.toNumber(");
-            try self.reg(r);
-            try self.out.text(")");
-        } else {
-            try self.reg(r);
-        }
-    }
-
-    /// Register r itself, as written.
-    pub fn regName(self: *MethodEmitter, r: i32) Error!void {
-        const ir = self.ir;
-        const out = &self.out;
-        const local: i32 = @intCast(ir.localCount);
-        const scopes: i32 = @intCast(ir.maxScope);
-        if (r < local) {
-            try out.byte('l');
-            try out.uint(@intCast(r));
-        } else if (r < local + scopes) {
-            try out.text("sc");
-            try out.uint(@intCast(r - local));
-        } else {
-            try out.byte('s');
-            try out.uint(@intCast(r - local - scopes));
-        }
-    }
-
-    /// `dst = ` for instruction i.
-    pub fn assign(self: *MethodEmitter, i: u32, number: bool) Error!void {
-        if (self.target >= 0) {
-            try self.regName(self.target);
-            self.sunk = true;
-        } else {
-            try self.regName(self.ir.dst[i]);
-        }
-
-        try self.out.text(" = ");
-        self.unboxResult = !number and self.unboxedTarget(i);
-        self.rawResult = self.target < 0 and
-            self.ir.dst[i] >= @as(i32, @intCast(self.ir.localCount + self.ir.maxScope)) and
-            self.ir.type[i].isBuiltin(self.domain.floatType);
-        if (self.unboxResult) {
-            try self.out.text("rt.toNumber(");
-        }
-    }
-
-    pub fn src(self: *const MethodEmitter, i: u32, k: u32) i32 {
-        return self.ir.src[i] + @as(i32, @intCast(k));
-    }
-
-    /// `b = n; continue;` to block n.
-    pub fn goto(self: *MethodEmitter, to: u32) Error!void {
-        if (self.structured) {
-            try structure.branchTo(self, to);
-            return;
-        }
-
-        try self.out.text("b = ");
-        try self.out.uint(to);
-        try self.out.text("; continue;");
-    }
-
-    /// Note that what is being written reads registers low .. high.
-    pub fn readsAt(self: *MethodEmitter, low: i32, high: i32) void {
-        if (low > high) {
-            return;
-        }
-
-        self.readLow = @min(self.readLow, low);
-        self.readHigh = @max(self.readHigh, high);
-    }
-
-    /// Register r's held text, read where it is written, in parentheses; r holds it no more.
-    pub fn inline_(self: *MethodEmitter, r: i32) Error!void {
-        const ru: u32 = @intCast(r);
-        const out = &self.out;
-        self.held[ru] = 0;
-        self.heldCount -%= 1;
-        self.readsAt(self.heldLow[ru], self.heldHigh[ru]);
-        try out.byte('(');
-        try out.append(&self.heldText, self.heldAt[ru], self.heldEnd[ru] - self.heldAt[ru]);
-        try out.byte(')');
-    }
-
-    /// Register r to hold the text instruction i wrote to the output from
-    /// `start`, `r = text;\n`, which is taken out; false if what it wrote is
-    /// not that one assignment, as written.
-    pub fn hold(self: *MethodEmitter, r: i32, start: u32) Error!bool {
-        const out = &self.out;
-        const bytes = out.written();
-        const end = out.len();
-        // `s`, its number, ` = `, at least a byte, `;\n`.
-        var at = start;
-        if (end < at + 7 or bytes[at] != 's') {
-            return false;
-        }
-
-        at += 1;
-        var n: u32 = 0;
-        while (at < end and bytes[at] >= '0' and bytes[at] <= '9') {
-            n = n *% 10 +% (bytes[at] - '0');
-            at += 1;
-            if (n > self.ir.frameSize) {
-                return false;
-            }
-        }
-
-        if (@as(i32, @intCast(n + self.ir.localCount + self.ir.maxScope)) != r or
-            at + 6 > end or
-            bytes[at] != ' ' or
-            bytes[at + 1] != '=' or
-            bytes[at + 2] != ' ' or
-            bytes[end - 2] != ';' or
-            bytes[end - 1] != '\n')
-        {
-            return false;
-        }
-
-        at += 3;
-        // One statement on one line, of no more than a few lines' text.
-        const length = end - 2 - at;
-        if (length > MAX_HELD or self.heldText.len() + length > MAX_HELD_TEXT) {
-            return false;
-        }
-
-        var k = at;
-        while (k < end - 1) : (k += 1) {
-            if (bytes[k] == '\n') {
-                return false;
-            }
-        }
-
-        if (self.heldCount == 0) {
-            self.heldText.reset();
-        }
-
-        const ru: u32 = @intCast(r);
-        self.heldAt[ru] = self.heldText.len();
-        try self.heldText.append(out, at, length);
-        self.heldEnd[ru] = self.heldText.len();
-        self.heldLow[ru] = self.readLow;
-        self.heldHigh[ru] = self.readHigh;
-        self.held[ru] = 1;
-        self.heldCount += 1;
-        self.heldTop = @max(self.heldTop, r + 1);
-        out.shrink(start);
-        return true;
-    }
-
-    /// Write register r's held text to it, `r = text;`, first writing what holds a text that reads r.
-    pub fn release(self: *MethodEmitter, r: i32) Error!void {
-        const ru: u32 = @intCast(r);
-        if (self.held[ru] == 0) {
-            return;
-        }
-
-        self.held[ru] = 0;
-        self.heldCount -%= 1;
-        try self.clobber(r, -1, -1);
-        const out = &self.out;
-        try self.regName(r);
-        try out.text(" = ");
-        try out.append(&self.heldText, self.heldAt[ru], self.heldEnd[ru] - self.heldAt[ru]);
-        try out.text(";\n");
-        self.checked[ru] = 0;
-    }
-
-    /// Before register w is written: write each held text that reads it, but those of registers from .. to - 1.
-    pub fn clobber(self: *MethodEmitter, w: i32, from: i32, to: i32) Error!void {
-        if (self.heldCount == 0) {
-            return;
-        }
-
-        var r: i32 = @intCast(self.ir.localCount);
-        while (r < self.heldTop) : (r += 1) {
-            const ru: u32 = @intCast(r);
-            if (self.held[ru] != 0 and (r < from or r >= to) and self.heldLow[ru] <= w and w <= self.heldHigh[ru]) {
-                try self.release(r);
-            }
-        }
-    }
-
-    /// Write every held text, but those of registers from .. to - 1.
-    pub fn releaseAll(self: *MethodEmitter, from: i32, to: i32) Error!void {
-        var r: i32 = @intCast(self.ir.localCount);
-        while (r < self.heldTop) : (r += 1) {
-            if (r < from or r >= to) {
-                try self.release(r);
-            }
-        }
-    }
-
-    /// Forget register r's held text, a value no instruction reads.
-    pub fn forget(self: *MethodEmitter, r: i32) void {
-        const ru: u32 = @intCast(r);
-        if (self.held[ru] != 0) {
-            self.held[ru] = 0;
-            self.heldCount -%= 1;
-        }
-    }
-
-    /// Forget the texts held from register `from` up, values no instruction reads.
-    pub fn drop(self: *MethodEmitter, from: i32) void {
-        var r: i32 = @max(from, 0);
-        while (r < self.heldTop) : (r += 1) {
-            self.forget(r);
-        }
-
-        if (from < self.heldTop) {
-            self.heldTop = @max(from, 0);
-        }
-    }
-
-    /// `r = void 0`, as a kill or popscope leaves a register; one right after
-    /// another such, with nothing written or marked between, joins it as
-    /// `a = r = void 0`, one statement.
-    pub fn reset(self: *MethodEmitter, r: i32) Error!void {
-        const out = &self.out;
-        if (@as(i32, @intCast(out.len())) == self.resetEnd and self.map.count() == self.resetMarks) {
-            out.shrink(out.len() - RESET_END);
-            try out.text(" = ");
-        }
-
-        try self.regName(r);
-        try out.text(" = void 0");
-        self.resets = true;
-    }
+    // Registers read and written, and texts held for them (method/registers.zig).
+    pub const space = method_registers.space;
+    pub const reg = method_registers.reg;
+    pub const member = method_registers.member;
+    pub const checkedRead = method_registers.checkedRead;
+    pub const unpend = method_registers.unpend;
+    pub const nameOf = method_registers.nameOf;
+    pub const read = method_registers.read;
+    pub const unboxedLocal = method_registers.unboxedLocal;
+    pub const unboxedTarget = method_registers.unboxedTarget;
+    pub const clearRaw = method_registers.clearRaw;
+    pub const numberReg = method_registers.numberReg;
+    pub const regName = method_registers.regName;
+    pub const assign = method_registers.assign;
+    pub const src = method_registers.src;
+    pub const goto = method_registers.goto;
+    pub const readsAt = method_registers.readsAt;
+    pub const inline_ = method_registers.inline_;
+    pub const hold = method_registers.hold;
+    pub const release = method_registers.release;
+    pub const clobber = method_registers.clobber;
+    pub const releaseAll = method_registers.releaseAll;
+    pub const forget = method_registers.forget;
+    pub const drop = method_registers.drop;
+    pub const reset = method_registers.reset;
 };
