@@ -196,6 +196,8 @@ interface Counts {
   moved: number;
   movesAborted: number;
   spareFaults: number;
+  /** Moves given up, by why. */
+  why: Record<string, number>;
 }
 
 async function run(seed: number): Promise<Counts> {
@@ -256,6 +258,7 @@ async function run(seed: number): Promise<Counts> {
     moved: 0,
     movesAborted: 0,
     spareFaults: 0,
+    why: {},
   };
   const start = () => {
     domains = [{ parent: -1, state: 0 }];
@@ -605,6 +608,7 @@ async function run(seed: number): Promise<Counts> {
   check("after the final compiles");
   const moves = a.usage().moves;
   counts.moved = moves.completed;
+  counts.why = { ...moves.aborted };
   counts.movesAborted = (Object.values(moves.aborted) as number[]).reduce((sum, n) => sum + n, 0);
   return counts;
 }
@@ -618,13 +622,20 @@ const total: Counts = {
   moved: 0,
   movesAborted: 0,
   spareFaults: 0,
+  why: {},
 };
 let failures = 0;
 for (let seed = first; seed < first + seeds; seed++) {
   try {
     const result = await run(seed);
     for (const key of Object.keys(total) as (keyof Counts)[]) {
-      total[key] += result[key];
+      if (key === "why") {
+        for (const [why, n] of Object.entries(result.why)) {
+          total.why[why] = (total.why[why] ?? 0) + n;
+        }
+      } else {
+        total[key] += result[key];
+      }
     }
   } catch (error) {
     failures++;
@@ -643,7 +654,8 @@ console.log(
     `${total.recovered} recovered, ${total.lost} lost as made to, ${total.unreplayable} lost as ` +
     `not replayable, ${total.compactions} compactions, ` +
     (MOVE
-      ? `${total.moved} moves, ${total.movesAborted} given up (${total.spareFaults} spare panics), `
+      ? `${total.moved} moves, ${total.movesAborted} given up ${JSON.stringify(total.why)} ` +
+        `(${total.spareFaults} spare panics), `
       : "") +
     `${failures} failures`,
 );

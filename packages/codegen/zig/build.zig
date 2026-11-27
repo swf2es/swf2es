@@ -66,6 +66,7 @@ const exports = [_][]const u8{
     "loadCheckpointState",
     "domainCompact",
     "domainRebuildStep",
+    "domainRebuildBudget",
     "domainSaveBytes",
     "domainSavedAbcBytes",
     "domainLoad",

@@ -1007,6 +1007,8 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       throw error;
     }
 
+    // Parts that block the host for little: a part's time is its garbage's, but for one large method's verification.
+    into.domainRebuildBudget(MOVE_PartBudget);
     move = {
       into,
       saved,
@@ -1655,6 +1657,8 @@ const WANT_Spare = 3;
  * rebuilds in place, in one call, rather than move a part at a time.
  */
 const IN_PLACE_Live = 4 << 20;
+/** The garbage a part of a move's rebuild makes at most (domainRebuildBudget). */
+const MOVE_PartBudget = 256 << 10;
 /** The slices compactStep catches a move up in before it finishes catching up in one. */
 const CATCH_UP_Slices = 32;
 /** How many SWFs whose blocks or units are compiled codegen holds a copy of at most. */
