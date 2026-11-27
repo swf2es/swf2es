@@ -1,5 +1,6 @@
 // Hash tables of ids for the domain's interned names and bindings
-// (assembly/avm2/link/table.ts).
+// (assembly/avm2/link/table.ts), but for hashPair, which is not
+// AssemblyScript's (see its comment).
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
@@ -205,7 +206,7 @@ test "ids inserted after a state are forgotten, those before kept" {
     }
 }
 
-test "the hashes are AssemblyScript's, wrapping" {
+test "hashBytes is AssemblyScript's, wrapping, and hashPair tells pairs apart" {
     try testing.expectEqual(0x811c9dc5, hashBytes(""));
     try testing.expectEqual(0xe40c292c, hashBytes("a"));
     try testing.expectEqual(hashPair(1, 2), hashPair(1, 2));

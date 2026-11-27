@@ -455,7 +455,8 @@ What Zig adds to the purity rule, since nothing zeroes its memory:
   build is asked for, so that `pnpm determinism` runs it in place of the
   checked build.
 - No address is ever hashed, compared or written; no `std.HashMap` is
-  iterated into output (`IdTable` is ported as it is).
+  iterated into output (`IdTable` is ported as it is, but for its
+  `hashPair`, below).
 - Indices and sizes are `u32`, not `usize`, wherever they are stored or
   computed with, so a native build computes what wasm32 does.
 
@@ -647,7 +648,12 @@ For AVM2, from reading `assembly/`:
   `grow` that re-inserts from the first slot after an empty one, so
   that equal hashes stay in insertion order. Lookups take the first row
   that matches along the probe, so which of two definitions is found
-  depends on this. Ported as written.
+  depends on this. Ported as written, but for `hashPair`, which departs
+  from AssemblyScript's on purpose (#1248): murmur3's 64-bit finalizer
+  over the pair, as AssemblyScript's left consecutive names of one
+  namespace in consecutive slots, one cluster that every lookup that
+  missed walked to its end. Which definition is found does not change:
+  equal keys share a hash under any function, and keep their order.
 - **Maps.** `catchScopes`, `vectorOf` and the source map's `sourceIndex`
   are only read by key, never iterated: any map does.
 - **Zeroed memory.** `new StaticArray<T>(n)` and a grown `Array` are
