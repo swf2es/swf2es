@@ -251,6 +251,7 @@
 //     [--checkout DIR] [--no-multi-draw]
 //   node tests/player/bench.ts --swf FILE [--frames N] [--resolution R] [--spike MS] [--top N]
 //     [--gpu] [--cpu-profile FILE] [--checkout DIR] [--census] [--no-multi-draw] [--json]
+//     [--bitmap-resolution display]
 //
 // --no-multi-draw hides WEBGL_multi_draw from the renderer, which then draws
 // as it does in a browser without it, as Firefox is; with --swf too.
@@ -264,7 +265,9 @@
 // ms waited for them, programs first drawn with, buffers made and copied, textures uploaded,
 // filter passes, composites and morphs blended anew. --cpu-profile FILE samples the whole play
 // and names the functions each listed frame spent its time in. --census takes the renderer's
-// census of every frame drawn, as for a synthetic scene. The SWF is only an argument: keep
+// census of every frame drawn, as for a synthetic scene. --bitmap-resolution display keeps vector
+// art drawn into bitmaps at the canvas' resolution (RenderViewOptions' bitmapResolution), and
+// reports the texture that held. The SWF is only an argument: keep
 // one that may not be shared out of the repository.
 //
 // --checkout DIR plays another built checkout's packages (its packages/*/dist)
@@ -2281,6 +2284,11 @@ async function playFile(path: string): Promise<void> {
     cpuProfilePath: cpuProfile,
     census: args.includes("--census"),
     multiDraw: !args.includes("--no-multi-draw"),
+    bitmapResolution:
+      args.includes("--bitmap-resolution") &&
+      args[args.indexOf("--bitmap-resolution") + 1] === "display"
+        ? "display"
+        : "stage",
   });
   if (played.error) {
     console.error(played.error);
@@ -2303,6 +2311,7 @@ async function playFile(path: string): Promise<void> {
   const round = (v: number) => Math.round(v * 100) / 100;
   // The animation frames that played more than one of the SWF's, catching up, and none.
   const doubled = steps.filter((s) => s.frames > 1).length;
+  const drew = steps.filter((t) => t.draw > 0);
   const report = {
     renderer: played.gpu,
     parallel: played.parallel,
@@ -2328,6 +2337,20 @@ async function playFile(path: string): Promise<void> {
       max: round(Math.max(0, ...total)),
     },
     doubled,
+    // Of the frames that drew, the median ms drawing and waiting for the GPU.
+    drawMedian: round(
+      quantile(
+        drew.map((t) => t.draw),
+        0.5,
+      ),
+    ),
+    glMedian: round(
+      quantile(
+        drew.map((t) => t.gl),
+        0.5,
+      ),
+    ),
+    displayMB: round(played.displayBytes / 2 ** 20),
     spikeMs: round(spikeMs),
     spikes: spikes.map((s) => ({
       ...(profile ? { functions: within(profile, s.begun, s.ms) } : {}),
@@ -2361,6 +2384,9 @@ async function playFile(path: string): Promise<void> {
   console.log(
     `  step    median ${ms(report.step.median)}  p90 ${ms(report.step.p90)}  p99 ${ms(report.step.p99)}  max ${ms(report.step.max)}; ${doubled} played more than one frame`,
   );
+  if (report.displayMB > 0) {
+    console.log(`  bitmaps ${report.displayMB} MB of texture at display resolution`);
+  }
   console.log(`  spikes  ${spikes.length} over ${ms(spikeMs)}:`);
   const shown = option("top", 40);
   // The worst, listed in order of play.

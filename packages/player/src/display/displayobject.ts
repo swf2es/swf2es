@@ -508,6 +508,11 @@ export class DisplayObject {
    * scene list a view last wrote, which only that view reads; null for none.
    */
   span: object | null = null;
+  /**
+   * pickWork.changes as it last changed (`invalidate`): what a renderer drew
+   * of it into a bitmap draws so again while this is no later than then.
+   */
+  changedAt = 0;
 
   /** A store it shows or fills with changed its pixels, or was disposed. */
   pixelsChanged(disposed: boolean): void {
@@ -517,7 +522,7 @@ export class DisplayObject {
   /** Mark a change, and that its ancestors have a changed descendant. */
   invalidate(what: number): void {
     this.dirty |= what;
-    pickWork.changes++;
+    this.changedAt = ++pickWork.changes;
     for (let p = this.parent; p && !p.descendantsDirty; p = p.parent) {
       p.descendantsDirty = true;
     }

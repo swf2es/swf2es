@@ -151,6 +151,32 @@ root was another, such as one a wrapper of another version loaded; and
 ahead of time are found only at the version they were compiled at
 (`--api`, below).
 
+Content often draws vector art into a BitmapData the stage's size and shows
+it through a Bitmap scaled to fit, as a map flattened for speed. Flash
+stretches those pixels when the stage is shown larger, and so does the
+player, so in a large window or on a dense screen such art looks blocky
+beside vectors drawn directly. `configure({ bitmapResolution: "display" })`
+shows such a bitmap at the screen's resolution instead, up to 4 screen
+pixels a stage pixel, for as long as scripts only draw display objects into
+it and fill it since it was of one colour, and draws it again when the
+scale it is shown at changes: it then looks as the vectors would. It departs
+from Flash only on the screen: the bitmap itself, and every pixel scripts
+read of it, are as with the option off. Anything else that changes the
+bitmap, such as setPixel or copyPixels into it, shows it as Flash would from
+then on. It costs texture memory, the square of the scale times the bitmap's
+(about 33 MB for a stage-sized bitmap shown at 3840 by 2160), at most 256 MB
+for all of them by default (`bitmapResolutionBudget` on the renderer), the GPU
+time of drawing that many more pixels when the SWF draws into a bitmap shown
+so, and the art drawn, which the renderer keeps while the bitmap is shown to
+draw it again. A bitmap is drawn at the screen's resolution once a Bitmap
+shows it, from what was drawn into it before: art changed between draws
+before then, such as one Shape redrawn and drawn several times, leaves the
+bitmap as Flash shows it; so does taking it off the stage for longer than
+1,800 rendered frames (300 for one never shown), after which it shows as
+Flash does until it is filled whole and drawn into again. It is off by
+default,
+`"stage"`; [Bitmaps](architecture/bitmaps.md) has the details.
+
 It has `load(url | bytes)` and `destroy()`, which
 gives back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events, and with Stage3D on, `stagelayout` as the SWF starts
@@ -546,6 +572,7 @@ the builtin.abc and playerglobal the player ships.
 | `--no-http-cache` | Neither reads nor keeps the HTTP cache, for this run. |
 | `--api-version=root` | Plays the SWF and what it loads at its own SWF version's API version (its workers at the latest), as Flash did, which hides the classes and members of later players; an AIR application stays at the latest. `latest`, the default, shows them all; a number plays them at a root of that SWF version's. |
 | `--theme=dark` | The app's look for this run: `system`, `light` or `dark`, over View › Theme's, which stays as it was unless one is chosen from that menu during the run. |
+| `--bitmap-resolution=display` | Keeps vector art the SWF draws into a bitmap at the screen's resolution for this run, over View › Sharp Bitmaps', as `configure({ bitmapResolution })` does; `stage`, Flash's, turns it off. |
 | `--software-gl` | Draws with SwiftShader, on the CPU: where Chromium takes no GPU (a server, Xvfb), or one that gives WebGL but not WebGL 2. Only for SWFs you trust. |
 | `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
 | `--proxy=http://user:pass@host:3128` | The same through an HTTP proxy, by a `CONNECT` tunnel for each connection; either kind takes a username and password. |
@@ -676,6 +703,14 @@ content plays with nothing to set up. View › Stage3D turns
 it off, after which a SWF's `requestContext3D` gets Error #3702, "Context3D
 not available", and on again; the app remembers the choice and restarts
 the movie playing.
+
+View › Sharp Bitmaps keeps vector art a SWF draws into a bitmap at the
+screen's resolution, so that a map flattened into a bitmap the stage's
+size stays as sharp as the stage's own art in a maximised window
+(`configure({ bitmapResolution })`, above). Scripts read Flash's pixels
+either way. It is off until chosen; the app remembers the choice and
+restarts the movie playing, and `--bitmap-resolution=display` or `stage`
+sets it for a single run.
 
 View › Theme makes the app light or dark, or follows the system, the
 default: its pages, the element's performance meter and context menu

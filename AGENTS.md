@@ -90,7 +90,8 @@ SWF2ES_FUZZ_STEPS=50000 SWF2ES_FUZZ_SEED=14 node --test tests/unit/player/player
                               # the two to reproduce it, SWF2ES_FUZZ_LOG=1 prints each step
 node tests/player/leak.ts [--loads N] [--snapshots DIR] [mode...]   # load SWFs over and over in
                               # Chrome, unloaded or, as a game's gear, dropped (dropped, shared,
-                              # churn); the heap after a full collection must stay bounded, and
+                              # churn), or bitmaps shown at the display's resolution dropped
+                              # (bitmaps); the heap after a full collection must stay bounded, and
                               # codegen's memory must not grow (part of pnpm test)
 node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--emit-libraries] [--air]
                               [--api latest|root|<SWF version>]   # AOT: the player's modules for the
@@ -127,6 +128,11 @@ node tests/player/redraw.ts         # a drawing cleared and drawn again every fr
 node tests/player/device-text-scale.ts [--write DIR]   # device text on a stage shown at 0.9 to 2
                               # canvas pixels a stage pixel as sharp as the browser draws it, and
                               # not rasterized again each frame of a resize (part of pnpm test)
+node tests/player/display-bitmaps.ts [--write DIR]   # bitmaps shown at the display's
+                              # resolution (bitmapResolution: "display") against the same art as
+                              # vectors at 2.7 and 1.8, their textures' scales, and every pixel
+                              # scripts read back the same as at Flash's (part of pnpm test);
+                              # --write-bench FILE writes a scene for bench.ts --swf instead
 node tests/player/draw-counts.ts [--update] [--gpu] [--runs N] [case...]   # GL draw calls,
                               # sub-draws, binds and uniform calls a frame in Chrome vs
                               # draw-counts.json, which may only go down (part of pnpm test)

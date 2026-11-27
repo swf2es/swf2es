@@ -14,6 +14,8 @@
 // --software-gl draws with SwiftShader, on the CPU: where Chromium takes no GPU, or even where it does.
 // --api-version=root|latest|<SWF version> plays the SWFs at that API version (api-version.ts).
 // --theme=system|light|dark is the app's look for this run, over View › Theme's (theme.ts).
+// --bitmap-resolution=display|stage keeps vector art drawn into bitmaps at the screen's
+//   resolution, or Flash's, for this run, over View › Sharp Bitmaps' (bitmap-resolution.ts).
 // --flashvars and --param give the SWF what a page's <object> or <embed> would (embedding.ts).
 //
 // The second runs an AIR application by its descriptor, as adl does.
@@ -82,6 +84,7 @@ import {
 import {
   announcePolicySwitch,
   apiVersion,
+  bitmapResolutionOverride,
   embedding,
   httpCacheOff,
   ignorePolicy,
@@ -350,6 +353,7 @@ function listen(): void {
     return {
       stage3D: settings.stage3D,
       apiVersion,
+      bitmapResolution: bitmapResolutionOverride ?? settings.bitmapResolution,
       libraries: settings.libraries(),
       movie: current?.movie ?? null,
       build,

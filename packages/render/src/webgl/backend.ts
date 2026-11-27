@@ -51,6 +51,7 @@ export type { Target } from "./targets.js";
 interface OverProgram {
   program: WebGLProgram;
   at: WebGLUniformLocation | null;
+  from: WebGLUniformLocation | null;
   opaque: WebGLUniformLocation | null;
 }
 
@@ -68,11 +69,12 @@ precision highp int;
 uniform sampler2D uSource;
 uniform sampler2D uBelow;
 uniform ivec2 uAt;
+uniform ivec2 uFrom;
 uniform bool uOpaque;
 out vec4 finalColor;
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy) - uAt;
-  ivec4 s = ivec4(round(texelFetch(uSource, p, 0) * 255.0));
+  ivec4 s = ivec4(round(texelFetch(uSource, p + uFrom, 0) * 255.0));
   ivec4 d = ivec4(round(texelFetch(uBelow, p, 0) * 255.0));
   ivec4 o = s.a == 255 ? s : s.a == 0 ? d : min(ivec4(255), s + ((d * (256 - s.a)) >> 8));
   if (uOpaque) {
@@ -649,7 +651,10 @@ export class WebGLBackend {
    * store composites source over (compositeOver), where it stays: nothing
    * is read back; `opaque` for an opaque store's texture. Pending
    * textures, the one drawn into among them, are uploaded first. Whether
-   * it was drawn; not on a lost context or without the texture.
+   * it was drawn; not on a lost context or without the texture. With a
+   * `margin`, the commands are drawn that much wider each way, as filters
+   * near the edge of a tile of a larger draw read past it, and only what
+   * lies within the margin is composited.
    */
   drawIntoTexture(
     commands: Commands,
@@ -667,6 +672,7 @@ export class WebGLBackend {
     x: number,
     y: number,
     opaque: boolean,
+    margin = 0,
   ): boolean {
     if (!this.live) {
       return false;
@@ -688,7 +694,16 @@ export class WebGLBackend {
       );
       const into = this.textureFramebuffer(id);
       if (into) {
-        this.compositeOver(layer, into, x, y, width, height, opaque);
+        this.compositeOver(
+          layer,
+          into,
+          x,
+          y,
+          width - 2 * margin,
+          height - 2 * margin,
+          opaque,
+          margin,
+        );
       }
 
       this.pool.giveLayer(layer);
@@ -700,7 +715,7 @@ export class WebGLBackend {
   }
 
   /**
-   * `layer`'s first `width` by `height` texels over those of `into` at
+   * `layer`'s `width` by `height` texels from (from, from) over those of `into` at
    * (x, y), as Flash's store composites source over, a channel at a time
    * on whole bytes: s + ((d * (256 - sa)) >> 8), at most 255, a source of
    * alpha 255 put as it is and one of 0 leaving what was there; an opaque
@@ -716,6 +731,7 @@ export class WebGLBackend {
     width: number,
     height: number,
     opaque: boolean,
+    from = 0,
   ): void {
     const gl = this.gl;
     const state = this.state;
@@ -736,6 +752,7 @@ export class WebGLBackend {
     state.bindTexture(LAYER_UNIT, below.texture);
     state.bindSampler(LAYER_UNIT, nearest);
     gl.uniform2i(over.at, x, y);
+    gl.uniform2i(over.from, from, from);
     gl.uniform1i(over.opaque, opaque ? 1 : 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     this.pool.giveLayer(below);
@@ -760,6 +777,7 @@ export class WebGLBackend {
     this.overProgram = {
       program,
       at: gl.getUniformLocation(program, "uAt"),
+      from: gl.getUniformLocation(program, "uFrom"),
       opaque: gl.getUniformLocation(program, "uOpaque"),
     };
   }

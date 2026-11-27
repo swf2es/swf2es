@@ -715,9 +715,11 @@ async function surfaceFor(
   antialias: boolean,
   preserve = true,
   canvas?: HTMLCanvasElement,
+  bitmapResolution: "stage" | "display" = "stage",
 ): Promise<RenderView> {
   const view = new RenderView({
     canvas,
+    bitmapResolution,
     width: player.width,
     height: player.height,
     resolution,
@@ -1650,6 +1652,8 @@ interface Played {
   parallel: boolean;
   /** Each frame drawn's census, where asked for: see installCensus. */
   census: Record<string, number>[];
+  /** The bytes of texture bitmaps at display resolution held at the end (bitmapResolution). */
+  displayBytes: number;
   error: string | null;
 }
 
@@ -1806,6 +1810,7 @@ async function playSwf(
   resolution: number,
   cpuProfile = false,
   census = false,
+  bitmapResolution: "stage" | "display" = "stage",
 ): Promise<Played> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const steps: PlayedStep[] = [];
@@ -1819,7 +1824,7 @@ async function playSwf(
     const morphs = morphMetrics(player);
     const meter = firstUses(links);
     const made = performance.now();
-    const view = await surfaceFor(player, 1, 1, 1, false, false);
+    const view = await surfaceFor(player, 1, 1, 1, false, false, undefined, bitmapResolution);
     const renderer = performance.now() - made;
     view.screenScale = null;
     view.resize(player.width, player.height, resolution);
@@ -1941,6 +1946,7 @@ async function playSwf(
       }
     }
 
+    const displayBytes = view.displayBitmapBytes;
     view.destroy();
     return {
       steps,
@@ -1954,6 +1960,7 @@ async function playSwf(
       gpu,
       parallel,
       census: censused?.frames ?? [],
+      displayBytes,
       error: null,
     };
   } catch (e) {
@@ -1969,6 +1976,7 @@ async function playSwf(
       gpu,
       parallel: false,
       census: [],
+      displayBytes: 0,
       error: describe(e, null),
     };
   }
@@ -2170,6 +2178,114 @@ async function deviceTextSwf(
     }
 
     return frames;
+  } finally {
+    view.destroy();
+  }
+}
+
+/**
+ * An AS3 SWF played on a renderer whose BitmapData.draw keeps bitmaps at
+ * `mode` (RenderViewOptions' `bitmapResolution`), shown as a host shows
+ * it: each step's resolution, canvas pixels a stage pixel, for its frames,
+ * each rendered, the last read back where it asks, its context lost and
+ * given back first where it asks; what the SWF traced, and the texture the
+ * bitmaps shown at display resolution held after each step.
+ */
+async function displayBitmapsSwf(
+  base64: string,
+  mode: "stage" | "display",
+  steps: { resolution: number; frames: number; capture: boolean; lose?: boolean }[],
+): Promise<{
+  trace: string[];
+  error: string | null;
+  shots: { width: number; height: number; pixels: string | null; bytes: number; count: number }[];
+}> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const trace: string[] = [];
+  const uncaught: unknown[] = [];
+  const shots = [];
+  const scripting = await scriptingFor(bytes, trace, null, uncaught, {});
+  if (!scripting) {
+    throw new Error("not an AS3 SWF");
+  }
+
+  const player = new Player(bytes, scripting, null);
+  const view = new RenderView({
+    width: player.width,
+    height: player.height,
+    resolution: steps[0]?.resolution ?? 1,
+    background: player.background,
+    preserveDrawingBuffer: true,
+    fillTessellator: await fillTessellator(),
+    bitmapResolution: mode,
+  });
+  view.quality = player.quality;
+  scripting.drawer = view;
+  try {
+    await player.start();
+    let first = true;
+    for (const step of steps) {
+      view.resize(player.width, player.height, step.resolution);
+      // As the element's stageSamples at high quality: 8, fewer on a denser canvas.
+      let dense = 4;
+      while (dense < 8 / (step.resolution * step.resolution)) {
+        dense *= 2;
+      }
+
+      view.samples = Math.min(8, dense);
+      if (step.lose) {
+        const lose = view.gl.getExtension("WEBGL_lose_context");
+        const restored = new Promise((done) =>
+          view.canvas.addEventListener("webglcontextrestored", () => setTimeout(done, 0), {
+            once: true,
+          }),
+        );
+        view.canvas.addEventListener(
+          "webglcontextlost",
+          () => setTimeout(() => lose?.restoreContext(), 0),
+          { once: true },
+        );
+        lose?.loseContext();
+        await restored;
+      }
+
+      for (let frame = 0; frame < step.frames; frame++) {
+        if (!first) {
+          await scripting.settled();
+          player.tick();
+        }
+
+        first = false;
+        if (uncaught.length > 0) {
+          throw uncaught[0];
+        }
+
+        view.render(player.stage);
+      }
+
+      let pixels: string | null = null;
+      if (step.capture) {
+        const data = pixelsOf(view.gl);
+        let text = "";
+        for (let i = 0; i < data.length; i += 0x8000) {
+          text += String.fromCharCode(...data.subarray(i, i + 0x8000));
+        }
+
+        pixels = btoa(text);
+      }
+
+      shots.push({
+        width: view.gl.drawingBufferWidth,
+        height: view.gl.drawingBufferHeight,
+        pixels,
+        bytes: view.displayBitmapBytes,
+        count: view.displayBitmapCount,
+      });
+    }
+
+    return { trace, error: null, shots };
+  } catch (e) {
+    return { trace, error: describe(e, scripting), shots };
   } finally {
     view.destroy();
   }
@@ -2780,13 +2896,21 @@ let opened: {
   scripting: Scripting | null;
   trace: string[];
   uncaught: unknown[];
+  /** Its renderer, which draws each frame, where it was opened to show bitmaps at display resolution. */
+  view: RenderView | null;
 } | null = null;
 
 /** Start a SWF, with no renderer, for stepSwf to play; any SWF opened before is let go. */
 /** The module cache openSwf's players share, made by the first that asks for one (leak.ts --cache). */
 let leakCache: ModuleCache | null = null;
 
-async function openSwf(base64: string, url: string | null, cached = false): Promise<string | null> {
+async function openSwf(
+  base64: string,
+  url: string | null,
+  cached = false,
+  display = false,
+): Promise<string | null> {
+  opened?.view?.destroy();
   opened = null;
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const trace: string[] = [];
@@ -2801,8 +2925,18 @@ async function openSwf(base64: string, url: string | null, cached = false): Prom
       moduleCache: cached ? leakCache : null,
     });
     const player = new Player(bytes, scripting);
+    // Shown on a canvas at twice the stage, its bitmaps at that resolution (leak.ts' bitmaps).
+    let view: RenderView | null = null;
+    if (display) {
+      view = await surfaceFor(player, 2, 1, 1, false, false, undefined, "display");
+      view.screenScale = null;
+      if (scripting) {
+        scripting.drawer = view;
+      }
+    }
+
     await player.start();
-    opened = { player, scripting, trace, uncaught };
+    opened = { player, scripting, trace, uncaught, view };
     return null;
   } catch (e) {
     return describe(e, scripting);
@@ -2817,12 +2951,18 @@ async function openSwf(base64: string, url: string | null, cached = false): Prom
 async function stepSwf(
   lines: number,
   frames: number,
-): Promise<{ lines: number; codegen: number; live: number; error: string | null }> {
+): Promise<{
+  lines: number;
+  codegen: number;
+  live: number;
+  display: number;
+  error: string | null;
+}> {
   if (!opened) {
-    return { lines: 0, codegen: 0, live: 0, error: "no SWF is open" };
+    return { lines: 0, codegen: 0, live: 0, display: 0, error: "no SWF is open" };
   }
 
-  const { player, scripting, trace, uncaught } = opened;
+  const { player, scripting, trace, uncaught, view } = opened;
   try {
     for (let frame = 0; frame < frames && trace.length < lines; frame++) {
       await scripting?.settled();
@@ -2830,16 +2970,19 @@ async function stepSwf(
       if (uncaught.length > 0) {
         throw uncaught[0];
       }
+
+      view?.render(player.stage);
     }
 
     return {
       lines: trace.length,
       codegen: scripting?.codegen.memoryBytes() ?? 0,
       live: scripting?.codegen.usage().live ?? 0,
+      display: view?.displayBitmapBytes ?? 0,
       error: null,
     };
   } catch (e) {
-    return { lines: trace.length, codegen: 0, live: 0, error: describe(e, scripting) };
+    return { lines: trace.length, codegen: 0, live: 0, display: 0, error: describe(e, scripting) };
   }
 }
 
@@ -2850,6 +2993,7 @@ async function traceSwf(): Promise<string[]> {
 
 /** Let go of the SWF openSwf started. */
 async function closeSwf(): Promise<boolean> {
+  opened?.view?.destroy();
   opened = null;
   return true;
 }
@@ -3081,6 +3225,7 @@ const page = globalThis as unknown as {
   resizeSwf: typeof resizeSwf;
   redrawSwf: typeof redrawSwf;
   deviceTextSwf: typeof deviceTextSwf;
+  displayBitmapsSwf: typeof displayBitmapsSwf;
   canvasText: typeof canvasText;
   contextLossSwf: typeof contextLossSwf;
   contextLossPlanSwf: typeof contextLossPlanSwf;
@@ -3099,6 +3244,7 @@ page.traceSwf = traceSwf;
 page.resizeSwf = resizeSwf;
 page.redrawSwf = redrawSwf;
 page.deviceTextSwf = deviceTextSwf;
+page.displayBitmapsSwf = displayBitmapsSwf;
 page.canvasText = canvasText;
 page.contextLossSwf = contextLossSwf;
 page.contextLossPlanSwf = contextLossPlanSwf;

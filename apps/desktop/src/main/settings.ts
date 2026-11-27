@@ -1,11 +1,11 @@
 // What the app remembers between runs, in settings.json under its user
-// data: a playerglobal.abc the user chose, the SWFs opened last, Stage3D
-// and the theme as the View menu set them, and the HTTP cache from the File
-// menu.
+// data: a playerglobal.abc the user chose, the SWFs opened last, Stage3D,
+// Sharp Bitmaps and the theme as the View menu set them, and the HTTP cache
+// from the File menu.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { LibraryName, LibraryState } from "../shared/api.js";
+import type { BitmapResolution, LibraryName, LibraryState } from "../shared/api.js";
 import { isTheme, type Theme } from "./theme.ts";
 
 export interface Settings {
@@ -19,6 +19,8 @@ export interface Settings {
   httpCache?: boolean;
   /** The theme as the View menu last set it; absent until it does, which is the system's. */
   theme?: Theme;
+  /** View › Sharp Bitmaps as last set; absent until it is, which is off. */
+  sharpBitmaps?: boolean;
   playerglobal?: string;
   /** Most recent first. */
   recent: string[];
@@ -79,6 +81,15 @@ export class SettingsFile {
     return this.update({ httpCache: enabled });
   }
 
+  /** Where BitmapData.draw keeps vector art: Flash's resolution unless the user chose the screen's. */
+  get bitmapResolution(): BitmapResolution {
+    return this.current.sharpBitmaps ? "display" : "stage";
+  }
+
+  setSharpBitmaps(enabled: boolean): boolean {
+    return this.update({ sharpBitmaps: enabled });
+  }
+
   /** The app's light or dark look: the system's unless the user chose one. */
   get theme(): Theme {
     return this.current.theme ?? "system";
@@ -122,6 +133,7 @@ export class SettingsFile {
         stage3DChoice: typeof read.stage3DChoice === "boolean" ? read.stage3DChoice : undefined,
         httpCache: typeof read.httpCache === "boolean" ? read.httpCache : undefined,
         theme: isTheme(read.theme) ? read.theme : undefined,
+        sharpBitmaps: typeof read.sharpBitmaps === "boolean" ? read.sharpBitmaps : undefined,
         playerglobal: text(read.playerglobal),
         recent: strings(read.recent),
         sockets: Object.fromEntries(

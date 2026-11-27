@@ -67,12 +67,21 @@ function drawObject(
   }
 
   const placed = { ...m, tx: m.tx - x0, ty: m.ty - y0 };
+  // What the renderer follows of the draw, where it keeps stores at the display's resolution.
+  const follows = drawer.displayDraws === true;
+  const before = follows ? store.version : 0;
+  const solid = follows ? store.solidPixel : null;
+
   // Plain source over goes on the GPU, the store left there until a script reads it.
   if (
     !c &&
     blend === "normal" &&
     drawer.drawInto(store, d, placed, x0, y0, x1 - x0, y1 - y0, samples)
   ) {
+    if (follows) {
+      drawer.drawn?.(store, d, placed, x0, y0, x1 - x0, y1 - y0, samples, true, before, solid);
+    }
+
     return;
   }
 
@@ -83,6 +92,24 @@ function drawObject(
   drawn.pixels = drawer.snapshot(d, placed, x1 - x0, y1 - y0, grid);
   const at = { a: 1, b: 0, c: 0, d: 1, tx: x0, ty: y0 };
   drawBitmap(store, drawn, at, c, blend, r, false, false, "drawing");
+  if (follows) {
+    const plain = blend === "normal" && (!c || unchanging(c));
+    drawer.drawn?.(store, d, placed, x0, y0, x1 - x0, y1 - y0, samples, plain, before, solid);
+  }
+}
+
+/** Whether `c` leaves every colour as it is, as a layer's own colour transform often does. */
+function unchanging(c: ColorTransformValues): boolean {
+  return (
+    c.rMul === 1 &&
+    c.gMul === 1 &&
+    c.bMul === 1 &&
+    c.aMul === 1 &&
+    c.rAdd === 0 &&
+    c.gAdd === 0 &&
+    c.bAdd === 0 &&
+    c.aAdd === 0
+  );
 }
 
 /**

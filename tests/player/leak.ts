@@ -32,6 +32,13 @@
 // - churn: each gear loaded once into that domain and kept, instances of
 //   its class made and dropped every frame, each a load.
 //
+// And a renderer that shows bitmaps at the display's resolution:
+//
+// - bitmaps: cards, each a Sprite that draws its child art into a
+//   BitmapData of its own and shows it scaled up, put on the stage and
+//   dropped without dispose(); what each card's texture and record hold
+//   must go with it, and the texture held must not grow with the cards.
+//
 // And that what lives on still works once the rest is collected:
 //
 // - kept: a main SWF keeps a text field a child's code made in an
@@ -172,6 +179,7 @@ const abcs = compileScripts([
   ...gearNames.map((name) => ({ name, source: gear(name) })),
   { name: "LeakMain", source: main },
   { name: "LeakKept", source: kept },
+  "LeakBitmaps",
   { name: "LeakKeptChild", source: keptChild },
   {
     name: "LeakProbe",
@@ -198,6 +206,10 @@ const oneFrame = (tags: Uint8Array[]) =>
 const mainSwf = oneFrame([
   w.doAbc(abcs.get("LeakMain") as Uint8Array, "LeakMain"),
   w.symbolClass([[0, "LeakMain"]]),
+]);
+const bitmapsSwf = oneFrame([
+  w.doAbc(abcs.get("LeakBitmaps") as Uint8Array, "LeakBitmaps"),
+  w.symbolClass([[0, "LeakBitmaps"]]),
 ]);
 const keptSwf = oneFrame([
   w.doAbc(abcs.get("LeakKept") as Uint8Array, "LeakKept"),
@@ -371,6 +383,7 @@ await withSteppedPage(
       "dropped",
       "shared",
       "churn",
+      "bitmaps",
     ]) {
       if (modes.length && !modes.includes(mode)) {
         continue;
@@ -382,6 +395,7 @@ await withSteppedPage(
       const codegen: number[] = [];
       const live: number[] = [];
       const memories: number[] = [];
+      const display: number[] = [];
       let warmed = 0;
       let error: string | null = null;
       const measure = async (n: number) => {
@@ -416,7 +430,9 @@ await withSteppedPage(
                   : `/leak/main.swf?kinds=${mode === "same" ? 1 : KINDS}`,
                 cached,
               )
-            : await page.open(gearSwf, `/leak/gear.swf?mode=${mode}&kinds=${KINDS}`, cached);
+            : mode === "bitmaps"
+              ? await page.open(bitmapsSwf, "/leak/bitmaps.swf", cached, true)
+              : await page.open(gearSwf, `/leak/gear.swf?mode=${mode}&kinds=${KINDS}`, cached);
         for (const n of [WARM, LOADS]) {
           if (error) {
             break;
@@ -429,6 +445,10 @@ await withSteppedPage(
           // After the collection measure made, as what codegen keeps of a
           // domain it has not evicted goes only with the domain.
           live.push((await page.step(0, 0)).live);
+          // The textures of the cards collected let go of as a frame starts.
+          if (mode === "bitmaps") {
+            display.push((await page.step(Number.MAX_SAFE_INTEGER, 2)).display);
+          }
         }
 
         await page.close();
@@ -449,7 +469,9 @@ await withSteppedPage(
       const codegenOk =
         liveOk && (codegen.length < 2 || codegen[1] <= Math.max(codegen[0], ceiling));
       const memoriesOk = memories.length < 2 || memories[1] <= memories[0];
-      failed ||= !ok || !codegenOk || !memoriesOk;
+      // At most the cards on the stage and those just off it: none of those collected.
+      const displayOk = display.length < 2 || display[1] <= display[0];
+      failed ||= !ok || !codegenOk || !memoriesOk || !displayOk;
       console.log(
         `${mode}: heap ${mb(heaps[0])} after ${WARM} loads, ${mb(heaps[1])} after ${LOADS}, ` +
           `${(perLoad / 1024).toFixed(1)} KB a load${ok ? "" : ` (more than ${BOUND / 1024} KB)`}; ` +
@@ -459,6 +481,9 @@ await withSteppedPage(
             : "") +
           (memories.length
             ? `wasm memories ${memories[0]} to ${memories[1]}${memoriesOk ? "" : " (grew)"}; `
+            : "") +
+          (display.length
+            ? `bitmaps at display resolution ${mb(display[0])} to ${mb(display[1])}${displayOk ? "" : " (grew)"}; `
             : "") +
           `${ms.toFixed(1)} ms a load`,
       );

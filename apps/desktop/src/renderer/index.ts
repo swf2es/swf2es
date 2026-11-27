@@ -175,7 +175,11 @@ desktop.onClose(() => {
   }
 });
 const state = await desktop.start();
-configure({ build: state.build ?? undefined, apiVersion: state.apiVersion });
+configure({
+  build: state.build ?? undefined,
+  apiVersion: state.apiVersion,
+  bitmapResolution: state.bitmapResolution,
+});
 if (state.stage3D) {
   // The WebGL2 backend loads when a SWF first asks for a context, so that one that never does
   // starts without waiting for it.

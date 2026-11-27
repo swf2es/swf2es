@@ -361,6 +361,30 @@ export interface Drawer {
     height: number,
     samples: number,
   ): boolean;
+  /**
+   * Whether the renderer follows draws into stores (`drawn`): where it keeps
+   * them at the display's resolution too (RenderViewOptions' `bitmapResolution`).
+   */
+  readonly displayDraws?: boolean;
+  /**
+   * `o` drawn into `store` as `drawInto` takes it, by whichever way it went:
+   * `plain` where it went source over with no colour transform but one that
+   * changes nothing; `before`, the store's version before, and `solid` the
+   * colour it was all of then, or null.
+   */
+  drawn?(
+    store: BitmapStore,
+    o: DisplayObject,
+    m: Affine,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    samples: number,
+    plain: boolean,
+    before: number,
+    solid: number | null,
+  ): void;
 }
 
 /**

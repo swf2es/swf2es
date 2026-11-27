@@ -295,6 +295,15 @@ export interface GpuCopy {
 }
 
 export class BitmapStore {
+  /**
+   * Told of each fillRect once done: the rect clipped, the pixel as the store
+   * keeps it, and the store's version before it. A renderer keeping bitmaps
+   * at the display's resolution follows the fills with it (DisplayBitmaps);
+   * null otherwise.
+   */
+  static fillWatch:
+    | ((store: BitmapStore, rect: PixelRect, pixel: number, before: number) => void)
+    | null = null;
   private cpu: Uint32Array;
   /**
    * The premultiplied pixel every pixel of a store is as made of one colour,
@@ -652,15 +661,16 @@ export class BitmapStore {
     }
 
     const pixel = this.premultiplied(argb);
-    if (this.onGpu((copy) => copy.fill(c, pixel))) {
-      return;
+    const before = this.version;
+    if (!this.onGpu((copy) => copy.fill(c, pixel))) {
+      for (let y = c.y; y < c.y + c.height; y++) {
+        this.pixels.fill(pixel, y * this.width + c.x, y * this.width + c.x + c.width);
+      }
+
+      this.changed();
     }
 
-    for (let y = c.y; y < c.y + c.height; y++) {
-      this.pixels.fill(pixel, y * this.width + c.x, y * this.width + c.x + c.width);
-    }
-
-    this.changed();
+    BitmapStore.fillWatch?.(this, c, pixel, before);
   }
 
   /**
