@@ -9,7 +9,10 @@
 //   node tests/fuzz/recovery.ts [seeds, 20] [first seed, 1] [steps, 300]
 //   (COMPACT=1 compacts too, both at the same steps, in spare instances,
 //   INPLACE=1 in place half the time, TRANSIENT=1 with domains made,
-//   filled and let go of; PANIC_RATE, VERBOSE=1, STOP=1, DUMP=dir)
+//   filled and let go of; MOVE=1 has A alone move its domain a few parts
+//   at a time between steps (compactStep), B never compacting, with
+//   panics injected into A's spare mid-move, which give the move up;
+//   PANIC_RATE, VERBOSE=1, STOP=1, DUMP=dir)
 import assert from "node:assert/strict";
 import * as dumpFs from "node:fs";
 import { readFileSync } from "node:fs";
@@ -28,6 +31,7 @@ const seeds = Number(process.argv[2] ?? 20);
 const first = Number(process.argv[3] ?? 1);
 const steps = Number(process.argv[4] ?? 300);
 const COMPACT = process.env.COMPACT === "1";
+const MOVE = process.env.MOVE === "1";
 const PANIC_RATE = Number(process.env.PANIC_RATE ?? 0.06);
 const VERBOSE = process.env.VERBOSE === "1";
 
@@ -43,15 +47,33 @@ const builtin = new Uint8Array(readFileSync(`${TREE}/oracle/avmplus/generated/bu
 // in memory already taken: where only one did, the other then moves.
 const INPLACE = process.env.INPLACE === "1";
 let inject: string | null = null;
+// Under MOVE, an export of A's spare to panic in once, set only while A's
+// compactStep runs, when only the spare calls these.
+let spareInject: string | null = null;
+const SPARE_CALLS = [
+  "domainLoad",
+  "domainLoadAbc",
+  "domainLoadRebuild",
+  "domainRebuildStep",
+  "domainAdd",
+  "domainRevive",
+  "domainRestore",
+  "replayEntry",
+];
 let compacting: "no" | "move" | "in place" = "no";
 let refusals = 0;
 const wrapped = (instance: WebAssembly.Instance) => {
   const raw = instance.exports as Record<string, (...args: number[]) => number>;
   const exports: Record<string, unknown> = { ...instance.exports };
-  for (const name of ["domainModuleBytes", "journalBytes"]) {
+  for (const name of ["domainModuleBytes", "journalBytes", ...SPARE_CALLS]) {
     exports[name] = (...args: number[]) => {
       if (inject === name) {
         inject = null;
+        raw.testingPanic();
+      }
+
+      if (spareInject === name) {
+        spareInject = null;
         raw.testingPanic();
       }
 
@@ -59,7 +81,7 @@ const wrapped = (instance: WebAssembly.Instance) => {
     };
   }
 
-  if (COMPACT) {
+  if (COMPACT || MOVE) {
     // WANT_Spare always; WANT_Move or WANT_InPlace and WANT_InPlaceBesideSpare as compacting says.
     exports.domainWantsCompact = (want: number) =>
       want === 3 || (want === 2 && compacting === "move") || (want < 2 && compacting === "in place")
@@ -170,6 +192,12 @@ interface Counts {
   /** Where recovery could not replay, as after a compile cut short. */
   unreplayable: number;
   compactions: number;
+  /** Under MOVE: A's moves completed, given up, and the panics injected into its spare. */
+  moved: number;
+  movesAborted: number;
+  spareFaults: number;
+  /** Moves given up, by why. */
+  why: Record<string, number>;
 }
 
 async function run(seed: number): Promise<Counts> {
@@ -221,7 +249,17 @@ async function run(seed: number): Promise<Counts> {
   const logs = new Map<number, string>();
   const hashes = () => abcs.map((_, i) => `h${i}`);
   const liveDomains = () => domains.map((d, i) => (d.state === 0 ? i : -1)).filter((i) => i >= 0);
-  const counts: Counts = { panics: 0, recovered: 0, lost: 0, unreplayable: 0, compactions: 0 };
+  const counts: Counts = {
+    panics: 0,
+    recovered: 0,
+    lost: 0,
+    unreplayable: 0,
+    compactions: 0,
+    moved: 0,
+    movesAborted: 0,
+    spareFaults: 0,
+    why: {},
+  };
   const start = () => {
     domains = [{ parent: -1, state: 0 }];
     abcs = [];
@@ -234,6 +272,7 @@ async function run(seed: number): Promise<Counts> {
   const check = (what: string) => {
     for (let i = 0; i < abcs.length; i++) {
       both(`${what}: context ${i}`, (g) => g.context(i));
+      // Under MOVE too: a swap keeps the keys of a domain's live ABCs.
       both(`${what}: keyContext ${i}`, (g) => g.keyContext(i, 0), !COMPACT);
     }
 
@@ -243,7 +282,81 @@ async function run(seed: number): Promise<Counts> {
   };
 
   start();
+  // Under MOVE, a move given up only where a fault was injected: a panic of
+  // the spare, or of the old instance (or a reset after one), or a
+  // revival that rebuilt the old instance in place; never refused, and
+  // never for a call not journaled but with ANY_FOUND.
+  let seenAborts = { ...a.usage().moves.aborted };
+  let opsBefore = ops.length;
+  const audit = (what: string, spareFaulted: boolean) => {
+    const now = a.usage().moves.aborted;
+    for (const why of ["spare", "refused", "unjournaled", "superseded"] as const) {
+      if (now[why] > seenAborts[why]) {
+        const faulted =
+          why === "superseded"
+            ? /^(panic|revive)/.test(what)
+            : why === "spare"
+              ? spareFaulted
+              : why === "unjournaled" && process.env.ANY_FOUND === "1";
+        assert.ok(faulted, `seed ${seed}: a move given up (${why}) at ${what}, with no fault`);
+      }
+    }
+
+    seenAborts = { ...now };
+  };
   for (let step = 0; step < steps; step++) {
+    if (MOVE) {
+      const last = ops.length > opsBefore ? (ops.at(-1) as { op: string }).op : "nothing";
+      audit(last, false);
+      opsBefore = ops.length;
+    }
+
+    // A few parts of A's move between B's and A's calls, a spare's panic
+    // now and then among them.
+    if (MOVE && r() < 0.35) {
+      const parts = 1 + Math.floor(r() * 6);
+      const injected = r() < 0.08 ? pick(SPARE_CALLS) : null;
+      spareInject = injected;
+      compacting = "move";
+      const before = a.usage().moves;
+      const progress: string[] = [];
+      for (let k = 0; k < parts; k++) {
+        const result = outcome(() => a.compactStep({ timeRemaining: () => 0 }));
+        assert.ok(
+          result.error === undefined,
+          `seed ${seed}: compactStep at step ${step} threw ${result.error}`,
+        );
+        progress.push(result.value as string);
+        if (result.value !== "moving") {
+          break;
+        }
+      }
+
+      compacting = "no";
+      audit("move", injected !== null && spareInject === null);
+      if (injected !== null && spareInject === null) {
+        counts.spareFaults++;
+        assert.equal(
+          a.usage().moves.aborted.spare,
+          before.aborted.spare + 1,
+          `seed ${seed}: a panic of the spare in ${injected} at step ${step} gave the move up`,
+        );
+      }
+
+      spareInject = null;
+      say(`move ${progress.join(" ")}`);
+      // Each swap compiles and resolves as B, which never compacts.
+      if (progress.includes("done")) {
+        check(`after a move (step ${step})`);
+        for (let i = 1; i < abcs.length; i++) {
+          both(`after a move (step ${step}): compile ${i}`, (g) => g.compileModule(hashes(), i));
+        }
+      }
+
+      // A spare, which compactStep asks for, made between steps.
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
     const x = r();
     // A panic in a compile, or in reading its log, which recovery undoes.
     if (x < PANIC_RATE / 3 && abcs.length > 1) {
@@ -527,16 +640,36 @@ async function run(seed: number): Promise<Counts> {
   }
 
   check("after the final compiles");
+  const moves = a.usage().moves;
+  counts.moved = moves.completed;
+  counts.why = { ...moves.aborted };
+  counts.movesAborted = (Object.values(moves.aborted) as number[]).reduce((sum, n) => sum + n, 0);
   return counts;
 }
 
-const total: Counts = { panics: 0, recovered: 0, lost: 0, unreplayable: 0, compactions: 0 };
+const total: Counts = {
+  panics: 0,
+  recovered: 0,
+  lost: 0,
+  unreplayable: 0,
+  compactions: 0,
+  moved: 0,
+  movesAborted: 0,
+  spareFaults: 0,
+  why: {},
+};
 let failures = 0;
 for (let seed = first; seed < first + seeds; seed++) {
   try {
     const result = await run(seed);
     for (const key of Object.keys(total) as (keyof Counts)[]) {
-      total[key] += result[key];
+      if (key === "why") {
+        for (const [why, n] of Object.entries(result.why)) {
+          total.why[why] = (total.why[why] ?? 0) + n;
+        }
+      } else {
+        total[key] += result[key];
+      }
     }
   } catch (error) {
     failures++;
@@ -553,7 +686,12 @@ for (let seed = first; seed < first + seeds; seed++) {
 console.log(
   `${seeds} seeds from ${first}, ${steps} steps each: ${total.panics} panics injected, ` +
     `${total.recovered} recovered, ${total.lost} lost as made to, ${total.unreplayable} lost as ` +
-    `not replayable, ${total.compactions} compactions, ${failures} failures`,
+    `not replayable, ${total.compactions} compactions, ` +
+    (MOVE
+      ? `${total.moved} moves, ${total.movesAborted} given up ${JSON.stringify(total.why)} ` +
+        `(${total.spareFaults} spare panics), `
+      : "") +
+    `${failures} failures`,
 );
 if (total.recovered + total.lost + total.unreplayable !== total.panics) {
   console.log("not every injected panic was recovered from or lost by design");

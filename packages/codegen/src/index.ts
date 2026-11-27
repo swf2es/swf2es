@@ -10,6 +10,7 @@
 import { AIR_API_VERSION, API_VERSION, checkApiVersion, isAirApiVersion } from "@swf2es/format";
 import { KeyChains, type KeyContext } from "./keys.js";
 import {
+  type CodegenExports,
   CodegenOutOfMemory,
   CodegenPanic,
   checkExports,
@@ -200,6 +201,38 @@ export interface LoggedModule {
   log: string | null;
 }
 
+/** How long compactStep may go on: as an IdleDeadline, the milliseconds left. */
+export interface CompactDeadline {
+  timeRemaining(): number;
+}
+
+/** What compactStep did (see Codegen.compactStep). */
+export type CompactProgress = "none" | "moving" | "done";
+
+/** Why a move compactStep started was given up, the domain left as it was. */
+export type MoveAbort =
+  /** The spare instance panicked, trapped or ran out of memory. */
+  | "spare"
+  /** The spare refused: the domain too large to move, or a part that did not load, rebuild or replay. */
+  | "refused"
+  /** A call meanwhile could not be journaled, so the spare could not catch up. */
+  | "unjournaled"
+  /** The domain was reset, recovered from a panic, or rebuilt in place meanwhile. */
+  | "superseded";
+
+/**
+ * compactStep's moves: started, completed, and given up by why; and of the
+ * last one completed, the calls replayed into its spare after its rebuild,
+ * and the bytes of its snapshot, which recovery keeps as its checkpoint.
+ */
+export interface MoveCounts {
+  started: number;
+  completed: number;
+  aborted: Record<MoveAbort, number>;
+  lastCaughtUp: number;
+  lastSavedBytes: number;
+}
+
 /**
  * The compiler. ABCs are added to a domain in the order the SWF loads them
  * (the builtins first), and the last one added compiles to its module,
@@ -258,15 +291,34 @@ export interface Codegen {
    */
   compact(): boolean;
   /**
+   * compact a part at a time, for a host that goes on compiling meanwhile:
+   * a move into the spare instance is snapshotted, loaded and rebuilt there
+   * while `deadline.timeRemaining()` is above 0 (one part at least), the
+   * calls made meanwhile replayed into it, and it takes this instance's
+   * place once it has caught up. "moving" while some is left, to be called
+   * again; "done" once a rebuild finished in this call; "none" if none was
+   * due, or the move was given up, the domain left as it was. Only a small
+   * domain is rebuilt in place, in one call; a larger one moves.
+   */
+  compactStep(deadline: CompactDeadline): CompactProgress;
+  /**
    * What the ABCs hold of codegen's memory, roughly, in bytes: the live
    * ones', and the dropped and evicted domains' that compact would free;
    * the size of codegen's memory, which grows and never shrinks but when
    * compact moves the domain to a new instance; how many such moves
    * failed, each leaving the domain as it was, rebuilt in place if at all;
-   * and what the recovery from a panic holds outside codegen's memory: its
-   * checkpoint and the inputs journaled since, in bytes.
+   * compactStep's moves; and what the recovery from a panic holds outside
+   * codegen's memory: its checkpoint and the inputs journaled since, in
+   * bytes.
    */
-  usage(): { live: number; dead: number; memory: number; failedMoves: number; recovery: number };
+  usage(): {
+    live: number;
+    dead: number;
+    memory: number;
+    failedMoves: number;
+    moves: MoveCounts;
+    recovery: number;
+  };
   /** The size of codegen's memory in bytes, as usage gives it: cheap, for a host that shows it often. */
   memoryBytes(): number;
   /**
@@ -583,6 +635,12 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     }
 
     if (done && saved) {
+      // The journal a move under way catches up from is cleared below.
+      if (into === wasm) {
+        abortMove("superseded");
+      }
+
+      moveRefused = false;
       checkpoint = saved;
       journal.clear();
       restores.clear();
@@ -603,6 +661,35 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   let spare: typeof wasm | null = null;
   let making = false;
   let failedMoves = 0;
+  // The move compactStep has under way, a part at a time (see Move), and what came of its moves.
+  let move: Move | null = null;
+  const moves: MoveCounts = {
+    started: 0,
+    completed: 0,
+    aborted: { spare: 0, refused: 0, unjournaled: 0, superseded: 0 },
+    lastCaughtUp: 0,
+    lastSavedBytes: 0,
+  };
+  // Whether the spare refused a move as too large, until the next rebuild: a large domain then rebuilds in place.
+  let moveRefused = false;
+  // The drops and evictions so far, and how many there must be before
+  // compactStep starts a move again after one was given up as failed: the
+  // same domain would likely fail the same way.
+  let lettings = 0;
+  let retryAt = 0;
+  const abortMove = (why: MoveAbort) => {
+    if (move !== null) {
+      move = null;
+      moves.aborted[why]++;
+      if (why !== "superseded") {
+        retryAt = lettings + RETRY_Lettings;
+      }
+
+      if (why === "spare" || why === "refused") {
+        failedMoves++;
+      }
+    }
+  };
   const prepare = () => {
     if (spare === null && !making) {
       making = true;
@@ -679,6 +766,23 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     children?: Set<JournalDomain>;
     entries?: Entry[];
   }
+  // A move compactStep makes a part at a time: the spare it rebuilds in,
+  // the snapshot it rebuilds, the calls journaled since, how many of those
+  // the spare has replayed and where in one it is; the bytes of the ABCs
+  // revivals since restored in it, copied once; the saved ABCs not yet
+  // given to it; its phase; and the slices it has spent catching up.
+  interface Move {
+    into: Bound;
+    saved: Checkpoint;
+    entries: Entry[];
+    replayed: number;
+    /** Where in the log entry being replayed, a compile's, the spare is. */
+    word: number;
+    restored: Map<number, Uint8Array>;
+    abcs: IterableIterator<[number, Uint8Array]> | null;
+    phase: "load" | "abcs" | "rebuild" | "catch up";
+    catchUp: number;
+  }
   const journalDomains = new Map<number, JournalDomain>();
   const journal = new Set<Entry>();
   // What the checkpoint and the journal hold, their bytes and strings' units twice.
@@ -712,6 +816,8 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   };
   const restores = new Map<number, Entry>();
   const abcDomains: number[] = [];
+  // Each ABC's length, by its index, which a replay of its verification takes time in proportion to.
+  const abcLengths: number[] = [];
   let replayable = true;
   const journaled = (entry: Entry, owner = 0) => {
     const id = owner | 0;
@@ -727,6 +833,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     }
 
     journal.add(entry);
+    move?.entries.push(entry);
   };
   // The target is absolute so dropping a child preserves work its compiles did on its ancestors.
   const journalLog = (mark: number) => {
@@ -833,7 +940,62 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       journalDomains.delete(domain.id);
     }
   };
-  const replayInto = (into: typeof wasm) => {
+  // Replay `entry` into `into`: whether it started a rebuild there, which
+  // only a revival `stepped` does (domainRevive's 2), for domainRebuildStep
+  // to finish before the next. Any refusal is a divergence, and throws.
+  const replayOne = (into: Bound, entry: Entry, stepped: boolean): boolean => {
+    switch (entry.kind) {
+      case "add":
+        if (into.domainAdd(entry.abc, entry.builtin, entry.appDomain) !== entry.error) {
+          throw new Error("a journaled ABC did not replay");
+        }
+        break;
+      case "child":
+        into.domainChild(entry.parent);
+        break;
+      case "drop":
+        into.domainDrop(entry.appDomain);
+        break;
+      case "evict":
+        into.domainEvict(entry.appDomain);
+        break;
+      case "restore":
+        if (into.domainRestore(entry.index, entry.bytes) !== 0) {
+          throw new Error("a journaled ABC did not restore");
+        }
+        break;
+      case "revive": {
+        // 1, or 2 stepped, where `into` rebuilt since the domain was
+        // evicted, as a move's spare has, or recovery from the checkpoint
+        // a move left: the restores journaled before give it the ABCs that
+        // rebuild let go of, and it links them again.
+        const revived = into.domainRevive(entry.appDomain, stepped);
+        if (revived < 0) {
+          throw new Error("a journaled domain did not revive");
+        }
+
+        return revived === 2;
+      }
+      case "found": {
+        const d = entry.definition;
+        into.domainFound(d.domain, d.nsKind, d.uri, d.name, d.abc, d.asType);
+        break;
+      }
+      case "log": {
+        const w = entry.words;
+        for (let i = 0; i < w.length; i += 4) {
+          if (!into.replayEntry(w[i], w[i + 1], w[i + 2], w[i + 3])) {
+            throw new Error(`a compile's log did not replay for ABC ${w[i + 1]}`);
+          }
+        }
+
+        break;
+      }
+    }
+
+    return false;
+  };
+  const replayInto = (into: Bound) => {
     if (checkpoint) {
       if (!loadCheckpoint(into, checkpoint, true) || !finishRebuild(into)) {
         throw new Error("the compiler checkpoint did not restore");
@@ -842,52 +1004,14 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       into.domainReset(apiVersion);
     }
 
+    // Any refusal is a divergence: recovery fails, and the domain is lost.
     for (const entry of journal) {
-      switch (entry.kind) {
-        case "add":
-          if (into.domainAdd(entry.abc, entry.builtin, entry.appDomain) !== entry.error) {
-            throw new Error("a journaled ABC did not replay");
-          }
-          break;
-        case "child":
-          into.domainChild(entry.parent);
-          break;
-        case "drop":
-          into.domainDrop(entry.appDomain);
-          break;
-        case "evict":
-          into.domainEvict(entry.appDomain);
-          break;
-        case "restore":
-          if (into.domainRestore(entry.index, entry.bytes) !== 0) {
-            throw new Error("a journaled ABC did not restore");
-          }
-          break;
-        case "revive":
-          if (into.domainRevive(entry.appDomain, false) !== 0) {
-            throw new Error("a journaled domain did not revive");
-          }
-          break;
-        case "found": {
-          const d = entry.definition;
-          into.domainFound(d.domain, d.nsKind, d.uri, d.name, d.abc, d.asType);
-          break;
-        }
-        case "log": {
-          // Any refusal is a divergence: recovery fails, and the domain is lost.
-          const w = entry.words;
-          for (let i = 0; i < w.length; i += 4) {
-            if (!into.replayEntry(w[i], w[i + 1], w[i + 2], w[i + 3])) {
-              throw new Error(`a compile's log did not replay for ABC ${w[i + 1]}`);
-            }
-          }
-
-          break;
-        }
-      }
+      replayOne(into, entry, false);
     }
   };
   const recover = (): boolean => {
+    // A move's spare was to catch up from the journal this replaces.
+    abortMove("superseded");
     if (!replayable) {
       return false;
     }
@@ -911,6 +1035,233 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     wasm = into;
     return true;
   };
+  // A move compactStep makes a part at a time (see Move): begun from a
+  // snapshot of this instance, as a move by compact is, and never reading
+  // this instance again, while the host goes on with it, each call it
+  // makes journaled and replayed into the spare once the spare has rebuilt.
+  const startMove = (into: Bound): boolean => {
+    let saved: Checkpoint;
+    try {
+      saved = saveCheckpoint();
+    } catch (error) {
+      if (error instanceof CodegenOutOfMemory) {
+        spare = into;
+        return false;
+      }
+
+      throw error;
+    }
+
+    // Parts that block the host for little: a part's time is its garbage's, but for one large method's verification.
+    into.domainRebuildBudget(MOVE_PartBudget);
+    move = {
+      into,
+      saved,
+      entries: [],
+      replayed: 0,
+      word: 0,
+      restored: new Map(),
+      abcs: null,
+      phase: "load",
+      catchUp: 0,
+    };
+    moves.started++;
+    return true;
+  };
+  // The spare, rebuilt and caught up, takes this instance's place, as a
+  // recovery's does, and the snapshot it rebuilt is the checkpoint, the
+  // calls since it the journal.
+  const swapMove = (m: Move) => {
+    move = null;
+    moves.completed++;
+    const kept = m.entries.filter((entry) => journal.has(entry));
+    moves.lastCaughtUp = kept.length;
+    moves.lastSavedBytes = m.saved.state.length;
+    for (const abc of m.saved.abcs.values()) {
+      moves.lastSavedBytes += abc.length;
+    }
+
+    journal.clear();
+    restores.clear();
+    for (const entry of kept) {
+      journal.add(entry);
+      if (entry.kind === "restore" && !restores.has(entry.index)) {
+        restores.set(entry.index, entry);
+      }
+    }
+
+    for (const domain of journalDomains.values()) {
+      const own = domain.entries?.filter((entry) => journal.has(entry));
+      domain.entries = own?.length ? own : undefined;
+    }
+
+    checkpoint = m.saved;
+    moveRefused = false;
+    revisionEpoch++;
+    holds.length = 0;
+    chains.clear();
+    wasm = m.into;
+  };
+  // One part of the move: a call into the spare, or the swap. Whatever the
+  // spare throws, a panic or running out of memory included, gives the
+  // move up, never this instance, which goes on as it was.
+  const moveUnit = (m: Move): CompactProgress => {
+    if (!replayable) {
+      abortMove("unjournaled");
+      return "none";
+    }
+
+    const into = m.into;
+    try {
+      switch (m.phase) {
+        case "load":
+          if (!into.domainLoad(m.saved.state)) {
+            moveRefused = true;
+            abortMove("refused");
+            return "none";
+          }
+
+          m.abcs = m.saved.abcs.entries();
+          m.phase = "abcs";
+          return "moving";
+        case "abcs": {
+          const next = m.abcs?.next();
+          if (next && !next.done) {
+            if (into.domainLoadAbc(next.value[0], next.value[1]) !== 0) {
+              abortMove("refused");
+              return "none";
+            }
+
+            return "moving";
+          }
+
+          m.abcs = null;
+          if (!into.domainLoadRebuild()) {
+            abortMove("refused");
+            return "none";
+          }
+
+          m.phase = "rebuild";
+          return "moving";
+        }
+        case "rebuild": {
+          const step = into.domainRebuildStep();
+          if (step < 0) {
+            abortMove("refused");
+            return "none";
+          }
+
+          if (step > 0) {
+            m.phase = "catch up";
+          }
+
+          return "moving";
+        }
+        case "catch up": {
+          // Entries of domains dropped since are out of the journal (see
+          // forgetDropped), but one half replayed is finished.
+          while (
+            m.word === 0 &&
+            m.replayed < m.entries.length &&
+            !journal.has(m.entries[m.replayed])
+          ) {
+            m.replayed++;
+          }
+
+          if (m.replayed === m.entries.length) {
+            swapMove(m);
+            return "done";
+          }
+
+          // A compile's log a log entry a part, a run of them taking long.
+          const entry = m.entries[m.replayed];
+          if (entry.kind === "log") {
+            const w = entry.words;
+            const i = m.word;
+            if (!into.replayEntry(w[i], w[i + 1], w[i + 2], w[i + 3])) {
+              abortMove("refused");
+              return "none";
+            }
+
+            m.word = i + 4 < w.length ? i + 4 : 0;
+            if (m.word === 0) {
+              m.replayed++;
+            }
+
+            return "moving";
+          }
+
+          m.replayed++;
+          // A revival that rebuilds the spare: catch-up starts over after it.
+          if (replayOne(into, entry, true)) {
+            m.phase = "rebuild";
+            m.catchUp = 0;
+          }
+
+          return "moving";
+        }
+      }
+    } catch (error) {
+      abortMove(
+        error instanceof CodegenPanic || error instanceof CodegenOutOfMemory ? "spare" : "refused",
+      );
+      return "none";
+    }
+  };
+  // Whether the move's next part replays a call that takes long in one:
+  // a compile's verification of a large ABC, as long as the compile
+  // verified it for, or the add of a large ABC, which parses and links it.
+  const longNext = (m: Move) => {
+    const entry = m.phase === "catch up" ? m.entries[m.replayed] : undefined;
+    if (entry?.kind === "add") {
+      return entry.abc.length > LARGE_Add;
+    }
+
+    return (
+      entry?.kind === "log" &&
+      entry.words[m.word] === LOG_Verify &&
+      (abcLengths[entry.words[m.word + 1]] ?? 0) > LARGE_Verify
+    );
+  };
+  // What compactStep starts, as compact decides, but that a large domain
+  // moves rather than rebuild in place, which would take one call.
+  const beginCompaction = (): CompactProgress => {
+    if (spare === null && !making && wasm.domainWantsCompact(WANT_Spare)) {
+      prepare();
+    }
+
+    const wantsMove = wasm.domainWantsCompact(WANT_Move);
+    const beside = spare !== null || making;
+    const inPlace =
+      !wantsMove && wasm.domainWantsCompact(beside ? WANT_InPlaceBesideSpare : WANT_InPlace);
+    if (!wantsMove && !inPlace) {
+      return "none";
+    }
+
+    if (inPlace && (moveRefused || Number(wasm.domainUsage().split(" ")[0]) < IN_PLACE_Live)) {
+      return wasm.domainCompact(true) && rebuild(wasm, null, true) ? "done" : "none";
+    }
+
+    // A spare could not catch up from the journal: compacted in one call, as compact does.
+    if (!replayable) {
+      return api.compact() ? "done" : "none";
+    }
+
+    // Backed off after a move that failed.
+    if (lettings < retryAt) {
+      return "none";
+    }
+
+    const into = spare;
+    if (into === null) {
+      // Called again once the spare is made, as instantiating is asynchronous.
+      prepare();
+      return making ? "moving" : "none";
+    }
+
+    spare = null;
+    return startMove(into) ? "moving" : "none";
+  };
   // Whether the domain was lost to a panic recovery could not undo (see fresh).
   let lost = false;
   const api: Codegen = {
@@ -924,6 +1275,9 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     },
     reset(version = API_VERSION) {
       checkApiVersion(version);
+      abortMove("superseded");
+      moveRefused = false;
+      retryAt = 0;
       wasm.domainReset(version);
       added = 0;
       epoch++;
@@ -934,6 +1288,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       journal.clear();
       restores.clear();
       abcDomains.length = 0;
+      abcLengths.length = 0;
       replayable = true;
       checkpoint = null;
     },
@@ -950,6 +1305,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       if (error === 0 || wasm.lastAddLinked()) {
         if (error === 0) {
           abcDomains.push(appDomain);
+          abcLengths.push(bytes.length);
         }
         journaled(
           {
@@ -989,6 +1345,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     },
     dropDomain(appDomain, of = epoch) {
       if (of === epoch) {
+        lettings++;
         wasm.domainDrop(appDomain);
         journaled({ kind: "drop", appDomain });
         forgetDropped(appDomain);
@@ -997,17 +1354,38 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       }
     },
     evictDomain(appDomain) {
+      lettings++;
       wasm.domainEvict(appDomain);
       journaled({ kind: "evict", appDomain });
     },
     usage() {
       const [live, dead, memory] = wasm.domainUsage().split(" ").map(Number);
-      return { live, dead, memory, failedMoves, recovery: recoveryBytes() };
+      return {
+        live,
+        dead,
+        memory,
+        failedMoves,
+        moves: { ...moves, aborted: { ...moves.aborted } },
+        recovery: recoveryBytes(),
+      };
     },
     memoryBytes() {
       return wasm.memory.buffer.byteLength;
     },
     compact() {
+      // A move compactStep has under way, finished here.
+      const m = move;
+      if (m !== null) {
+        let progress = moveUnit(m);
+        while (progress === "moving") {
+          progress = moveUnit(m);
+        }
+
+        if (progress === "done") {
+          return true;
+        }
+      }
+
       // Done in the spare instance, once there is one and that would take
       // less memory, or in place would not fit; else in place, where the
       // new tables are made while the old are live, only where they fit
@@ -1029,10 +1407,68 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
       return wasm.domainCompact(true) && rebuild(wasm, null, true);
     },
+    compactStep(deadline) {
+      let m = move;
+      if (m === null) {
+        const begun = beginCompaction();
+        if (begun !== "moving" || move === null) {
+          return begun;
+        }
+
+        m = move;
+      }
+
+      // Catch-up chases what the host goes on doing. Past CATCH_UP_Slices
+      // slices it goes on CATCH_UP_Overrun past the deadline, a long part
+      // still starting a slice of its own; past twice as many, it finishes
+      // in this slice, which has only what came in since the last to
+      // replay (a revival's rebuild still a part at a time).
+      let slices = 0;
+      if (m.phase === "catch up") {
+        slices = ++m.catchUp;
+      }
+
+      for (;;) {
+        const progress = moveUnit(m);
+        if (progress !== "moving") {
+          return progress;
+        }
+
+        const catchingUp = m.phase === "catch up";
+        if (catchingUp && slices > CATCH_UP_Slices * 2) {
+          continue;
+        }
+
+        // A part that takes long in one call starts a slice of its own,
+        // so that it adds to no other part's time.
+        if (longNext(m)) {
+          return "moving";
+        }
+
+        const overrun = catchingUp && slices > CATCH_UP_Slices ? CATCH_UP_Overrun : 0;
+        if (deadline.timeRemaining() <= -overrun) {
+          return "moving";
+        }
+      }
+    },
     isLive(appDomain) {
       return wasm.domainState(appDomain) === 0;
     },
     reviveDomain(appDomain, abcs) {
+      // A move's spare lets go of the ABCs of the domains evicted before its
+      // snapshot, and before any rebuild a replayed revival makes in it,
+      // which this instance may still hold: restores journaled before the
+      // revival give each evicted ABC back to it (see replayOne).
+      const evictedGiven =
+        move === null
+          ? []
+          : [...abcs.keys()].filter(
+              (index) =>
+                Number.isInteger(index) &&
+                index >= 0 &&
+                index < abcDomains.length &&
+                wasm.domainState(abcDomains[index]) === 1,
+            );
       // Its ABCs' bytes are copied into the compiler only if a rebuild let go of them.
       let revived = wasm.domainRevive(appDomain, true);
       if (revived < 0) {
@@ -1057,6 +1493,24 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       // Revived by a rebuild in place, mid-load: a compaction moves it later.
       const done = revived === 0 || (revived > 0 && rebuild());
       if (revived === 0) {
+        // Owned by the root, not by the domain: a revival the journal keeps
+        // needs them though the domain is dropped later (a drop forgets the
+        // domain's own entries, see forgetDropped), until the next checkpoint.
+        if (move !== null) {
+          for (const index of evictedGiven) {
+            const given = abcs.get(index);
+            if (given !== undefined) {
+              let bytes = move.restored.get(index);
+              if (bytes === undefined) {
+                bytes = new Uint8Array(given);
+                move.restored.set(index, bytes);
+              }
+
+              journaled({ kind: "restore", index, bytes });
+            }
+          }
+        }
+
         journaled({ kind: "revive", appDomain });
       }
 
@@ -1076,6 +1530,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
           { kind: "found", definition: { domain, nsKind, uri, name, abc, asType } },
           domain,
         );
+      } else if (move !== null && wasm.domainState(domain) >= 0 && wasm.domainState(domain) < 2) {
+        // The spare could part from this instance by it; one of a domain
+        // dropped or never made the compiler ignored.
+        abortMove("unjournaled");
       }
     },
     compile(hashes = [], index = -1) {
@@ -1192,6 +1650,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // on in a fresh instance, for a reset and what needs no domain (AVM1),
   // and the domain's calls throw until the next reset.
   const fresh = () => {
+    abortMove("superseded");
     wasm = spare ?? recoveryInstance(module);
     spare = null;
     holds.length = 0;
@@ -1222,6 +1681,10 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
 
       if (lost && name === "compact") {
         return false;
+      }
+
+      if (lost && name === "compactStep") {
+        return "none";
       }
 
       if (lost && !domainless) {
@@ -1264,6 +1727,9 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   return Object.defineProperties({}, descriptors) as Codegen;
 }
 
+/** An instance of the compiler, its exports bound. */
+type Bound = CodegenExports & { panicked(): string | null };
+
 /** What a lost domain does not stop (see lost): a reset, AVM1, and what reads no domain. */
 const DOMAINLESS = new Set([
   "reset",
@@ -1303,6 +1769,28 @@ const WANT_InPlace = 0;
 const WANT_InPlaceBesideSpare = 1;
 const WANT_Move = 2;
 const WANT_Spare = 3;
+/**
+ * The live weight (domainUsage's first number) below which compactStep
+ * rebuilds in place, in one call, rather than move a part at a time.
+ */
+const IN_PLACE_Live = 4 << 20;
+/** A compile's log entry that verified an ABC: LogKind.verify (avm2/link/domain.zig). */
+const LOG_Verify = 4;
+/**
+ * The length of an ABC whose verification, replayed, starts a slice of its
+ * own: some 20 ms of it on real content, 750 ms for 2.3 MB.
+ */
+const LARGE_Verify = 64 << 10;
+/** The garbage a part of a move's rebuild makes at most (domainRebuildBudget). */
+const MOVE_PartBudget = 256 << 10;
+/** The slices compactStep catches a move up in before it goes on past their deadlines (see compactStep). */
+const CATCH_UP_Slices = 32;
+/** How far past its deadline a slice catches up after CATCH_UP_Slices, in milliseconds. */
+const CATCH_UP_Overrun = 50;
+/** The length of an ABC whose add, replayed, starts a slice of its own: some 4 ms of parsing and linking. */
+const LARGE_Add = 256 << 10;
+/** The drops and evictions after a move given up as failed before compactStep starts another. */
+const RETRY_Lettings = 16;
 /** How many SWFs whose blocks or units are compiled codegen holds a copy of at most. */
 const HELD_SWFS = 4;
 

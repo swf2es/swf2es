@@ -1161,6 +1161,28 @@ case (200 loads of three builtin copies, compacting each load): 3.9 s,
 1.13 s of it in compact(), against 4.0 s and 1.03 s. M2 removes the
 rebuild.
 
+*Background moves.* Until M2, the player compacts with `compactStep`,
+which moves the domain a part at a time while loads go on (section 7's
+journal replayed into the spare once it has rebuilt; see
+docs/architecture/compiler.md). The spare rebuilds in parts of 256 KB of
+garbage (`domainRebuildBudget`), which cost no more in all. The part
+that cannot be split is a compile's verification of an ABC replayed in
+catch-up, as long as the compile's own: 165 ms for a 2.3 MB ABC on the
+same real content, with #1248's hashing, until a later change steps it.
+300 loads with idle slices of 50 ms: 9 moves, as many as compact makes,
+each 16 to 50 slices, the largest block 165 ms where compact's were 0.8
+to 1.8 s, 14.5 s in all against 13.7. With one 6 ms slice each 100 ms,
+a busy page: 4 moves of 138 to 217 slices, 13 to 21 loads each, the
+largest block 123 ms, the median slice 8 ms; memory ends at 152 MB
+against 120, the dead ABCs piling up during the longer moves. A revival
+during a move of a domain evicted before its snapshot rebuilds the
+spare again in catch-up: with one revival every 4 loads, a busy page's
+first move took 150 loads and 13 s of background work. Giving the move
+up there and starting another after the revival was worse (one move of
+ten completed on a busy page, five of ten idle). Revivals after any
+compaction still rebuild the new instance in place, synchronously, as
+before: 18 blocks of 1.2 to 1.9 s, with compact as with moves.
+
 **Release mode, decided.** The user's decision after stage 5: the
 release ships in ReleaseSafe. About 180 KB gzipped is fine, so section
 7's bound of twice AssemblyScript's size and its 1.15 bound on compile

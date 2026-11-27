@@ -359,6 +359,20 @@ codegen.compact = () => {
 /** What the test build's report says a window of loads at a time, by its lines' first words. */
 const reports: { loads: number; lines: string[] }[] = [];
 const report = () => (raw?.domainMemoryReport ? text(raw, raw.domainMemoryReport()) : "");
+// How long the player's compactions block it: each call of compact or
+// compactStep (a checkout from before compactStep has only compact).
+const blocks: number[] = [];
+for (const name of ["compact", "compactStep"]) {
+  const method = codegen[name];
+  if (typeof method === "function") {
+    codegen[name] = (...a: unknown[]) => {
+      const t0 = performance.now();
+      const result = method(...a);
+      blocks.push(performance.now() - t0);
+      return result;
+    };
+  }
+}
 const store = new Map<string, unknown>();
 let lines = 0;
 const errors: string[] = [];
@@ -513,6 +527,15 @@ for (const g of grows) {
 }
 
 console.log(`  rebuilds: ${rebuilds.done}, ${rebuilds.moved} of them in a new instance`);
+blocks.sort((a, b) => b - a);
+console.log(
+  `  compaction calls: ${blocks.length}, ${blocks.reduce((a, b) => a + b, 0).toFixed(0)} ms in all, ` +
+    `longest ${blocks
+      .slice(0, 3)
+      .map((ms) => ms.toFixed(1))
+      .join(", ")} ms` +
+    (codegen.usage().moves ? `; moves ${JSON.stringify(codegen.usage().moves)}` : ""),
+);
 console.log("  grown by:");
 for (const [call, { count, bytes }] of [...byCall].sort((a, b) => b[1].bytes - a[1].bytes)) {
   console.log(`    ${call}: ${count} times, ${mb(bytes)} MB`);

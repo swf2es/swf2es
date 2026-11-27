@@ -107,6 +107,7 @@ export interface CodegenExports {
   domainModuleMoreBytes(): number;
   domainParent(appDomain: number): number;
   domainRebuildStep(): number;
+  domainRebuildBudget(bytes: number): void;
   domainReplay(log: string, index?: number): boolean;
   domainReset(apiVersion: number): void;
   domainRestore(index: number, bytes: Uint8Array): number;
@@ -183,6 +184,7 @@ export const SIGNATURES: {
   domainModuleMoreBytes: ["", "address"],
   domainParent: ["i32", "i32"],
   domainRebuildStep: ["", "i32"],
+  domainRebuildBudget: ["i32", "void"],
   domainReplay: ["str i32=-1", "bool"],
   domainReset: ["i32", "void"],
   domainRestore: ["i32 u8s", "i32"],
