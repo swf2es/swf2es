@@ -261,10 +261,12 @@ export interface Codegen {
    * What the ABCs hold of codegen's memory, roughly, in bytes: the live
    * ones', and the dropped and evicted domains' that compact would free;
    * the size of codegen's memory, which grows and never shrinks but when
-   * compact moves the domain to a new instance; and how many such moves
-   * failed, each leaving the domain as it was, rebuilt in place if at all.
+   * compact moves the domain to a new instance; how many such moves
+   * failed, each leaving the domain as it was, rebuilt in place if at all;
+   * and what the recovery from a panic holds outside codegen's memory: its
+   * checkpoint and the inputs journaled since, in bytes.
    */
-  usage(): { live: number; dead: number; memory: number; failedMoves: number };
+  usage(): { live: number; dead: number; memory: number; failedMoves: number; recovery: number };
   /** The size of codegen's memory in bytes, as usage gives it: cheap, for a host that shows it often. */
   memoryBytes(): number;
   /**
@@ -679,6 +681,35 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   }
   const journalDomains = new Map<number, JournalDomain>();
   const journal = new Set<Entry>();
+  // What the checkpoint and the journal hold, their bytes and strings' units twice.
+  const recoveryBytes = () => {
+    let bytes = 0;
+    if (checkpoint) {
+      bytes += checkpoint.state.byteLength;
+      for (const abc of checkpoint.abcs.values()) {
+        bytes += abc.byteLength;
+      }
+    }
+
+    for (const entry of journal) {
+      switch (entry.kind) {
+        case "add":
+          bytes += entry.abc.byteLength;
+          break;
+        case "restore":
+          bytes += entry.bytes.byteLength;
+          break;
+        case "log":
+          bytes += entry.words.byteLength;
+          break;
+        case "found":
+          bytes += (entry.definition.uri.length + entry.definition.name.length) * 2;
+          break;
+      }
+    }
+
+    return bytes;
+  };
   const restores = new Map<number, Entry>();
   const abcDomains: number[] = [];
   let replayable = true;
@@ -971,7 +1002,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     },
     usage() {
       const [live, dead, memory] = wasm.domainUsage().split(" ").map(Number);
-      return { live, dead, memory, failedMoves };
+      return { live, dead, memory, failedMoves, recovery: recoveryBytes() };
     },
     memoryBytes() {
       return wasm.memory.buffer.byteLength;

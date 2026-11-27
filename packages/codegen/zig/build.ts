@@ -19,6 +19,10 @@
 //   node zig/build.ts --names   dist-test/codegen-names.wasm, the compiler
 //                               with the name section, so that a trap's
 //                               stack names its functions (zig build names)
+//   node zig/build.ts --oracle  dist-test/testing-nofree.wasm, the test
+//                               build that never gives back what domains
+//                               free, for a build that reuses freed memory
+//                               to be held to (zig build oracle)
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -82,20 +86,26 @@ for (const path of LEFTOVERS) {
   rmSync(join(pkg, path), { recursive: true, force: true });
 }
 
-if (process.argv.includes("--names")) {
+/** A build the default leaves out, by its zig build step, into dist-test/. */
+const extra: Record<string, [string, string]> = {
+  "--names": ["names", "codegen-names.wasm"],
+  "--oracle": ["oracle", "testing-nofree.wasm"],
+};
+for (const [flag, [step, file]] of Object.entries(extra)) {
+  if (!process.argv.includes(flag)) {
+    continue;
+  }
+
   const prefix = mkdtempSync(join(swf2esCache(), "zig-codegen-out-"));
   try {
-    runZig(here, ["build", "names", "--prefix", prefix], join(swf2esCache(), "zig-codegen-cache"));
+    runZig(here, ["build", step, "--prefix", prefix], join(swf2esCache(), "zig-codegen-cache"));
     mkdirSync(join(pkg, "dist-test"), { recursive: true });
-    copyFileSync(
-      join(prefix, "bin", "codegen-names.wasm"),
-      join(pkg, "dist-test", "codegen-names.wasm"),
-    );
+    copyFileSync(join(prefix, "bin", file), join(pkg, "dist-test", file));
   } finally {
     rmSync(prefix, { recursive: true, force: true });
   }
 
-  console.log("zig: dist-test/codegen-names.wasm");
+  console.log(`zig: dist-test/${file}`);
   process.exit(0);
 }
 

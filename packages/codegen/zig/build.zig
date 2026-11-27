@@ -8,6 +8,10 @@
 //   - testing-poison.wasm, the test build filling every freed run and
 //     rolled-back allocation with 0xAA, which must give the same output.
 //
+// `zig build oracle` writes testing-nofree.wasm, the test build that never
+// gives back what domains and the global arena free: one that reuses freed
+// memory must give its output, or reads what it freed.
+//
 // `zig build test` runs every file's inline tests natively, once as each
 // build allocates; `zig build names` writes codegen-names.wasm, the
 // compiler with the name section, so that a trap's stack names functions.
@@ -79,6 +83,13 @@ const testing_exports = exports ++ [_][]const u8{
     "memoryReached",
     "memoryTopRuns",
     "memoryReserve",
+    "domainMemoryReport",
+    "domainPinPolicy",
+    "domainRebuildPhases",
+    "domainRebuildStepWork",
+    "domainOutsideFindings",
+    "domainStrictFindings",
+    "domainGapProbe",
     "testingPanic",
     "testingOverflow",
     "stackPaint",
@@ -126,15 +137,18 @@ pub fn build(b: *std.Build) void {
         .cpu_features_add = std.Target.wasm.featureSet(&.{ .bulk_memory, .nontrapping_fptoint, .sign_ext, .mutable_globals }),
     });
 
-    b.installArtifact(module(b, target, "codegen", "src/root.zig", &exports, false, true));
-    b.installArtifact(module(b, target, "testing", "src/testing.zig", &testing_exports, false, true));
-    b.installArtifact(module(b, target, "testing-poison", "src/testing.zig", &testing_exports, true, true));
+    b.installArtifact(module(b, target, "codegen", "src/root.zig", &exports, false, true, false));
+    b.installArtifact(module(b, target, "testing", "src/testing.zig", &testing_exports, false, true, false));
+    b.installArtifact(module(b, target, "testing-poison", "src/testing.zig", &testing_exports, true, true, false));
+
+    const nofree = module(b, target, "testing-nofree", "src/testing.zig", &testing_exports, false, true, true);
+    b.step("oracle", "Build the test build that never gives back what domains free").dependOn(&b.addInstallArtifact(nofree, .{}).step);
 
     // The release build with probes reaching what later stages will reach from its exports, for measuring.
-    const probe = b.addInstallArtifact(module(b, target, "codegen-probe", "src/probe.zig", &(exports ++ [_][]const u8{"probeVerify"}), false, true), .{});
+    const probe = b.addInstallArtifact(module(b, target, "codegen-probe", "src/probe.zig", &(exports ++ [_][]const u8{"probeVerify"}), false, true, false), .{});
     b.step("probe", "Build the release with probes, to measure its size as the port goes").dependOn(&probe.step);
 
-    const names = b.addInstallArtifact(module(b, target, "codegen-names", "src/root.zig", &exports, false, false), .{});
+    const names = b.addInstallArtifact(module(b, target, "codegen-names", "src/root.zig", &exports, false, false, false), .{});
     b.step("names", "Build the compiler with the name section").dependOn(&names.step);
 
     const test_step = b.step("test", "Run the inline tests natively, as each build allocates");
@@ -145,7 +159,7 @@ pub fn build(b: *std.Build) void {
                 .root_source_file = b.path("src/testing.zig"),
                 .target = b.graph.host,
                 .optimize = .ReleaseSafe,
-                .imports = &.{.{ .name = "options", .module = options(b, poison, true) }},
+                .imports = &.{.{ .name = "options", .module = options(b, poison, true, false) }},
             }),
         });
         test_step.dependOn(&b.addRunArtifact(tests).step);
@@ -155,10 +169,11 @@ pub fn build(b: *std.Build) void {
 /// `checks`: the test builds' and the native tests' assertions that the
 /// release build leaves out, such as that a row the domain writes in place
 /// is written inside a Change.
-fn options(b: *std.Build, poison: bool, checks: bool) *std.Build.Module {
+fn options(b: *std.Build, poison: bool, checks: bool, free_noop: bool) *std.Build.Module {
     const values = b.addOptions();
     values.addOption(bool, "poison", poison);
     values.addOption(bool, "checks", checks);
+    values.addOption(bool, "free_noop", free_noop);
     values.addOption(u32, "stack_size", stack_size);
     return values.createModule();
 }
@@ -171,6 +186,7 @@ fn module(
     names: []const []const u8,
     poison: bool,
     strip: bool,
+    free_noop: bool,
 ) *std.Build.Step.Compile {
     const root_module = b.createModule(.{
         .root_source_file = b.path(root),
@@ -178,7 +194,7 @@ fn module(
         .optimize = .ReleaseSafe,
         .single_threaded = true,
         .strip = strip,
-        .imports = &.{.{ .name = "options", .module = options(b, poison, std.mem.eql(u8, root, "src/testing.zig")) }},
+        .imports = &.{.{ .name = "options", .module = options(b, poison, std.mem.eql(u8, root, "src/testing.zig"), free_noop) }},
     });
     root_module.export_symbol_names = names;
     const wasm = b.addExecutable(.{ .name = name, .root_module = root_module });

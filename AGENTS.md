@@ -202,6 +202,9 @@ node packages/codegen/zig/build.ts [--update | --verify]   # the compiler, as pn
 node packages/codegen/zig/build.ts --names   # dist-test/codegen-names.wasm, by the pinned Zig:
                               # the compiler with the name section, so that a trap's stack names
                               # its functions
+node packages/codegen/zig/build.ts --oracle  # dist-test/testing-nofree.wasm: the test build that
+                              # never gives back what domains free, which a build that reuses freed
+                              # memory must give the output of
 node tests/golden/run.ts [--abcs] [--update]   # the generated code's digests (libraries, the unit
                               # tests' ABCs, conformance cases with and without line maps, as3pb, AVM1
                               # blocks) against tests/golden/digests.json; --abcs builds the ABCs ASC
@@ -229,7 +232,9 @@ node tests/parity/run.ts [--reference <ref>] [--deep] [--seed N] [--cases N] [su
                               # Cases seeded from the oracle's cache follow what it holds, so their counts
                               # differ between hosts; a suite with none of its cache's or corpus's seeds
                               # says PARTIAL. A throw from this tree's builds fails the run, even one all
-                              # three share, unless it is running out of memory
+                              # three share, unless it is running out of memory. Where the reference
+                              # can, the test builds' rebuild policy is pinned (domainPinPolicy), so
+                              # that a compaction follows the weights, not memory's layout
 node tests/bench/codegen-compile.ts [--reference <ref>] [--runs N]   # compile time of a build of
                               # <ref> against this tree's, interleaved, a warm-up pass each, N even
                               # (8): the libraries, the conformance cases, AVM1 blocks,
@@ -250,10 +255,15 @@ node tests/bench/avm1-names.ts [<checkout A> <checkout B>] [runs]   # AVM1 names
                               # children: the pointer moved over a thousand clips, each asked for
                               # onPress and the rest, and a script's member reads, two checkouts
 node --expose-gc tests/bench/codegen-session.ts [--loads N] [--checkout DIR] [--cache] [--grows]
+                              [--testing [--report]]
                               # codegen's memory over a long session played by the player in node:
                               # a large main SWF loading items into its domain, most of them again,
-                              # and maps into children; memory, live and dead weight, rebuilds and
-                              # which exports grew memory, a window of loads at a time
+                              # and maps into children; memory, live and dead weight, what recovery
+                              # holds, rebuilds and which exports grew memory, a window of loads at
+                              # a time, and each compaction's pause and its longest call; --testing
+                              # on the test build: pauses split into saving, parsing, linking,
+                              # verifying and replaying, and what each table and dead ABCs take
+                              # (testing/measure.zig), --report the whole report at the end
 node tests/bench/codegen-strings.ts <before.wasm> <after.wasm> [pairs]   # AVM2 module emission
                               # in two builds of the Zig compiler, interleaved pairs, loading,
                               # linking and checking the text outside the timer

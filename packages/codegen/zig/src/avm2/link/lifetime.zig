@@ -5,6 +5,7 @@
 // replacement instance rebuild the same domain (rebuild.zig, saved.zig).
 const std = @import("std");
 const builtin = @import("builtin");
+const options = @import("options");
 const Allocator = std.mem.Allocator;
 const memory = @import("../../memory.zig");
 const Abc = @import("../abc/abc.zig").Abc;
@@ -184,9 +185,23 @@ fn inChain(dom: *const Domain, d: u32, top: u32, bottom: u32) bool {
     return false;
 }
 
+/// The test builds' memory size for the policy, pinned (domainPinPolicy)
+/// so that its answers follow the weights alone, the same whatever the
+/// layout of memory: 0 where the real one counts.
+pub var pinned_size: u64 = 0;
+
+/// Whether the policy is pinned: never in the release build.
+pub fn pinned() bool {
+    return options.checks and pinned_size != 0;
+}
+
 /// The size of wasm memory, as AssemblyScript's memory.size() << 16 gives it;
-/// natively, for the tests, of the chunks reached.
+/// natively, for the tests, of the chunks reached; or the size pinned.
 pub fn memorySize() u64 {
+    if (pinned()) {
+        return pinned_size;
+    }
+
     if (builtin.cpu.arch.isWasm()) {
         return @as(u64, @wasmMemorySize(0)) << 16;
     }
@@ -254,7 +269,7 @@ pub fn wantsRebuild(dom: *Domain, part: u64, movedPart: u64, want: Want) bool {
     const rebuilt = rebuiltSize(live, largestLive, movedPart);
     const smaller = rebuilt <= size - (size >> 3);
     const pages = memory.pages();
-    const available = @as(u64, pages.chunks - pages.used) * memory.chunk_size;
+    const available = if (pinned()) pinned_size else @as(u64, pages.chunks - pages.used) * memory.chunk_size;
     // The live tables are allocated in runs. Leave headroom for fragmented free
     // chunks, the verifier, and a scratch part alongside the rebuilt domain.
     const fits = liveTables + (liveTables >> 1) + part < available;
