@@ -14,8 +14,6 @@ const refs = @import("../refs.zig");
 const values = @import("../values.zig");
 const objects = @import("../objects.zig");
 const u = objects.u;
-const Kind = objects.Kind;
-const AS3_URI = objects.AS3_URI;
 
 pub fn getProperty(em: *MethodEmitter, i: u32, a: u32, src: i32) Error!void {
     const out = &em.out;
@@ -251,6 +249,10 @@ pub fn name(em: *MethodEmitter, a: u32, from: i32) Error!void {
     try out.text(")");
 }
 
+/// The kind of a Vector's elements, as the runtime's vectorGet and
+/// vectorSet name it; none if not a Vector's.
+const Kind = enum { none, Int, Uint, Double, Float, Object };
+
 /// The kind of Vector type t's elements.
 fn vectorKind(em: *MethodEmitter, t: TypeId) Error!Kind {
     const domain = em.domain;
@@ -287,6 +289,9 @@ pub fn vectorLength(em: *MethodEmitter, r: i32, getter: i32) Error!bool {
         try vectorKind(em, em.regType[u(r)]) != .none and
         em.domain.traits.returnType.get(@intCast(getter)) == em.domain.uintType;
 }
+
+/// The namespace of the builtins' methods that a prototype's function cannot replace.
+const AS3_URI = "http://adobe.com/AS3/2006/builtin";
 
 /// Whether the domain's string `id` is `text`, which is ASCII.
 fn stringIs(domain: *const Domain, id: u32, text: []const u8) bool {

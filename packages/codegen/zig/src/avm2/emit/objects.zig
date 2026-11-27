@@ -550,10 +550,3 @@ pub fn object(em: *MethodEmitter, i: u32, op: IrOp) Error!bool {
 
     return true;
 }
-
-/// The kind of a Vector's elements, as the runtime's vectorGet and
-/// vectorSet name it; none if not a Vector's.
-pub const Kind = enum { none, Int, Uint, Double, Float, Object };
-
-/// The namespace of the builtins' methods that a prototype's function cannot replace.
-pub const AS3_URI = "http://adobe.com/AS3/2006/builtin";
