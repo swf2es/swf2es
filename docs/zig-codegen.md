@@ -1176,7 +1176,14 @@ compact's were 1.9 to 4.7 s, 37.2 s in all against 34.1. With one 6 ms
 slice each 100 ms, a busy page: 3 moves, of 177 to 328 slices, 18 to
 33 s each, the largest block 326 ms, the median slice 10 ms; memory
 ends at 136 MB against 120, the dead ABCs piling up during the longer
-moves.
+moves. A revival during a move of a domain evicted before its snapshot
+rebuilds the spare again in catch-up: with one revival every 4 loads, a
+busy page's first move took 221 loads, 31 s of background work, and
+both instances held 507 MB at their peak. Giving the move up there and
+starting another after the revival was worse (one move of ten completed
+on a busy page, five of ten idle). Revivals after any compaction still
+rebuild the new instance in place, synchronously, as before: 10 blocks
+of 2.8 to 4.2 s idle, against 18 of up to 5.1 s with compact.
 
 **Release mode, decided.** The user's decision after stage 5: the
 release ships in ReleaseSafe. About 180 KB gzipped is fine, so section
