@@ -1151,11 +1151,11 @@ async function playNested(
   const lines: string[] = [];
   const codegen = await createCodegen(wasm);
   const counts = { compacted: 0, revived: 0 };
-  const { compact, reviveDomain } = codegen;
-  codegen.compact = () => {
-    const rebuilt = compact();
-    counts.compacted += rebuilt && counts.revived === 0 ? 1 : 0;
-    return rebuilt;
+  const { compactStep, reviveDomain } = codegen;
+  codegen.compactStep = (deadline) => {
+    const progress = compactStep(deadline);
+    counts.compacted += progress === "done" && counts.revived === 0 ? 1 : 0;
+    return progress;
   };
   codegen.reviveDomain = (domain, abcs) => {
     counts.revived++;

@@ -90,26 +90,40 @@ export class Code {
 
   /**
    * Have the compiler reuse what dropped and evicted domains took, if that
-   * is worth a rebuild, when the page is next idle (or soon, without
-   * requestIdleCallback): a rebuild links every live ABC again, too long to
-   * do in a load's frame.
+   * is worth a rebuild, a slice at a time when the page is idle: a rebuild
+   * links every live ABC again, seconds for a large application, so the
+   * compiler moves the domain into another instance a part at a time
+   * (Codegen.compactStep) while loads go on, and this asks again while it
+   * is moving. An idle callback that comes on its timeout, the page busy,
+   * gets one short slice, at most one a timeout; without
+   * requestIdleCallback (node, workers) each slice is a short timer's.
    */
-  private compactSoon(): void {
+  private compactSoon(moving = false): void {
     if (this.compacting) {
       return;
     }
 
     this.compacting = true;
-    const compact = () => {
+    const compact = (idle?: IdleDeadlineLike) => {
       this.compacting = false;
-      this.s.codegen.compact();
+      const end = performance.now() + COMPACT_Slice;
+      const deadline =
+        idle !== undefined && idle.timeRemaining() > 0
+          ? idle
+          : { timeRemaining: () => end - performance.now() };
+      if (this.s.codegen.compactStep(deadline) === "moving") {
+        this.compactSoon(true);
+      }
     };
-    const idle = (globalThis as { requestIdleCallback?: (f: () => void, o?: object) => void })
-      .requestIdleCallback;
+    const idle = (
+      globalThis as {
+        requestIdleCallback?: (f: (d: IdleDeadlineLike) => void, o?: object) => void;
+      }
+    ).requestIdleCallback;
     if (idle) {
-      idle(compact, { timeout: 1000 });
+      idle(compact, { timeout: moving ? COMPACT_MovingTimeout : 1000 });
     } else {
-      setTimeout(compact, 0);
+      setTimeout(compact, moving ? COMPACT_Frame : 0);
     }
   }
   /**
@@ -995,6 +1009,21 @@ export class Code {
  * database that may first have to open and a write.
  */
 const MIN_CACHED_ABC = 8 * 1024;
+
+/** A requestIdleCallback's deadline, as Codegen.compactStep takes it. */
+interface IdleDeadlineLike {
+  timeRemaining(): number;
+}
+
+/** The milliseconds a compaction's slice takes when the page is not idle, or has no idle callbacks. */
+const COMPACT_Slice = 6;
+/**
+ * The idle callback's timeout while the compiler moves its domain: a busy
+ * page gives a move one slice this often, a few percent of its time.
+ */
+const COMPACT_MovingTimeout = 100;
+/** Without idle callbacks, the milliseconds between a move's slices: one slice a frame at most. */
+const COMPACT_Frame = 16;
 
 /**
  * Whether `entry` is a module and a log of the lengths stored with them: a
