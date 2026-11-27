@@ -3,11 +3,11 @@
 // fresh, the libraries, and the dumps a compiled ABC is compared by.
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { shellToplevelLibrary } from "../../../packages/cli/dist/shell-toplevel-library.js";
 import { builtinLibrary } from "../../../packages/player/dist/playerglobal/libraries.js";
 import { floatLibrary } from "../../../packages/runtime/dist/avm2/float-library.js";
+import { oracleDir } from "../local.ts";
 import type { Compiler, Results } from "../suite.ts";
 
 /** How large the suites are: the standard run, or --deep's, with the reviews' exhaustive parts. */
@@ -36,7 +36,10 @@ export function generator(seed: number): { random: () => number; below: (n: numb
   return { random, below: (n) => Math.floor(random() * n) };
 }
 
-/** A compiler that a case may kill: the case's result is what it threw, and the next case runs on a fresh one. */
+/**
+ * A compiler that a case may kill: the case's result is what it threw,
+ * counted in the results as a throw, and the next case runs on a fresh one.
+ */
 export class Live {
   c: Compiler;
   readonly fresh: () => Promise<Compiler>;
@@ -48,16 +51,28 @@ export class Live {
 
   /** Case `name`'s text, as a digest: what `run` returns on the compiler, or what it threw. */
   async case(r: Results, name: string, run: (c: Compiler) => string): Promise<void> {
-    let text: string;
-    try {
-      text = run(this.c);
-    } catch (error) {
-      const e = error as Error;
-      text = `threw ${e?.name}: ${e?.message}`;
-      this.c = await this.fresh();
+    const text = await this.attempt(r, name, run);
+    r.case(name, () => r.blob(name, Buffer.from(text, "utf8")));
+  }
+
+  /** Case `name` in parts, each on its own: a part that throws leaves the others theirs. */
+  async parts(r: Results, name: string, parts: ((c: Compiler) => string)[]): Promise<void> {
+    const texts: string[] = [];
+    for (const part of parts) {
+      texts.push(await this.attempt(r, name, part));
     }
 
-    r.case(name, () => r.blob(name, Buffer.from(text, "utf8")));
+    r.case(name, () => r.blob(name, Buffer.from(texts.join("\n@@\n"), "utf8")));
+  }
+
+  /** What `run` returns, or what it threw, counted, with a fresh compiler for what comes next. */
+  async attempt(r: Results, name: string, run: (c: Compiler) => string): Promise<string> {
+    try {
+      return run(this.c);
+    } catch (error) {
+      this.c = await this.fresh();
+      return r.thrown(name, error);
+    }
   }
 }
 
@@ -105,23 +120,14 @@ export function compiled(
   return text;
 }
 
-function oracleDir(): string {
-  const cache = process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache");
-  return process.env.SWF2ES_ORACLE_CACHE ?? join(cache, "swf2es", "oracle");
-}
-
-/** Whether the oracle's cache has ABCs, which some suites take seeds from. */
-export function oracleHasAbcs(): boolean {
-  const dir = oracleDir();
-  return (
-    existsSync(dir) &&
-    readdirSync(dir).some((sub) => {
-      try {
-        return readdirSync(join(dir, sub)).some((f) => f.endsWith(".abc"));
-      } catch {
-        return false;
-      }
-    })
+/**
+ * A suite's seeds, said on its line with how many came from the oracle's
+ * cache: partial where the cache gave none, as a host without it runs fewer.
+ */
+export function oracleInputs(r: Results, seeds: string, oracle: Uint8Array[]): void {
+  r.input(
+    `${seeds}, ${oracle.length} of them the oracle's`,
+    oracle.length === 0 ? "no ABCs in the oracle's cache" : undefined,
   );
 }
 

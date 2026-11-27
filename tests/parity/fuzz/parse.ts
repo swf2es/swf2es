@@ -10,16 +10,29 @@ import { linkAbcs } from "../../unit/codegen/link-abc.ts";
 import { richAbc } from "../../unit/codegen/rich-abc.ts";
 import { verifyErrorAbcs } from "../../unit/codegen/verify-errors.ts";
 import type { Compiler, Results } from "../suite.ts";
-import { count, type FuzzOptions, generator, type Live, oracleSeeds } from "./common.ts";
+import {
+  count,
+  type FuzzOptions,
+  generator,
+  type Live,
+  oracleInputs,
+  oracleSeeds,
+} from "./common.ts";
 
-/** What the parser makes of `bytes`: dumped as a user ABC and as a builtin, its pool, and added to a domain. */
-function parsed(t: Compiler, bytes: Uint8Array): string {
-  const user = t.abcDump(bytes, false);
-  const asBuiltin = t.abcDump(bytes, true);
-  const pool = t.poolDump(bytes);
-  t.domainReset(50);
-  return `${user}\n@@\n${asBuiltin}\n@@\n${pool}\n@@\n${t.domainAdd(bytes, false)}`;
-}
+/**
+ * What the parser makes of `bytes`, each part on its own so that one that
+ * throws hides none of the others: dumped as a user ABC and as a builtin,
+ * its pool, and added to a domain.
+ */
+const parsing = (bytes: Uint8Array): ((t: Compiler) => string)[] => [
+  (t) => t.abcDump(bytes, false),
+  (t) => t.abcDump(bytes, true),
+  (t) => t.poolDump(bytes),
+  (t) => {
+    t.domainReset(50);
+    return String(t.domainAdd(bytes, false));
+  },
+];
 
 const HOSTILE = [
   [0xff, 0xff, 0xff, 0xff, 0x03],
@@ -35,20 +48,22 @@ const EDGES = [0, 1, 0x7f, 0x80, 0xff, 0xfe, 0x3f, 0x40];
 
 export async function parseDumps(live: Live, r: Results, o: FuzzOptions): Promise<void> {
   const { random, below } = generator(o.seed);
+  const oracle = oracleSeeds(2, 6000, 150);
   const seeds: Uint8Array[] = [
     richAbc(true),
     richAbc(false),
     ...verifyErrorAbcs().map(([, b]) => b),
     ...(Object.values(linkAbcs()) as Uint8Array[]),
     ...structuredAbcs(20, 1),
-    ...oracleSeeds(2, 6000, 150),
+    ...oracle,
   ];
   // Every truncation and, for small seeds, hostile values at every byte, over and before it; --deep
   // takes every seed under 1,500 bytes, the standard run the first 40.
   const systematic = seeds.filter((s) => s.length <= 1500).slice(0, o.deep ? undefined : 40);
+  oracleInputs(r, `${seeds.length} seeds, ${systematic.length} cut and overwritten`, oracle);
   for (const [i, seed] of systematic.entries()) {
     for (let n = 0; n < seed.length; n++) {
-      await live.case(r, `cut ${i} ${n}`, (t) => parsed(t, seed.subarray(0, n)));
+      await live.parts(r, `cut ${i} ${n}`, parsing(seed.subarray(0, n)));
     }
 
     for (let p = 4; p < seed.length; p++) {
@@ -58,10 +73,10 @@ export async function parseDumps(live: Live, r: Results, o: FuzzOptions): Promis
           ...bytes,
           ...seed.subarray(p + 1),
         ]);
-        await live.case(r, `replace ${i} ${p} ${h}`, (t) => parsed(t, replaced));
+        await live.parts(r, `replace ${i} ${p} ${h}`, parsing(replaced));
         if (h < 3) {
           const inserted = new Uint8Array([...seed.subarray(0, p), ...bytes, ...seed.subarray(p)]);
-          await live.case(r, `insert ${i} ${p} ${h}`, (t) => parsed(t, inserted));
+          await live.parts(r, `insert ${i} ${p} ${h}`, parsing(inserted));
         }
       }
     }
@@ -106,7 +121,7 @@ export async function parseDumps(live: Live, r: Results, o: FuzzOptions): Promis
     }
 
     const edited = new Uint8Array(bytes);
-    await live.case(r, `random ${c}`, (t) => parsed(t, edited));
+    await live.parts(r, `random ${c}`, parsing(edited));
   }
 }
 
@@ -218,16 +233,18 @@ const OWNER_HOSTILE = [
 ];
 
 export async function parseOwners(live: Live, r: Results, o: FuzzOptions): Promise<void> {
-  for (const [label, bytes] of ownerCases()) {
-    await live.case(r, label, (t) => parsed(t, bytes));
+  const cases = ownerCases();
+  r.input(`${cases.length} owners' ABCs`);
+  for (const [label, bytes] of cases) {
+    await live.parts(r, label, parsing(bytes));
     for (let n = 0; n < bytes.length; n++) {
-      await live.case(r, `${label} cut ${n}`, (t) => parsed(t, bytes.subarray(0, n)));
+      await live.parts(r, `${label} cut ${n}`, parsing(bytes.subarray(0, n)));
     }
 
     for (let p = 4; p < bytes.length; p++) {
       for (const h of OWNER_HOSTILE) {
         const replaced = new Uint8Array([...bytes.subarray(0, p), ...h, ...bytes.subarray(p + 1)]);
-        await live.case(r, `${label} replace ${p} ${h}`, (t) => parsed(t, replaced));
+        await live.parts(r, `${label} replace ${p} ${h}`, parsing(replaced));
       }
     }
 
@@ -244,7 +261,7 @@ export async function parseOwners(live: Live, r: Results, o: FuzzOptions): Promi
             const changed = bytes.slice();
             changed[p] = a;
             changed[q] = b;
-            await live.case(r, `${label} pair ${p} ${q} ${a} ${b}`, (t) => parsed(t, changed));
+            await live.parts(r, `${label} pair ${p} ${q} ${a} ${b}`, parsing(changed));
           }
         }
       }

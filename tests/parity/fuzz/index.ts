@@ -6,10 +6,11 @@
 // small seed of parse, owners' pairs, more saves), about six, for changes
 // to arenas, saving and loading, and compaction; --seed and --cases
 // change the numbers.
+import { noOracle } from "../local.ts";
 import type { Results, Suite } from "../suite.ts";
 import { avm1 } from "./avm1.ts";
 import { bodies } from "./bodies.ts";
-import { type FuzzOptions, Live, oracleHasAbcs } from "./common.ts";
+import { type FuzzOptions, Live } from "./common.ts";
 import { floats } from "./floats.ts";
 import { handlers } from "./handlers.ts";
 import { link } from "./link.ts";
@@ -48,11 +49,6 @@ function suite(
     run: (c, r, fresh) => generator(new Live(c, fresh), r, o),
   };
 }
-
-const noOracle = () =>
-  oracleHasAbcs()
-    ? null
-    : "no ABCs in the oracle's cache (~/.cache/swf2es/oracle or SWF2ES_ORACLE_CACHE)";
 
 export function fuzzSuites(o: FuzzOptions): Suite[] {
   return [

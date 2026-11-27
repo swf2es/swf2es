@@ -16,6 +16,7 @@ import {
 
 export async function oracleIr(live: Live, r: Results, o: FuzzOptions): Promise<void> {
   const abcs = oracleAll(120000, count(o, 3000, 3000));
+  r.input(`${abcs.length} of the oracle's ABCs`);
   for (const [i, [name, bytes]] of abcs.entries()) {
     const n = i + 1;
     const libraries = n % 3 === 0 ? [builtin, shell, float] : [builtin, shell];

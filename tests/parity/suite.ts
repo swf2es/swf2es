@@ -14,6 +14,14 @@ export class Results {
   /** Each line's case name, which a large result's bytes are kept by. */
   readonly names: string[] = [];
   readonly blobs = new Map<string, Uint8Array>();
+  /** The cases that threw, and what each threw. */
+  readonly throws: [name: string, thrown: string][] = [];
+  /** What the suite ran on, said on its line: its seeds and where they came from. */
+  readonly inputs: string[] = [];
+  /** Why the suite ran on fewer inputs than it can here, where it did: a cache or corpus missing. */
+  readonly partial: string[] = [];
+  /** Why the suite fails whatever the builds give, where it does: inputs too few to test anything. */
+  readonly problems: string[] = [];
 
   readonly capture: ReadonlySet<string>;
   /** Which build's: reference, candidate or poison. */
@@ -30,8 +38,23 @@ export class Results {
     try {
       this.lines.push(`${name}: ${run()}`);
     } catch (error) {
-      const e = error as Error;
-      this.lines.push(`${name}: threw ${e?.name}: ${e?.message}`);
+      this.lines.push(`${name}: ${this.thrown(name, error)}`);
+    }
+  }
+
+  /** What case `name` threw, as its result reads, counted as a throw. */
+  thrown(name: string, error: unknown): string {
+    const e = error as Error;
+    const text = `threw ${e?.name}: ${e?.message}`;
+    this.throws.push([name, text]);
+    return text;
+  }
+
+  /** The suite's inputs, said on its line; `missing`, where some could not be had here, marks it partial. */
+  input(text: string, missing?: string): void {
+    this.inputs.push(text);
+    if (missing) {
+      this.partial.push(missing);
     }
   }
 
@@ -44,6 +67,14 @@ export class Results {
     return `${bytes.length} ${createHash("sha256").update(bytes).digest("hex")}`;
   }
 }
+
+/**
+ * Whether a throw is the compiler running out of memory, which a hostile
+ * input may make it do and the builds then agree on; any other throw from
+ * the candidate or its poison build is a trap or the harness's own mistake,
+ * and fails the run even where every build threw the same.
+ */
+export const outOfMemory = (thrown: string) => /ran out of memory/.test(thrown);
 
 /** Either build, bound; the test builds' exports beyond are reached by name. */
 // biome-ignore lint/suspicious/noExplicitAny: the test builds' exports are typed by their signatures alone

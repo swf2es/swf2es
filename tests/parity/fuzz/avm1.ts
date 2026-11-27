@@ -7,9 +7,8 @@
 // units, each block alone, each unit alone, held and released, and the
 // first block's dump. Local SWFs (SWF2ES_LOCAL_SWFS) join the corpus,
 // named by number.
-import { isAs3, readActions } from "../../../packages/format/dist/index.js";
 import { type Avm1Swf, avm1Swfs } from "../../conformance/determinism-avm1.ts";
-import { localSwfs } from "../local.ts";
+import { localAvm1 } from "../local.ts";
 import type { Compiler, Results } from "../suite.ts";
 import { count, type FuzzOptions, generator, type Live } from "./common.ts";
 
@@ -82,30 +81,19 @@ function everything(t: Compiler, swf: Avm1Swf): string {
   return out.join("\n@@\n");
 }
 
-/** The local SWFs' AVM1 blocks, named by number. */
-function localAvm1(): Avm1Swf[] {
-  return localSwfs().flatMap((swf, i) => {
-    const { version, blocks } = readActions(swf);
-    return isAs3(swf) || blocks.length === 0
-      ? []
-      : [
-          {
-            name: `local ${i}`,
-            bytes: swf.bytes,
-            version,
-            offsets: Int32Array.from(blocks, (b) => b.offset),
-            lengths: Int32Array.from(blocks, (b) => b.length),
-          },
-        ];
-  });
-}
-
 const u16 = (n: number) => [n & 0xff, (n >> 8) & 0xff];
 const act = (op: number, operands: number[]) => [op, ...u16(operands.length), ...operands];
 
 export async function avm1(live: Live, r: Results, o: FuzzOptions): Promise<void> {
   const { random, below } = generator(o.seed);
-  const swfs = [...avm1Swfs(true), ...localAvm1()];
+  const corpus = avm1Swfs(true);
+  const fromCorpus = corpus.length - avm1Swfs(false).length;
+  const local = localAvm1();
+  const swfs = [...corpus, ...local];
+  r.input(
+    `${swfs.length} SWFs, ${fromCorpus} of them the corpus's, ${local.length} local`,
+    fromCorpus === 0 ? "no corpus fetched (tests/player/corpus/fetch-ruffle.ts)" : undefined,
+  );
   // The corpus as it is, asked for more than the avm1 suite asks.
   for (const swf of swfs) {
     await live.case(r, swf.name, (t) => everything(t, swf));

@@ -187,14 +187,20 @@ export async function saved(live: Live, r: Results, o: FuzzOptions): Promise<voi
   }
 
   r.case("saves kept", () => genuine.map((g) => g.words.length).join(","));
-  if (genuine.length === 0) {
+  // The reader tests the saves the writer kept: too few, and it would pass on next to nothing.
+  const bySize = genuine.slice().sort((a, b) => a.words.length - b.words.length);
+  const inRange = bySize.filter((g) => g.words.length >= 300 && g.words.length <= 2200);
+  const fractions = o.deep ? [0, 0.33, 0.66, 1] : [0, 1];
+  const floor = Math.min(20, Math.ceil(sequences / 6));
+  r.input(`${genuine.length} saves kept, ${inRange.length} of 300 to 2,200 bytes`);
+  if (genuine.length < floor || inRange.length < fractions.length) {
+    r.problems.push(
+      `the writer kept ${genuine.length} saves, ${inRange.length} of 300 to 2,200 bytes; the reader needs ${floor} and ${fractions.length}`,
+    );
     return;
   }
 
   // The reader, systematic: every word of a few saves set to each value, every cut of them, and bytes past them.
-  const bySize = genuine.slice().sort((a, b) => a.words.length - b.words.length);
-  const inRange = bySize.filter((g) => g.words.length >= 300 && g.words.length <= 2200);
-  const fractions = o.deep ? [0, 0.33, 0.66, 1] : [0, 1];
   const small = [
     bySize[0],
     ...fractions.map((f) => inRange[Math.min(inRange.length - 1, Math.floor(f * inRange.length))]),

@@ -157,17 +157,13 @@ export function handlerSeeds(): Uint8Array[] {
 }
 
 /** Bytes worth landing on: small numbers, the opcodes of floats, locals, branches and pushes. */
-export const EDGES = [
+const EDGES = [
   0, 1, 2, 3, 4, 5, 6, 7, 0x22, 0x79, 0x75, 0x73, 0x80, 0xa0, 0xa3, 0x62, 0x63, 0xd1, 0xd2, 0xd3,
   0x2f, 0x2d, 0x82, 0x48, 0x47, 0x1d, 0x06, 0x0c, 12, 16, 46, 47,
 ];
 
 /** Up to three bytes changed, most near the end, where the bodies are. */
-export function nearTheEnd(
-  random: () => number,
-  below: (n: number) => number,
-  a: Uint8Array,
-): Uint8Array {
+function nearTheEnd(random: () => number, below: (n: number) => number, a: Uint8Array): Uint8Array {
   const bytes = [...a];
   const n = below(4);
   for (let m = 0; m < n; m++) {
@@ -205,6 +201,7 @@ export async function seedsInModes(
 ): Promise<void> {
   const { random, below } = generator(o.seed);
   const total = seeds.length * 3 + Math.max(0, mutations);
+  r.input(`${seeds.length} seeds`);
   for (let c = 0; c < total; c++) {
     const asIs = c < seeds.length * 3;
     const original = seeds[asIs ? c % seeds.length : below(seeds.length)];

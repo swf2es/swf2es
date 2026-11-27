@@ -15,6 +15,7 @@ import {
   float,
   generator,
   type Live,
+  oracleInputs,
   oracleSeeds,
   sha,
   shell,
@@ -25,14 +26,16 @@ const VERSIONS = [50, 50, 50, 12, 50, 50, 50, 0];
 
 export async function link(live: Live, r: Results, o: FuzzOptions): Promise<void> {
   const { random, below } = generator(o.seed);
+  const oracle = oracleSeeds(3, 20000, 400);
   const seeds: Uint8Array[] = [
     richAbc(true),
     richAbc(false),
     ...verifyErrorAbcs().map(([, b]) => b),
     ...(Object.values(linkAbcs()) as Uint8Array[]),
     ...structuredAbcs(20, 1),
-    ...oracleSeeds(3, 20000, 400),
+    ...oracle,
   ];
+  oracleInputs(r, `${seeds.length} seeds`, oracle);
   const mutate = (a: Uint8Array): Uint8Array => {
     const bytes = [...a];
     // None: the seed itself.

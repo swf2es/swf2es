@@ -17,6 +17,7 @@ import {
   float,
   generator,
   type Live,
+  oracleInputs,
   oracleSeeds,
   shell,
 } from "./common.ts";
@@ -42,9 +43,9 @@ interface Seed {
 }
 
 /** The seeds that link after the libraries, and their bodies' code, as `t` dumps them. */
-async function linking(live: Live, candidates: Uint8Array[]): Promise<Seed[]> {
+async function linking(live: Live, r: Results, candidates: Uint8Array[]): Promise<Seed[]> {
   const seeds: Seed[] = [];
-  for (const bytes of candidates) {
+  for (const [i, bytes] of candidates.entries()) {
     let dump = "";
     try {
       const t: Compiler = live.c;
@@ -56,8 +57,9 @@ async function linking(live: Live, candidates: Uint8Array[]): Promise<Seed[]> {
       }
 
       dump = t.abcDump(bytes, false);
-    } catch {
+    } catch (error) {
       live.c = await live.fresh();
+      r.thrown(`bodies seed ${i}`, error);
       continue;
     }
 
@@ -77,6 +79,7 @@ async function linking(live: Live, candidates: Uint8Array[]): Promise<Seed[]> {
 export async function bodies(live: Live, r: Results, o: FuzzOptions): Promise<void> {
   const { random, below } = generator(o.seed);
   const handlers = handlerSeeds().filter((_, i) => i >= 2 && i % 3 === 0);
+  const oracle = oracleSeeds(4, 30000, 700);
   const candidates = [
     richAbc(true),
     richAbc(false),
@@ -84,10 +87,16 @@ export async function bodies(live: Live, r: Results, o: FuzzOptions): Promise<vo
     ...structuredAbcs(60, 1),
     ...structuredAbcs(40, 7),
     ...handlers,
-    ...oracleSeeds(4, 30000, 700),
+    ...oracle,
   ];
-  const seeds = await linking(live, candidates);
+  const seeds = await linking(live, r, candidates);
   r.case("bodies seeds", () => `${seeds.length} of ${candidates.length}`);
+  oracleInputs(r, `${seeds.length} of ${candidates.length} seeds link`, oracle);
+  if (seeds.length === 0) {
+    r.problems.push("no seed links, so there is nothing to mutate");
+    return;
+  }
+
   const mutate = (x: Seed): Uint8Array => {
     const bytes = x.bytes.slice();
     const n = 1 + below(3);

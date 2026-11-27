@@ -265,6 +265,7 @@ export async function reject(live: Live, r: Results, o: FuzzOptions): Promise<vo
   }
 
   const total = systematic.length + count(o, 3000, 3000);
+  r.input(`${all.length} shapes, ${systematic.length} of them in their modes`);
   for (let c = 0; c < total; c++) {
     const isSystematic = c < systematic.length;
     const [shape, systematicMode] = isSystematic ? systematic[c] : [all[below(all.length)], 0];
