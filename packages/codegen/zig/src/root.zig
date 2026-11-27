@@ -453,6 +453,8 @@ test {
         @import("avm2/link/saved.zig"),
         @import("avm2/ir/ir.zig"),
         @import("avm2/abc/code.zig"),
+        @import("avm2/abc/code/frame.zig"),
+        @import("avm2/abc/code/verifier.zig"),
         @import("avm2/abc/targets.zig"),
         @import("avm2/abc/verify.zig"),
         @import("avm2/abc/typing.zig"),
