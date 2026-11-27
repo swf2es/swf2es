@@ -642,7 +642,7 @@ test("idle callbacks give a move their time, or one short slice on their timeout
 
   // Idle: the callback's own time.
   asked.shift()?.run({ timeRemaining: () => 30, didTimeout: false });
-  assert.equal(given[0], 30);
+  assert.ok(given[0] > 29 && given[0] <= 30, `${given[0]} ms`);
   assert.equal(asked.length, 1, "asked again while moving");
   assert.equal(asked[0].timeout, 100, "with a short timeout");
 
@@ -670,4 +670,33 @@ test("without idle callbacks a timer gives a move one slice as often as the time
   assert.equal(given.length, 3);
   t.mock.timers.tick(1000);
   assert.equal(given.length, 3, "done: no more");
+});
+
+test("the deadline compactStep gets goes below 0, though an idle callback's stops at it", (t) => {
+  const asked: Asked[] = [];
+  const global = globalThis as { requestIdleCallback?: unknown };
+  global.requestIdleCallback = (run: Asked["run"], options: { timeout: number }) => {
+    asked.push({ run, timeout: options.timeout });
+  };
+  t.after(() => {
+    delete global.requestIdleCallback;
+  });
+
+  // An IdleDeadline 20 ms long, as the browser's: it clamps at 0.
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
+  const seen: number[] = [];
+  const made = new Code({
+    codegen: {
+      compactStep(deadline: CompactDeadline) {
+        seen.push(deadline.timeRemaining());
+        now += 70;
+        seen.push(deadline.timeRemaining());
+        return "done";
+      },
+    },
+  } as never);
+  (made as unknown as { compactSoon(): void }).compactSoon();
+  asked.shift()?.run({ timeRemaining: () => Math.max(0, 20 - now), didTimeout: false });
+  assert.deepEqual(seen, [20, -50]);
 });

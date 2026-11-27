@@ -106,11 +106,12 @@ export class Code {
     this.compacting = true;
     const compact = (idle?: IdleDeadlineLike) => {
       this.compacting = false;
-      const end = performance.now() + COMPACT_Slice;
-      const deadline =
-        idle !== undefined && idle.timeRemaining() > 0
-          ? idle
-          : { timeRemaining: () => end - performance.now() };
+      // The idle callback's time, or a short slice; a deadline of its own
+      // either way, which goes below 0, as an IdleDeadline's stops at it,
+      // so that the compiler sees how far past it a part went.
+      const left = idle?.timeRemaining() ?? 0;
+      const end = performance.now() + (left > 0 ? left : COMPACT_Slice);
+      const deadline = { timeRemaining: () => end - performance.now() };
       if (this.s.codegen.compactStep(deadline) === "moving") {
         this.compactSoon(true);
       }
