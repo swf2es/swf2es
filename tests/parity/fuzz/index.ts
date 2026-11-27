@@ -1,16 +1,17 @@
-// The differential fuzz suites, from a review of the idiomatic pass: each a
-// generator of ABCs, saves or AVM1 blocks run on the reference, the
-// candidate and its poison build like any other suite (run.ts). The
-// standard sizes run the reviews' random counts, about three and a half
-// minutes; --deep adds their exhaustive parts (every shape of reject, every
-// small seed of parse, owners' pairs, more saves), about five and a half,
-// for changes to arenas, saving and loading, and compaction; --seed and
-// --cases change the numbers.
+// The differential fuzz suites, from a review of the idiomatic pass, and
+// compactions: each a generator of ABCs, saves, domain lifetimes or AVM1
+// blocks run on the reference, the candidate and its poison build like any
+// other suite (run.ts). The standard sizes run the reviews' random counts,
+// about four and a half minutes; --deep adds their exhaustive parts (every
+// shape of reject, every small seed of parse, owners' pairs, more saves,
+// more sequences of compactions), about eight, for changes to arenas,
+// saving and loading, and compaction; --seed and --cases change the numbers.
 import { noOracle } from "../local.ts";
 import type { Results, Suite } from "../suite.ts";
 import { avm1 } from "./avm1.ts";
 import { bodies } from "./bodies.ts";
 import { type FuzzOptions, Live } from "./common.ts";
+import { compactions } from "./compactions.ts";
 import { floats } from "./floats.ts";
 import { handlers } from "./handlers.ts";
 import { link } from "./link.ts";
@@ -84,6 +85,34 @@ export function fuzzSuites(o: FuzzOptions): Suite[] {
         "domainUsage",
       ],
       saved,
+      o,
+    ),
+    suite(
+      "fuzz-compactions",
+      [
+        "domainReset",
+        "domainAdd",
+        "domainChild",
+        "domainDrop",
+        "domainEvict",
+        "domainRevive",
+        "domainRestore",
+        "domainState",
+        "domainModule",
+        "domainContext",
+        "domainSummary",
+        "domainUsage",
+        "domainWantsCompact",
+        "domainCompact",
+        "domainRebuild",
+        "domainRebuildStep",
+        "domainSaveBytes",
+        "domainSavedAbcBytes",
+        "domainLoad",
+        "domainLoadAbc",
+        "domainLoadRebuild",
+      ],
+      compactions,
       o,
     ),
     suite(

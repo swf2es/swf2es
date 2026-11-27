@@ -1,6 +1,6 @@
 {
   "zig": "0.17.0",
-  "inputs": "42fe985f113c783832e8fe75f56b5c492ce9a95750aab1adee5f5f31161489d4",
+  "inputs": "f4a1c80c51a2e830283ec065adfae1ee9ea386cf8c427d4e7fdb5b194b0f7072",
   "modules": {
     "dist/codegen.wasm": "a44b3560e09260c7134a0e1b6e01497a66c06c237789a196756e396b2e9d250b",
     "dist-test/testing.wasm": "b649dc5809de77be4b158dd4b187d154637092895f0f7012cc3b12b1d7bdad7c",
