@@ -140,10 +140,19 @@ pub fn hashBytes(bytes: []const u8) u32 {
     return h;
 }
 
+/// A pair of ids' hash, every bit of each mixed into the low bits that pick
+/// a slot: murmur3's 64-bit finalizer over the pair, a bijection, so that no
+/// two pairs share a hash before its low half is taken. Ids are dense, and a
+/// hash that left consecutive names of one namespace in consecutive slots
+/// made one cluster of them, which every lookup that missed walked to its end.
 pub fn hashPair(a: u32, b: u32) u32 {
-    var h = a *% 0x9e3779b1;
-    h ^= b +% 0x7f4a7c15 +% (h << 6) +% (h >> 2);
-    return h ^ (h >> 16);
+    var h: u64 = (@as(u64, a) << 32) | b;
+    h ^= h >> 33;
+    h *%= 0xff51afd7ed558ccd;
+    h ^= h >> 33;
+    h *%= 0xc4ceb9fe1a85ec53;
+    h ^= h >> 33;
+    return @truncate(h);
 }
 
 const testing = std.testing;
@@ -201,4 +210,48 @@ test "the hashes are AssemblyScript's, wrapping" {
     try testing.expectEqual(0xe40c292c, hashBytes("a"));
     try testing.expectEqual(hashPair(1, 2), hashPair(1, 2));
     try testing.expect(hashPair(1, 2) != hashPair(2, 1));
+}
+
+test "consecutive names of one namespace spread over the table, and a miss probes a few slots" {
+    var arena: memory.Arena = .init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    // As a large ABC's names are interned: thousands, consecutive ids, in a
+    // few namespaces, which the old hash put in consecutive slots.
+    var table: IdTable = try .init(gpa);
+    var id: u32 = 0;
+    for ([_]u32{ 3, 4, 9 }) |ns| {
+        for (1000..9000) |name| {
+            try table.insert(gpa, hashPair(ns, @intCast(name)), id);
+            id += 1;
+        }
+    }
+
+    // A lookup that misses walks its cluster to an empty slot: in a table at
+    // most half full of well-spread hashes, a few slots on average, and no
+    // run long; the old hash made one run of over 10,000 slots here.
+    var longest: u32 = 0;
+    var run: u32 = 0;
+    for (0..2 * table.ids.len) |i| {
+        if (table.ids[i & (table.ids.len - 1)] != 0) {
+            run += 1;
+            longest = @max(longest, run);
+        } else {
+            run = 0;
+        }
+    }
+
+    // Names of the same namespace not in the table, as most lookups of a
+    // binding miss: the old hash took some 500 probes for each of these.
+    var probes: u64 = 0;
+    const misses = 10_000;
+    for (0..misses) |name| {
+        var slot = table.start(hashPair(3, @intCast(20_000 + name)));
+        while (table.at(slot) >= 0) : (slot = table.next(slot)) {
+            probes += 1;
+        }
+    }
+
+    try testing.expect(longest < 100);
+    try testing.expect(probes < 4 * misses);
 }
